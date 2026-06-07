@@ -1,0 +1,26 @@
+node_modules/
+dist/
+dist-ssr/
+*.local
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# 빌드 산출물·스크래치
+app-icon.png
+icon-data.txt
+*.png.bak
+menu.png
+game*.png
+settings.png
+
+# 에디터/OS
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.log
+.playwright-mcp/

@@ -1,0 +1,433 @@
+/* Fetris 전역 레이아웃 — funky-ui 토큰 위에 게임 셸 스타일 */
+
+:root {
+  --fx-bg: #fff5d1;
+  --fx-ink: #222;
+  --fx-border: #000;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: var(--fx-bg);
+  font-family: Pretendard, system-ui, -apple-system, sans-serif;
+  color: var(--fx-ink);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+.fx-app {
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- 메뉴 ---- */
+.fx-menu {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  position: relative;
+  overflow: hidden;
+}
+.fx-logo {
+  font-weight: 900;
+  font-size: clamp(3rem, 12vw, 9rem);
+  letter-spacing: -0.04em;
+  line-height: 0.9;
+  text-transform: uppercase;
+  position: relative;
+  transform: rotate(-3deg);
+}
+.fx-logo span {
+  display: inline-block;
+}
+.fx-menu-buttons {
+  display: grid;
+  gap: 0.75rem;
+  width: min(420px, 80vw);
+  z-index: 2;
+}
+.fx-menu-buttons .funky-button {
+  width: 100%;
+  justify-content: center;
+  font-size: 1.1rem;
+}
+.fx-tagline {
+  font-weight: 700;
+  color: #6f6a52;
+  letter-spacing: 0.04em;
+}
+
+/* funky 배경 떠다니는 도형 */
+.fx-bg-shapes {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.fx-shape {
+  position: absolute;
+  border: 3px solid #000;
+  box-shadow: 6px 6px 0 0 rgba(0, 0, 0, 0.2);
+  opacity: 0.9;
+  animation: fx-float 8s ease-in-out infinite;
+}
+@keyframes fx-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-22px) rotate(8deg);
+  }
+}
+
+/* ---- 게임 화면 ---- */
+.fx-game {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  display: flex;
+}
+.fx-canvas-wrap {
+  flex: 1;
+  position: relative;
+  background: #140f22; /* 캔버스 다크 스테이지와 일치 (리사이즈 시 깜빡임 방지) */
+}
+.fx-canvas-wrap canvas {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* HUD 오버레이 — 게임 중 React 리렌더 없이 직접 갱신 */
+.fx-hud {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  pointer-events: none;
+  z-index: 5;
+}
+.fx-hud-primary {
+  background: rgba(26, 21, 40, 0.6);
+  border: 2px solid rgba(61, 236, 253, 0.45);
+  border-radius: 2px;
+  box-shadow: 0 0 16px rgba(61, 236, 253, 0.15), inset 0 0 0 1px rgba(0, 0, 0, 0.3);
+  padding: 0.5rem 0.9rem;
+}
+.fx-hud-primary .lbl {
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: rgba(61, 236, 253, 0.8);
+  text-transform: uppercase;
+}
+.fx-hud-primary .val {
+  font-size: 1.8rem;
+  font-weight: 900;
+  line-height: 1;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.fx-hud-secondary {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  max-width: 240px;
+}
+.fx-hud-chip {
+  background: rgba(20, 15, 34, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 2px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.9);
+  font-variant-numeric: tabular-nums;
+}
+.fx-hud-chip .k {
+  color: rgba(255, 255, 255, 0.45);
+  font-weight: 900;
+  font-size: 0.65rem;
+  margin-right: 0.25rem;
+}
+.fx-fps {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  font-size: 0.7rem;
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+  z-index: 5;
+}
+
+/* ---- 오버레이(일시정지/결과) ---- */
+.fx-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 245, 209, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+.fx-panel {
+  background: #fff;
+  border: 3px solid #000;
+  box-shadow: 8px 8px 0 0 rgba(0, 0, 0, 0.2);
+  padding: 1.5rem;
+  width: min(440px, 90vw);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.fx-panel h2 {
+  margin: 0;
+  font-weight: 900;
+  font-size: 2rem;
+  text-transform: uppercase;
+}
+
+/* ---- 설정 ---- */
+.fx-settings {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem clamp(1rem, 5vw, 4rem);
+  gap: 1rem;
+  overflow: hidden;
+}
+.fx-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.fx-settings-body {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+.fx-section {
+  margin-bottom: 1.5rem;
+}
+.fx-section-title {
+  font-weight: 900;
+  font-size: 1.1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 3px solid #000;
+  padding-bottom: 0.3rem;
+  margin-bottom: 0.8rem;
+}
+.fx-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+.fx-row-label {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+.fx-row-desc {
+  font-size: 0.75rem;
+  color: #6f6a52;
+  font-weight: 500;
+}
+.fx-row-control {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 200px;
+  justify-content: flex-end;
+}
+
+/* 슬라이더 */
+.fx-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 140px;
+  height: 8px;
+  background: #fff0b8;
+  border: 2px solid #000;
+  outline: none;
+}
+.fx-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: #ff4eba;
+  border: 2px solid #000;
+  cursor: pointer;
+  box-shadow: 2px 2px 0 0 rgba(0, 0, 0, 0.2);
+}
+.fx-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: #ff4eba;
+  border: 2px solid #000;
+  cursor: pointer;
+}
+.fx-slider-val {
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  min-width: 76px;
+  text-align: right;
+}
+.fx-slider-val--editable {
+  cursor: text;
+  border-bottom: 2px dotted rgba(0, 0, 0, 0.3);
+}
+.fx-slider-val--editable:hover {
+  background: #fff0b8;
+  border-bottom-color: #000;
+}
+.fx-slider-input {
+  width: 76px;
+  border: 2px solid #000;
+  background: #fff;
+  padding: 0.15rem 0.35rem;
+  font-weight: 900;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  box-shadow: 2px 2px 0 0 rgba(0, 0, 0, 0.2);
+}
+.fx-slider-input:focus {
+  outline: none;
+  background: #fff0b8;
+}
+
+/* 토글 */
+.fx-toggle {
+  width: 52px;
+  height: 28px;
+  border: 2px solid #000;
+  background: #fff0b8;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.1s ease-out;
+  flex-shrink: 0;
+}
+.fx-toggle.on {
+  background: #00c22a;
+}
+.fx-toggle .knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 22px;
+  height: 22px;
+  background: #fff;
+  border: 2px solid #000;
+  transition: transform 0.1s ease-out;
+}
+.fx-toggle.on .knob {
+  transform: translateX(24px);
+}
+
+/* 세그먼트 선택 */
+.fx-seg {
+  display: inline-flex;
+  border: 2px solid #000;
+  overflow: hidden;
+}
+.fx-seg button {
+  border: none;
+  border-right: 2px solid #000;
+  background: #fff;
+  padding: 0.35rem 0.7rem;
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+.fx-seg button:last-child {
+  border-right: none;
+}
+.fx-seg button.active {
+  background: #7828c8;
+  color: #fff;
+}
+
+/* 키바인딩 버튼 */
+.fx-key {
+  min-width: 90px;
+  border: 2px solid #000;
+  background: #fff;
+  padding: 0.3rem 0.6rem;
+  font-weight: 700;
+  font-size: 0.8rem;
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: 2px 2px 0 0 rgba(0, 0, 0, 0.2);
+}
+.fx-key.listening {
+  background: #ffd500;
+  animation: fx-pulse 0.6s ease-in-out infinite;
+}
+@keyframes fx-pulse {
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.fx-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+  width: min(680px, 86vw);
+  z-index: 2;
+}
+.fx-mode-card {
+  border: 3px solid #000;
+  box-shadow: 6px 6px 0 0 rgba(0, 0, 0, 0.2);
+  padding: 1rem;
+  cursor: pointer;
+  background: #fff;
+  transition: transform 0.1s ease-out, box-shadow 0.1s ease-out;
+  text-align: left;
+  font-family: inherit;
+}
+.fx-mode-card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 8px 8px 0 0 rgba(0, 0, 0, 0.2);
+}
+.fx-mode-card:active {
+  transform: translate(6px, 6px);
+  box-shadow: 0 0 0 0 rgba(0, 0, 0, 0.2);
+}
+.fx-mode-card .name {
+  font-weight: 900;
+  font-size: 1.2rem;
+  text-transform: uppercase;
+}
+.fx-mode-card .desc {
+  font-size: 0.8rem;
+  color: #6f6a52;
+  font-weight: 500;
+  margin-top: 0.25rem;
+}

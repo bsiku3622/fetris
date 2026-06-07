@@ -1,0 +1,189 @@
+import { Game } from "./game";
+import type { InputCommands } from "./game";
+
+// ============================================================================
+// InputManager — DOM 키보드 → 게임 입력.
+//  - 방향키(L/R)는 handling에 즉시 press/release (서브프레임 DAS 정밀도).
+//  - soft drop은 held 상태로 매 poll 반영.
+//  - rotate/hold/hardDrop은 keydown 엣지에서 1회 적립, poll 시 소비.
+//  - 키맵 리매핑 가능. e.repeat(OS 오토리피트)는 무시.
+// ============================================================================
+
+export interface KeyMap {
+  moveLeft: string[];
+  moveRight: string[];
+  softDrop: string[];
+  hardDrop: string[];
+  rotateCW: string[];
+  rotateCCW: string[];
+  rotate180: string[];
+  hold: string[];
+  retry: string[];
+  pause: string[];
+}
+
+export const DEFAULT_KEYMAP: KeyMap = {
+  moveLeft: ["ArrowLeft"],
+  moveRight: ["ArrowRight"],
+  softDrop: ["ArrowDown"],
+  hardDrop: ["Space"],
+  rotateCW: ["ArrowUp", "KeyX"],
+  rotateCCW: ["KeyZ"],
+  rotate180: ["KeyA"],
+  hold: ["KeyC", "ShiftLeft", "ShiftRight"],
+  retry: ["KeyR"],
+  pause: ["Escape", "F1"],
+};
+
+type Action = keyof KeyMap;
+
+export class InputManager {
+  private game: Game;
+  keymap: KeyMap;
+  private lookup = new Map<string, Action>();
+  private softHeld = false;
+  private leftHeld = false;
+  private rightHeld = false;
+  // 이산 적립
+  private qCW = false;
+  private qCCW = false;
+  private q180 = false;
+  private qHard = false;
+  private qHold = false;
+  onRetry?: () => void;
+  onPause?: () => void;
+  onUndo?: () => void;
+
+  constructor(game: Game, keymap: KeyMap = DEFAULT_KEYMAP) {
+    this.game = game;
+    this.keymap = keymap;
+    this.rebuild();
+  }
+
+  setGame(game: Game): void {
+    this.game = game;
+    this.reset();
+  }
+
+  setKeymap(km: KeyMap): void {
+    this.keymap = km;
+    this.rebuild();
+  }
+
+  private rebuild(): void {
+    this.lookup.clear();
+    (Object.keys(this.keymap) as Action[]).forEach((action) => {
+      for (const code of this.keymap[action]) this.lookup.set(code, action);
+    });
+  }
+
+  reset(): void {
+    this.softHeld = this.leftHeld = this.rightHeld = false;
+    this.qCW = this.qCCW = this.q180 = this.qHard = this.qHold = false;
+  }
+
+  attach(target: Window | HTMLElement = window): void {
+    target.addEventListener("keydown", this.onKeyDown as EventListener);
+    target.addEventListener("keyup", this.onKeyUp as EventListener);
+    window.addEventListener("blur", this.onBlur);
+  }
+
+  detach(target: Window | HTMLElement = window): void {
+    target.removeEventListener("keydown", this.onKeyDown as EventListener);
+    target.removeEventListener("keyup", this.onKeyUp as EventListener);
+    window.removeEventListener("blur", this.onBlur);
+  }
+
+  private onBlur = (): void => {
+    // 포커스 잃으면 모든 키 해제(끼임 방지)
+    if (this.leftHeld) this.game.releaseDir(-1);
+    if (this.rightHeld) this.game.releaseDir(1);
+    this.reset();
+  };
+
+  private onKeyDown = (e: KeyboardEvent): void => {
+    // Ctrl+Z / Cmd+Z → 되돌리기 (rotateCCW보다 우선)
+    if ((e.ctrlKey || e.metaKey) && e.code === "KeyZ") {
+      e.preventDefault();
+      if (!e.repeat) this.onUndo?.();
+      return;
+    }
+    const action = this.lookup.get(e.code);
+    if (!action) return;
+    e.preventDefault();
+    // 하드드롭: safelock ON이면 오토리피트 무시(홀드 시 1회만), OFF면 리피트 허용.
+    // keyup 의존 게이트를 쓰지 않아 키업 누락으로 인한 입력 씹힘이 없음.
+    if (action === "hardDrop") {
+      if (e.repeat && this.game.handling.h.safelock) return;
+      this.qHard = true;
+      return;
+    }
+    if (e.repeat) return; // 그 외 액션은 OS 오토리피트 무시
+
+    switch (action) {
+      case "moveLeft":
+        this.leftHeld = true;
+        this.game.pressDir(-1);
+        break;
+      case "moveRight":
+        this.rightHeld = true;
+        this.game.pressDir(1);
+        break;
+      case "softDrop":
+        this.softHeld = true;
+        break;
+      case "rotateCW":
+        this.qCW = true;
+        break;
+      case "rotateCCW":
+        this.qCCW = true;
+        break;
+      case "rotate180":
+        this.q180 = true;
+        break;
+      case "hold":
+        this.qHold = true;
+        break;
+      case "retry":
+        this.onRetry?.();
+        break;
+      case "pause":
+        // 실제 pause/resume은 상위(React)가 단일 소스로 처리 — 여기선 통지만
+        this.onPause?.();
+        break;
+    }
+  };
+
+  private onKeyUp = (e: KeyboardEvent): void => {
+    const action = this.lookup.get(e.code);
+    if (!action) return;
+    e.preventDefault();
+    switch (action) {
+      case "moveLeft":
+        this.leftHeld = false;
+        this.game.releaseDir(-1);
+        break;
+      case "moveRight":
+        this.rightHeld = false;
+        this.game.releaseDir(1);
+        break;
+      case "softDrop":
+        this.softHeld = false;
+        break;
+    }
+  };
+
+  /** 한 시뮬 배치의 입력 명령 반환 + 이산 플래그 소비 */
+  poll(): InputCommands {
+    const cmd: InputCommands = {
+      rotateCW: this.qCW,
+      rotateCCW: this.qCCW,
+      rotate180: this.q180,
+      hardDrop: this.qHard,
+      hold: this.qHold,
+      softDropHeld: this.softHeld,
+    };
+    this.qCW = this.qCCW = this.q180 = this.qHard = this.qHold = false;
+    return cmd;
+  }
+}

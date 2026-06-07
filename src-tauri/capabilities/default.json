@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Fetris 기본 권한 — 창 + opener만",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
