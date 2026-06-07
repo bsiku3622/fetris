@@ -29,16 +29,16 @@ export const FUNKY = {
   gridLine: "rgba(255,255,255,0.13)",
 } as const;
 
-/** 피스별 면색 — 표준 테트리스 색배치(직관적). I=청록, J=파랑, L=주황, O=노랑, S=초록, T=보라, Z=빨강. */
+/** 피스별 면색 — TETR.IO 기본 스킨 색감(부드럽고 세련된 톤). 고전 네온보다 살짝 채도를 낮춘 파스텔. */
 export const PIECE_COLORS: Record<number, string> = {
-  [Piece.I]: FUNKY.cyan,
-  [Piece.J]: FUNKY.blue,
-  [Piece.L]: FUNKY.orange,
-  [Piece.O]: FUNKY.yellow,
-  [Piece.S]: FUNKY.green,
-  [Piece.T]: FUNKY.purple,
-  [Piece.Z]: FUNKY.danger,
-  [Piece.Garbage]: "#9a937a",
+  [Piece.I]: "#41bfc4", // 시폼 틸
+  [Piece.J]: "#5a63d6", // 페리윙클 인디고
+  [Piece.L]: "#e08a3c", // 소프트 오렌지
+  [Piece.O]: "#e3bd43", // 골드 옐로
+  [Piece.S]: "#7fc24a", // 라임 그린
+  [Piece.T]: "#c356cf", // 마젠타 퍼플
+  [Piece.Z]: "#dd5563", // 코랄 레드
+  [Piece.Garbage]: "#6e7079", // 중립 그레이
 };
 
 /** 약간 어둡게(블록 하단 엣지 음영용) */

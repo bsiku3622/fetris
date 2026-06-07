@@ -2,6 +2,7 @@ import { Piece, Rot, SpinType, LastAction } from "./types";
 import type { Handling, RuleSet, Stats, ClearResult } from "./types";
 import { Board } from "./board";
 import { Randomizer, Queue } from "./randomizer";
+import type { QueueSnapshot } from "./randomizer";
 import { shapeOf, spawnX, ALL_PIECES } from "./pieces";
 import { getKickset } from "./srs";
 import { detectSpin } from "./spin";
@@ -72,7 +73,8 @@ export interface GameSnapshot {
   py: number;
   hold: Piece;
   canHold: boolean;
-  buf: Piece[];
+  queue: QueueSnapshot; // 버퍼 + 랜더마이저 내부 상태(가방 desync 방지)
+  buf?: Piece[]; // 레거시 호환(구버전 저장)
   scoring: { b2b: number; combo: number; surge: number };
   stats: Stats;
 }
@@ -86,7 +88,7 @@ interface UndoSnap {
   py: number;
   hold: Piece;
   canHold: boolean;
-  buf: Piece[];
+  queue: QueueSnapshot;
   scoring: { b2b: number; combo: number; surge: number };
   stats: Stats;
 }
@@ -190,6 +192,18 @@ export class Game {
     this.handling.setHandling(h);
   }
 
+  /** Zen/4-Wide/Combo 톱아웃 시 필드 리셋 — 보드·스코어·홀드·가방까지 깨끗이 초기화.
+   *  (홀드 orphan/가방 꼬임 방지: 새 시드로 가방을 새로 채운다) */
+  private resetField(): void {
+    this.board.clearGrid();
+    this.scoring.reset();
+    this.undoStack.length = 0;
+    this.holdPiece = Piece.None;
+    this.canHold = true;
+    this.seed = (Math.imul(this.seed, 1664525) + 1013904223) >>> 0;
+    this.queue.reset(this.seed);
+  }
+
   private push(type: EventType, ev?: Partial<GameEvent>): void {
     this.events.push({ type, ...ev });
   }
@@ -218,10 +232,8 @@ export class Game {
         this.py -= 1;
       } else if (this.rule.topOutEnabled || this.topOutResets) {
         if (this.topOutResets) {
-          // Zen: 게임오버 대신 필드 리셋 후 계속
-          this.board.clearGrid();
-          this.scoring.reset();
-          this.undoStack.length = 0;
+          // Zen: 게임오버 대신 필드 리셋 후 계속(홀드·가방까지 초기화)
+          this.resetField();
           this.py = this.rule.bufferRows - 2;
           this.push(EventType.TopOut); // 이펙트/사운드용(리셋 신호)
         } else {
@@ -245,7 +257,7 @@ export class Game {
       py: this.py,
       hold: this.holdPiece,
       canHold: this.canHold,
-      buf: this.queue.snapshotBuffer(),
+      queue: this.queue.snapshot(),
       scoring: this.scoring.snapshot(),
       stats: { ...this.stats },
     });
@@ -264,7 +276,7 @@ export class Game {
     this.py = s.py;
     this.holdPiece = s.hold;
     this.canHold = s.canHold;
-    this.queue.restoreBuffer(s.buf);
+    this.queue.restore(s.queue);
     this.scoring.restoreFrom(s.scoring);
     this.stats = { ...s.stats };
     // 피스 진행 상태 초기화
@@ -289,7 +301,7 @@ export class Game {
       py: this.py,
       hold: this.holdPiece,
       canHold: this.canHold,
-      buf: this.queue.snapshotBuffer(),
+      queue: this.queue.snapshot(),
       scoring: this.scoring.snapshot(),
       stats: { ...this.stats },
     };
@@ -305,7 +317,8 @@ export class Game {
     this.py = s.py;
     this.holdPiece = s.hold;
     this.canHold = s.canHold;
-    if (Array.isArray(s.buf)) this.queue.restoreBuffer(s.buf);
+    if (s.queue && Array.isArray(s.queue.buf) && s.queue.rand) this.queue.restore(s.queue);
+    else if (Array.isArray(s.buf)) this.queue.restoreBuffer(s.buf); // 레거시 저장 호환
     if (s.scoring) this.scoring.restoreFrom(s.scoring);
     if (s.stats) this.stats = { ...s.stats };
     this.gravityAccum = 0;
@@ -463,9 +476,7 @@ export class Game {
       this.canHold = true;
       this.cur = Piece.None;
       if (this.topOutResets) {
-        this.board.clearGrid();
-        this.scoring.reset();
-        this.undoStack.length = 0;
+        this.resetField();
         this.push(EventType.TopOut);
         this.phase = Phase.Are;
         this.phaseTimer = this.rule.are;

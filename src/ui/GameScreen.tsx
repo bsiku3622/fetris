@@ -18,9 +18,6 @@ export function GameScreen({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sessionRef = useRef<GameSession | null>(null);
-  const primaryLbl = useRef<HTMLDivElement>(null);
-  const primaryVal = useRef<HTMLDivElement>(null);
-  const secondaryRef = useRef<HTMLDivElement>(null);
   const fpsRef = useRef<HTMLDivElement>(null);
   const [result, setResult] = useState<ModeResult | null>(null);
   const [paused, setPaused] = useState(false);
@@ -30,16 +27,9 @@ export function GameScreen({
     const rule = settings.rulesets[mode];
     const seed = (Math.random() * 0xffffffff) >>> 0;
 
-    const applyHud = (hud: HudInfo, fps: number) => {
-      if (primaryLbl.current) primaryLbl.current.textContent = hud.primaryLabel;
-      if (primaryVal.current) primaryVal.current.textContent = hud.primaryValue;
+    // 통계는 캔버스에 직접 그려짐(필드 가장자리 정렬). 여기선 FPS만 갱신.
+    const applyHud = (_hud: HudInfo, fps: number) => {
       if (fpsRef.current) fpsRef.current.textContent = `${fps} FPS`;
-      if (secondaryRef.current) {
-        const html = hud.secondary
-          .map((s) => `<div class="fx-hud-chip"><span class="k">${s.label}</span>${s.value}</div>`)
-          .join("");
-        if (secondaryRef.current.innerHTML !== html) secondaryRef.current.innerHTML = html;
-      }
     };
 
     const session = new GameSession(
@@ -113,17 +103,6 @@ export function GameScreen({
     <div className="fx-game">
       <div className="fx-canvas-wrap">
         <canvas ref={canvasRef} />
-        <div className="fx-hud">
-          <div className="fx-hud-primary">
-            <div className="lbl" ref={primaryLbl}>
-              TIME
-            </div>
-            <div className="val" ref={primaryVal}>
-              0.00
-            </div>
-          </div>
-          <div className="fx-hud-secondary" ref={secondaryRef} />
-        </div>
         <div className="fx-fps" ref={fpsRef}>
           60 FPS
         </div>

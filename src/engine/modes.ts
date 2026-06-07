@@ -8,11 +8,16 @@ import { defaultRuleset } from "./config";
 // Mode는 룰을 제공하고, 진행/완료/HUD를 관리한다.
 // ============================================================================
 
+export interface StatItem {
+  label: string;
+  value: string; // 큰 글자(주 수치)
+  sub?: string; // 큰 값 옆 작은 글자(보조: PPS, APM, /40, .ms 등)
+}
+
+/** 테트리오식 사이드 통계 — 좌측/우측 컬럼 하단에 큼직하게 표시 */
 export interface HudInfo {
-  primaryLabel: string;
-  primaryValue: string;
-  secondary: { label: string; value: string }[];
-  progress?: number; // 0..1 (목표 진행도)
+  left: StatItem[]; // 좌측 스택(HOLD 컬럼 하단)
+  right: StatItem[]; // 우측 스택(NEXT 컬럼 하단), 모드에 따라 0개
 }
 
 export interface ModeResult {
@@ -105,61 +110,43 @@ export class Mode {
   }
 
   hud(game: Game, now: number): HudInfo {
+    const s = game.stats;
+    const sec = s.frame / 60;
+    const pps = sec > 0 ? s.piecesPlaced / sec : 0;
+    const apm = sec > 0 ? s.attack / (sec / 60) : 0;
     const elapsed = this.elapsedMs(game, now);
-    const pps = game.stats.frame > 0 ? game.stats.piecesPlaced / (game.stats.frame / 60) : 0;
-    const lines = game.stats.lines;
-    const apm = game.stats.frame > 0 ? game.stats.attack / (game.stats.frame / 60 / 60) : 0;
+
+    // 큰 수치 + 작은 보조(테트리오식): 피스수+PPS, 보낸줄+APM
+    const pieces: StatItem = { label: "PIECES", value: String(s.piecesPlaced), sub: `, ${pps.toFixed(2)}/S` };
+    const attackItem: StatItem = { label: "ATTACK", value: String(s.attack), sub: `, ${apm.toFixed(0)}/M` };
+    const t = splitTime(elapsed);
+    const timeItem: StatItem = { label: "TIME", value: t.value, sub: t.sub };
 
     if (this.name === "sprint") {
       return {
-        primaryLabel: "TIME",
-        primaryValue: fmtTime(elapsed),
-        secondary: [
-          { label: "LINES", value: `${lines}/40` },
-          { label: "PPS", value: pps.toFixed(2) },
-          { label: "FIN", value: String(game.stats.finesseFaults) },
-        ],
-        progress: Math.min(1, lines / this.goalLines),
+        left: [{ label: "LINES", value: String(s.lines), sub: `/${this.goalLines}` }, pieces, attackItem, timeItem],
+        right: [{ label: "FINESSE", value: String(s.finesseFaults) }],
       };
     }
     if (this.name === "blitz") {
-      const remain = Math.max(0, this.timeLimitFrames - game.stats.frame) / 60;
+      const remain = Math.max(0, this.timeLimitFrames - s.frame) / 60;
+      const rt = splitTime(remain * 1000);
       return {
-        primaryLabel: "SCORE",
-        primaryValue: game.stats.score.toLocaleString(),
-        secondary: [
-          { label: "TIME", value: fmtTime(remain * 1000) },
-          { label: "LEVEL", value: String(this.blitz?.level ?? 1) },
-          { label: "LINES", value: String(lines) },
-        ],
-        progress: 1 - remain / 120,
+        left: [{ label: "LEVEL", value: String(this.blitz?.level ?? 1) }, pieces, attackItem, { label: "TIME", value: rt.value, sub: rt.sub }],
+        right: [{ label: "SCORE", value: s.score.toLocaleString() }],
       };
     }
-    // COMBO: 현재/최대 콤보 중심
-    if (this.name === "combo") {
+    if (this.name === "marathon" || this.name === "custom") {
+      const level = Math.floor(s.lines / 10) + 1;
       return {
-        primaryLabel: "COMBO",
-        primaryValue: String(Math.max(0, game.scoring.combo)),
-        secondary: [
-          { label: "MAX", value: String(game.stats.maxCombo) },
-          { label: "LINES", value: String(lines) },
-          { label: "PPS", value: pps.toFixed(2) },
-          { label: "TIME", value: fmtTime(elapsed) },
-        ],
+        left: [{ label: "LEVEL", value: String(level) }, pieces, attackItem, timeItem],
+        right: [{ label: "SCORE", value: s.score.toLocaleString() }],
       };
     }
-    // zen / marathon / custom / fourwide
-    const linesPrimary = this.name === "zen" || this.name === "fourwide";
+    // zen / fourwide / combo — 우측 없음
     return {
-      primaryLabel: linesPrimary ? "LINES" : "SCORE",
-      primaryValue: linesPrimary ? String(lines) : game.stats.score.toLocaleString(),
-      secondary: [
-        { label: "TIME", value: fmtTime(elapsed) },
-        { label: "PPS", value: pps.toFixed(2) },
-        { label: "APM", value: apm.toFixed(0) },
-        { label: "LINES", value: String(lines) },
-        { label: "FIN", value: String(game.stats.finesseFaults) },
-      ],
+      left: [{ label: "LINES", value: String(s.lines) }, pieces, attackItem, timeItem],
+      right: [],
     };
   }
 
@@ -182,6 +169,17 @@ export class Mode {
       metricValue,
     };
   }
+}
+
+/** 시간을 큰 부분(M:SS 또는 S)과 작은 부분(.mmm)으로 분리 — HUD 표시용 */
+export function splitTime(ms: number): { value: string; sub: string } {
+  if (ms < 0) ms = 0;
+  const total = ms / 1000;
+  const m = Math.floor(total / 60);
+  const s = Math.floor(total % 60);
+  const mil = Math.floor(ms % 1000);
+  const value = m > 0 ? `${m}:${String(s).padStart(2, "0")}` : String(s);
+  return { value, sub: `.${String(mil).padStart(3, "0")}` };
 }
 
 export function fmtTime(ms: number): string {

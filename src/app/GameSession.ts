@@ -54,6 +54,7 @@ export class GameSession {
   private shakeMag = 0;
   private ended = false;
   private hudAccum = 0;
+  private lastHud: HudInfo = { left: [], right: [] };
   private playedReady = false;
   private playedGo = false;
   private spinThisPiece = false;
@@ -183,15 +184,13 @@ export class GameSession {
     const decay = 0.82;
     this.shakeMag *= decay;
     if (this.shakeMag < 0.05) this.shakeMag = 0;
-    const sm = this.shakeMag * this.gfx.screenShake * 8;
+    const sm = this.shakeMag * this.gfx.screenShake * 2; // 흔들림 강도 1/4로 완화(과한 흔들림 방지)
     this.renderer.shakeX = (Math.random() - 0.5) * sm;
     this.renderer.shakeY = (Math.random() - 0.5) * sm;
     this.renderer.flash *= 0.85;
     if (this.renderer.flash < 0.02) this.renderer.flash = 0;
     // 화려한 연출 감쇠
     const r = this.renderer;
-    r.dropTrailAlpha *= 0.82;
-    if (r.dropTrailAlpha < 0.02) r.dropTrailAlpha = 0;
     r.framePulse *= 0.86;
     if (r.framePulse < 0.02) r.framePulse = 0;
 
@@ -200,15 +199,15 @@ export class GameSession {
     this.actionText.update(1 / 60);
     this.damage.update(1 / 60);
 
-    this.renderer.render(game, alpha, this.gfx, this.particles, this.actionText, this.damage);
-
-    // HUD (약 20Hz로 throttle — 텍스트 갱신 과다 방지)
+    // HUD 갱신 (약 20Hz로 throttle — 매 프레임 문자열 할당 방지). 캔버스/콜백 공용.
     this.hudAccum++;
     if (this.hudAccum >= 3) {
       this.hudAccum = 0;
-      const now = performance.now();
-      this.cbs.onHud?.(this.mode.hud(game, now), fps);
+      this.lastHud = this.mode.hud(game, performance.now());
+      this.cbs.onHud?.(this.lastHud, fps);
     }
+
+    this.renderer.render(game, alpha, this.gfx, this.particles, this.actionText, this.damage, this.lastHud);
 
     // 종료 판정
     if (!this.ended && this.mode.isComplete(game)) {
@@ -242,12 +241,6 @@ export class GameSession {
           // 피스 가로 중심에서 분출(왼쪽 편향 제거) — 트레일 범위 [minX, maxX+1] 중심
           const dropCx = e.cells && e.cells.length === 2 ? (e.cells[0] + e.cells[1]) / 2 : this.game.px + 1.5;
           this.particles.hardDropDust(dropCx, this.game.ghostY(), 1, b.bufferRows, "#9a937a");
-          // 빛 기둥 트레일
-          if (e.cells && e.cells.length === 2) {
-            this.renderer.dropTrailX0 = e.cells[0];
-            this.renderer.dropTrailX1 = e.cells[1];
-            this.renderer.dropTrailAlpha = Math.min(1, 0.5 + (e.a ?? 0) / 20);
-          }
           break;
         }
         case EventType.SoftLock:

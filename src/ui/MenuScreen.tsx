@@ -12,7 +12,7 @@ const MODES: { mode: GameModeName; name: string; desc: string }[] = [
   { mode: "zen", name: "Zen", desc: "톱아웃 없는 무한 연습" },
   { mode: "marathon", name: "Marathon", desc: "중력이 점점 빨라진다" },
   { mode: "fourwide", name: "4-Wide", desc: "4칸 좁은 보드 Zen" },
-  { mode: "combo", name: "Combo", desc: "4칸 보드 · 3줄 유지 콤보 연습" },
+  { mode: "combo", name: "Combo", desc: "4칸 보드 · 가비지 보충 콤보 연습" },
   { mode: "custom", name: "Custom", desc: "모든 룰을 직접 설정" },
 ];
 

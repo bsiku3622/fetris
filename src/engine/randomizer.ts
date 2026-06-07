@@ -19,8 +19,16 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
+/** Randomizer 전체 상태 스냅샷(undo/Zen 이어하기 — desync 없는 정확 복원용) */
+export interface RandomizerState {
+  a: number; // rng 내부 상태
+  bag: Piece[];
+  bagIndex: number;
+  history: Piece[];
+}
+
 export class Randomizer {
-  private rng: () => number;
+  private a: number; // mulberry32 내부 상태(스냅샷 가능하도록 직접 보유)
   private bag: Piece[] = [];
   private bagIndex = 0;
   private type: RandomizerName;
@@ -28,14 +36,35 @@ export class Randomizer {
 
   constructor(type: RandomizerName, seed: number) {
     this.type = type;
-    this.rng = mulberry32(seed);
+    this.a = seed >>> 0;
+  }
+
+  /** mulberry32 한 스텝. [0,1) 반환. (상태를 this.a에 보존해 스냅샷 가능) */
+  private rng(): number {
+    this.a = (this.a + 0x6d2b79f5) | 0;
+    let t = Math.imul(this.a ^ (this.a >>> 15), 1 | this.a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
 
   reset(seed: number): void {
-    this.rng = mulberry32(seed);
+    this.a = seed >>> 0;
     this.bag = [];
     this.bagIndex = 0;
     this.history = [];
+  }
+
+  /** 전체 상태 스냅샷(deep copy) */
+  snapshot(): RandomizerState {
+    return { a: this.a, bag: this.bag.slice(), bagIndex: this.bagIndex, history: this.history.slice() };
+  }
+
+  /** 스냅샷 복원 */
+  restore(s: RandomizerState): void {
+    this.a = s.a >>> 0;
+    this.bag = s.bag.slice();
+    this.bagIndex = s.bagIndex;
+    this.history = s.history.slice();
   }
 
   private shuffle(arr: Piece[]): void {
@@ -134,13 +163,25 @@ export class Queue {
     return this.buf.slice(0, count);
   }
 
-  /** undo용: 현재 버퍼 복사본 반환 */
-  snapshotBuffer(): Piece[] {
-    return this.buf.slice();
+  /** undo/이어하기용: 버퍼 + 랜더마이저 내부까지 전체 스냅샷(정확 복원) */
+  snapshot(): QueueSnapshot {
+    return { buf: this.buf.slice(), rand: this.rand.snapshot() };
   }
 
-  /** undo용: 버퍼 복원(랜더마이저 내부는 그대로 — 샌드박스라 미세 desync 허용) */
+  /** 전체 스냅샷 복원 — 랜더마이저 내부 상태까지 되돌려 가방 desync 방지 */
+  restore(s: QueueSnapshot): void {
+    this.buf = s.buf.slice();
+    this.rand.restore(s.rand);
+  }
+
+  /** 레거시 Zen 저장(버퍼만) 복원 — 구버전 localStorage 호환 */
   restoreBuffer(buf: Piece[]): void {
     this.buf = buf.slice();
   }
+}
+
+/** 큐 전체 스냅샷(버퍼 + 랜더마이저 상태) */
+export interface QueueSnapshot {
+  buf: Piece[];
+  rand: RandomizerState;
 }

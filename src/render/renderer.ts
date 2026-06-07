@@ -3,6 +3,7 @@ import { Piece } from "../engine/types";
 import { shapeOf, BOX_SIZE } from "../engine/pieces";
 import { PIECE_COLORS, FUNKY, darken, lighten } from "./theme";
 import type { ParticleSystem, ActionTextManager, DamageNumberManager } from "./effects";
+import type { HudInfo, StatItem } from "../engine/modes";
 
 // ============================================================================
 // Renderer — 단일 캔버스에 [hold | playfield | next] 를 그린다.
@@ -19,6 +20,8 @@ export interface GfxOptions {
   flashOnClear: boolean;
   screenShake: number; // 0..1 강도
   particles: number; // 0..1 양
+  bgIntensity: number; // 0..1 배경 화려함(블롭 밝기)
+  glow: number; // 0..1 블록 네온 발광
   bloom: boolean;
   showHold: boolean;
   nextCount: number;
@@ -33,10 +36,21 @@ export const DEFAULT_GFX: GfxOptions = {
   flashOnClear: true,
   screenShake: 0.5,
   particles: 0.6,
+  bgIntensity: 0.6,
+  glow: 0.4,
   bloom: false,
   showHold: true,
   nextCount: 5,
 };
+
+/** 그래픽 품질 프리셋 — 연출 강도(3D/플래시/흔들림/파티클/배경/글로우)만 조절. 가시성 설정은 보존. */
+export const GFX_PRESETS: { id: string; label: string; gfx: Partial<GfxOptions> }[] = [
+  { id: "minimum", label: "MINIMUM", gfx: { block3d: false, flashOnClear: false, screenShake: 0, particles: 0, bgIntensity: 0, glow: 0 } },
+  { id: "low", label: "LOW", gfx: { block3d: false, flashOnClear: true, screenShake: 0.25, particles: 0.3, bgIntensity: 0.3, glow: 0.2 } },
+  { id: "medium", label: "MEDIUM", gfx: { block3d: true, flashOnClear: true, screenShake: 0.5, particles: 0.6, bgIntensity: 0.6, glow: 0.4 } },
+  { id: "high", label: "HIGH", gfx: { block3d: true, flashOnClear: true, screenShake: 0.8, particles: 0.85, bgIntensity: 0.85, glow: 0.7 } },
+  { id: "ultra", label: "ULTRA", gfx: { block3d: true, flashOnClear: true, screenShake: 1, particles: 1, bgIntensity: 1, glow: 1 } },
+];
 
 export class Renderer {
   private canvas: HTMLCanvasElement;
@@ -52,15 +66,15 @@ export class Renderer {
   private spriteCache = new Map<number, HTMLCanvasElement>();
   private spriteCell = -1;
   private sprite3d = true;
+  private spriteGlow = -1; // 스프라이트에 구운 글로우 강도(캐시 키)
+  private glowLevel = 0; // 현재 글로우 강도(액티브 피스 런타임 글로우용)
   private spritePad = 0; // 글로우 여백
   // 락 플래시 — 방금 놓인 피스 셀들이 번쩍
   bgPhase = 0; // 배경 애니메이션용 위상
   private bgCanvas: HTMLCanvasElement | null = null;
   private bgFrame = 0;
+  private bgIntensityCache = -1; // 배경 화려함 캐시(변경 시 재계산)
   // 화려한 연출 상태 (GameSession이 설정/감쇠)
-  dropTrailX0 = 0; // 하드드롭 트레일(컬럼 범위)
-  dropTrailX1 = 0;
-  dropTrailAlpha = 0;
   framePulse = 0; // 클리어 시 프레임 번쩍
 
   constructor(canvas: HTMLCanvasElement) {
@@ -88,7 +102,7 @@ export class Renderer {
     }
   }
 
-  render(game: Game, _alpha: number, gfx: GfxOptions, particles?: ParticleSystem, action?: ActionTextManager, damage?: DamageNumberManager): void {
+  render(game: Game, _alpha: number, gfx: GfxOptions, particles?: ParticleSystem, action?: ActionTextManager, damage?: DamageNumberManager, hud?: HudInfo): void {
     const ctx = this.ctx;
     const { cols, rows } = game.board;
     const W = this.cssW;
@@ -98,7 +112,8 @@ export class Renderer {
     ctx.scale(this.dpr, this.dpr);
 
     // 배경 — 저해상도 오프스크린에 캐싱해 blit (매 프레임 풀스크린 그라데이션 비용 제거)
-    this.renderBackground(W, H);
+    this.glowLevel = gfx.glow ?? 0.4;
+    this.renderBackground(W, H, gfx.bgIntensity ?? 0.6);
 
     // 레이아웃: 프레임은 필드(rows)에만. 스폰존(EXTRA)은 필드 위 배경 영역에 피스만 보임.
     const EXTRA = 2; // 필드 위 스폰존 행 수(배경에 그려짐)
@@ -130,22 +145,11 @@ export class Renderer {
     // 필드 배경 + 그리드 + 프레임 (필드만)
     this.drawField(bx, fieldTop, boardW, fieldH, cols, rows, cell, gfx);
 
-    // 블록 스프라이트 준비(셀 크기/3d 변경 시에만 재생성)
-    this.ensureSprites(cell, gfx.block3d);
+    // 블록 스프라이트 준비(셀 크기/3d/글로우 변경 시에만 재생성)
+    this.ensureSprites(cell, gfx.block3d, this.glowLevel);
 
     // 스택
     this.drawStack(game, bx, by, cell, renderTop);
-
-    // 하드드롭 트레일 — 피스가 떨어진 컬럼에 빛 기둥(잔상)
-    if (this.dropTrailAlpha > 0.01) {
-      const tx = bx + this.dropTrailX0 * cell;
-      const tw = (this.dropTrailX1 - this.dropTrailX0) * cell;
-      const tg = ctx.createLinearGradient(0, fieldTop, 0, fieldTop + fieldH);
-      tg.addColorStop(0, `rgba(255,255,255,0)`);
-      tg.addColorStop(1, `rgba(180,230,255,${this.dropTrailAlpha * 0.5})`);
-      ctx.fillStyle = tg;
-      ctx.fillRect(tx, fieldTop, tw, fieldH);
-    }
 
     // 고스트 + 액티브 피스 (셀 단위 스냅 — 칸 단위로 또렷하게 낙하)
     if (game.cur !== Piece.None) {
@@ -171,38 +175,33 @@ export class Renderer {
     // 파티클(오버레이) — 필드 기준 좌표
     if (particles) particles.draw(ctx, bx, fieldTop, cell);
 
-    // 상시 B2B 표시 (필드 왼쪽 하단) — 서지 충전 중이면 표시가 불(빨강)로 변함
+    // 상시 B2B 표시 (HOLD 패널 바로 아래) — 서지 충전 중이면 불(빨강)로 변함
     const b2b = game.scoring.b2b;
     const surge = game.scoring.surgeCharge;
-    if (b2b >= 1) {
+    if (b2b >= 1 && gfx.showHold) {
       ctx.save();
-      ctx.textAlign = "right";
-      const ax = bx - pad * 1.2;
-      const ay = fieldTop + fieldH - cell * 0.4;
+      ctx.textAlign = "left";
+      const lx = originX + pad * 0.4;
+      const ly = fieldTop + cell * 4.2 + cell * 1.05; // 홀드 패널 바로 아래
       ctx.lineJoin = "round";
       ctx.textBaseline = "alphabetic";
       const charging = surge > 0;
       const mainCol = charging ? FUNKY.danger : FUNKY.yellow;
-      ctx.lineJoin = "round";
-      // 라벨: 충전 중이면 "B2B SURGE" — 흰색 테두리
       const label = charging ? "B2B SURGE" : "B2B";
-      ctx.font = `900 ${Math.floor(cell * 0.42)}px Pretendard, system-ui, sans-serif`;
-      ctx.lineWidth = cell * 0.07;
-      ctx.strokeStyle = "#ffffff";
-      ctx.strokeText(label, ax, ay - cell * 0.85);
+      ctx.font = `900 ${Math.floor(cell * 0.4)}px Pretendard, system-ui, sans-serif`;
       ctx.fillStyle = charging ? "rgba(255,90,60,0.95)" : "rgba(255,213,0,0.9)";
-      ctx.fillText(label, ax, ay - cell * 0.85);
+      ctx.fillText(label, lx, ly);
       // ×N — 흰색 테두리 (+ 충전 중 글로우)
-      ctx.font = `900 ${Math.floor(cell * (charging ? 1.15 : 1.0))}px Pretendard, system-ui, sans-serif`;
+      ctx.font = `900 ${Math.floor(cell * (charging ? 1.05 : 0.92))}px Pretendard, system-ui, sans-serif`;
       if (charging) {
         ctx.shadowColor = FUNKY.danger;
         ctx.shadowBlur = cell * 0.5;
       }
-      ctx.lineWidth = cell * 0.12;
+      ctx.lineWidth = cell * 0.1;
       ctx.strokeStyle = "#ffffff";
-      ctx.strokeText(`×${b2b}`, ax, ay);
+      ctx.strokeText(`×${b2b}`, lx, ly + cell * 1.0);
       ctx.fillStyle = mainCol;
-      ctx.fillText(`×${b2b}`, ax, ay);
+      ctx.fillText(`×${b2b}`, lx, ly + cell * 1.0);
       ctx.restore();
     }
 
@@ -242,11 +241,76 @@ export class Renderer {
       this.drawMini(nexts[i], nx + (panelW - pad) / 2, fieldTop + cell * (2.7 + i * 3.2), cell * 2.8, 1);
     }
 
+    // 사이드 통계 (테트리오식) — 필드 좌우 테두리에 붙여서. 좌측은 우측정렬, 우측은 좌측정렬.
+    if (hud) {
+      const statBottom = fieldTop + fieldH - cell * 0.35;
+      if (hud.left.length) this.drawStatStack(hud.left, bx - pad * 1.4, statBottom, cell, "right");
+      if (hud.right.length) this.drawStatStack(hud.right, bx + boardW + pad * 1.4, statBottom, cell, "left");
+    }
+
+    ctx.restore();
+  }
+
+  /** 통계 스택 — 라벨(작게,흐림) + 값(크게,흰색) + 선택적 보조(작게). bottomY 기준 위로 쌓음. */
+  private drawStatStack(items: StatItem[], x: number, bottomY: number, cell: number, align: "left" | "right"): void {
+    if (!items.length) return;
+    const ctx = this.ctx;
+    const blockH = cell * 1.75;
+    const labelFs = Math.max(8, Math.floor(cell * 0.4));
+    const valueFs = Math.max(12, Math.floor(cell * 0.92));
+    const subFs = Math.max(9, Math.floor(cell * 0.5));
+    const subGap = cell * 0.04;
+    const labelFont = `900 ${labelFs}px Pretendard, system-ui, sans-serif`;
+    const valueFont = `900 ${valueFs}px Pretendard, system-ui, sans-serif`;
+    const subFont = `800 ${subFs}px Pretendard, system-ui, sans-serif`;
+    const topY = bottomY - items.length * blockH;
+    ctx.save();
+    ctx.textBaseline = "alphabetic";
+    ctx.shadowColor = "rgba(0,0,0,0.6)";
+    ctx.shadowBlur = cell * 0.15;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const blockTop = topY + i * blockH;
+      const labelY = blockTop + labelFs;
+      const valueY = blockTop + labelFs + valueFs * 0.95;
+      // 라벨
+      ctx.textAlign = align;
+      ctx.font = labelFont;
+      ctx.fillStyle = "rgba(255,255,255,0.45)";
+      ctx.fillText(it.label, x, labelY);
+      // 값(+보조). 보조는 큰 값과 같은 베이스라인에 작게.
+      if (it.sub) {
+        if (align === "right") {
+          ctx.textAlign = "right";
+          ctx.font = subFont;
+          const sw = ctx.measureText(it.sub).width;
+          ctx.fillStyle = "rgba(255,255,255,0.75)";
+          ctx.fillText(it.sub, x, valueY);
+          ctx.font = valueFont;
+          ctx.fillStyle = "#ffffff";
+          ctx.fillText(it.value, x - sw - subGap, valueY);
+        } else {
+          ctx.textAlign = "left";
+          ctx.font = valueFont;
+          ctx.fillStyle = "#ffffff";
+          ctx.fillText(it.value, x, valueY);
+          const vw = ctx.measureText(it.value).width;
+          ctx.font = subFont;
+          ctx.fillStyle = "rgba(255,255,255,0.75)";
+          ctx.fillText(it.sub, x + vw + subGap, valueY);
+        }
+      } else {
+        ctx.textAlign = align;
+        ctx.font = valueFont;
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(it.value, x, valueY);
+      }
+    }
     ctx.restore();
   }
 
   /** 배경을 저해상도 오프스크린에 그려 캐싱하고, 매 프레임은 blit만(저비용). 블롭은 가끔만 갱신. */
-  private renderBackground(W: number, H: number): void {
+  private renderBackground(W: number, H: number, intensity: number): void {
     const lw = Math.max(4, Math.round(W / 3));
     const lh = Math.max(4, Math.round(H / 3));
     if (!this.bgCanvas) this.bgCanvas = document.createElement("canvas");
@@ -256,8 +320,10 @@ export class Renderer {
       bc.width = lw;
       bc.height = lh;
     }
+    const intensityChanged = this.bgIntensityCache !== intensity;
+    if (intensityChanged) this.bgIntensityCache = intensity;
     // 블롭은 약 6프레임마다만 재계산(움직임이 느려 충분)
-    if (resized || this.bgFrame % 6 === 0) {
+    if (resized || intensityChanged || this.bgFrame % 6 === 0) {
       const b = bc.getContext("2d")!;
       const grad = b.createLinearGradient(0, 0, 0, lh);
       grad.addColorStop(0, FUNKY.stageTop);
@@ -266,25 +332,30 @@ export class Renderer {
       b.fillStyle = grad;
       b.fillRect(0, 0, lw, lh);
       this.bgPhase += 0.036;
-      const blobs: [number, number, string][] = [
-        [0.18, 0.25, FUNKY.purple],
-        [0.82, 0.7, FUNKY.pink],
-        [0.5, 0.9, FUNKY.sky],
-      ];
-      b.globalCompositeOperation = "lighter";
-      for (let i = 0; i < blobs.length; i++) {
-        const [bxr, byr, col] = blobs[i];
-        const ph = this.bgPhase + i * 2.1;
-        const gx = lw * bxr + Math.cos(ph) * (lw * 0.02);
-        const gy = lh * byr + Math.sin(ph * 0.8) * (lh * 0.02);
-        const r = Math.min(lw, lh) * 0.32;
-        const rg = b.createRadialGradient(gx, gy, 0, gx, gy, r);
-        rg.addColorStop(0, col + "22");
-        rg.addColorStop(1, col + "00");
-        b.fillStyle = rg;
-        b.fillRect(0, 0, lw, lh);
+      // 블롭 밝기는 bgIntensity에 비례(0.6≈기존, 1=훨씬 화려, 0=그라데이션만)
+      const ab = Math.max(0, Math.min(255, Math.round(55 * intensity)));
+      if (ab > 0) {
+        const ah = ab.toString(16).padStart(2, "0");
+        const blobs: [number, number, string][] = [
+          [0.18, 0.25, FUNKY.purple],
+          [0.82, 0.7, FUNKY.pink],
+          [0.5, 0.9, FUNKY.sky],
+        ];
+        b.globalCompositeOperation = "lighter";
+        for (let i = 0; i < blobs.length; i++) {
+          const [bxr, byr, col] = blobs[i];
+          const ph = this.bgPhase + i * 2.1;
+          const gx = lw * bxr + Math.cos(ph) * (lw * 0.02);
+          const gy = lh * byr + Math.sin(ph * 0.8) * (lh * 0.02);
+          const r = Math.min(lw, lh) * (0.32 + intensity * 0.1);
+          const rg = b.createRadialGradient(gx, gy, 0, gx, gy, r);
+          rg.addColorStop(0, col + ah);
+          rg.addColorStop(1, col + "00");
+          b.fillStyle = rg;
+          b.fillRect(0, 0, lw, lh);
+        }
+        b.globalCompositeOperation = "source-over";
       }
-      b.globalCompositeOperation = "source-over";
     }
     this.bgFrame++;
     this.ctx.drawImage(bc, 0, 0, W, H);
@@ -345,22 +416,35 @@ export class Renderer {
     ctx.fillText(label, x + w / 2, y + headH / 2);
   }
 
-  /** 셀 크기/3d 모드가 바뀌면 모든 블록 색 스프라이트를 미리 렌더(네온 글로우 baked) */
-  private ensureSprites(cell: number, block3d: boolean): void {
+  /** 셀 크기/3d/글로우가 바뀌면 모든 블록 색 스프라이트를 미리 렌더(네온 글로우 baked) */
+  private ensureSprites(cell: number, block3d: boolean, glow: number): void {
     const isize = Math.max(1, Math.round(cell));
-    if (this.spriteCell === isize && this.sprite3d === block3d) return;
+    const g = Math.round(glow * 100) / 100;
+    if (this.spriteCell === isize && this.sprite3d === block3d && this.spriteGlow === g) return;
     this.spriteCell = isize;
     this.sprite3d = block3d;
-    this.spritePad = 0; // 글로우 제거 — 깔끔하게
+    this.spriteGlow = g;
+    // 글로우 여백 — 스프라이트 둘레로 발광이 번질 공간
+    this.spritePad = g > 0 ? Math.round(isize * 0.32 * g) : 0;
+    const pad = this.spritePad;
     this.spriteCache.clear();
     for (const key of Object.keys(PIECE_COLORS)) {
       const v = Number(key);
       const color = PIECE_COLORS[v];
       const c = document.createElement("canvas");
-      c.width = isize;
-      c.height = isize;
+      c.width = isize + pad * 2;
+      c.height = isize + pad * 2;
       const sctx = c.getContext("2d")!;
-      this.paintCell(sctx, 0, 0, isize, color, block3d);
+      // 글로우 패스 — 색 블록을 shadowBlur로 한 번 깔아 발광 halo 생성
+      if (g > 0) {
+        sctx.save();
+        sctx.shadowColor = color;
+        sctx.shadowBlur = isize * 0.55 * g;
+        sctx.fillStyle = color;
+        sctx.fillRect(pad + isize * 0.16, pad + isize * 0.16, isize * 0.68, isize * 0.68);
+        sctx.restore();
+      }
+      this.paintCell(sctx, pad, pad, isize, color, block3d);
       this.spriteCache.set(v, c);
     }
   }
@@ -389,10 +473,10 @@ export class Renderer {
     const shape = shapeOf(game.cur, game.rot);
     const sp = this.spriteCache.get(game.cur);
     const ctx = this.ctx;
-    // 액티브 피스만 은은한 글로우 (조종 중인 피스 강조 — 스택엔 글로우 없음)
+    // 액티브 피스 추가 글로우(조종 중인 피스 강조) — glow 설정에 비례, 스택의 베이크 글로우 위에 살짝
     ctx.save();
     ctx.shadowColor = PIECE_COLORS[game.cur];
-    ctx.shadowBlur = cell * 0.45;
+    ctx.shadowBlur = cell * 0.4 * this.glowLevel;
     if (game.softActive) ctx.globalAlpha = 0.6; // 소프트드롭 중 반투명
     for (let i = 0; i < 8; i += 2) {
       const boardRow = game.py + shape[i + 1];
@@ -429,36 +513,58 @@ export class Renderer {
 
   /**
    * 임의 컨텍스트에 블록 1칸을 그린다(스프라이트 굽기·미니 공용).
-   * Tetr.io 스타일: 은은한 세로 그라데이션 + 글로시 상단 하이라이트 + 부드러운 베벨
-   * + 색을 어둡게 한 얇은 테두리(검정 두꺼운 테두리 대신).
+   * 3D: 4면 경사(베벨) 타일 — 빛은 좌상단. 솟아오른 캡처럼 보이도록.
+   * 비3D: 단순 세로 그라데이션.
    */
   private paintCell(ctx: CanvasRenderingContext2D, x: number, y: number, cell: number, color: string, threeD: boolean): void {
-    // 베이스 세로 그라데이션 (위 살짝 밝게 → 아래 살짝 어둡게)
-    const grad = ctx.createLinearGradient(x, y, x, y + cell);
-    grad.addColorStop(0, lighten(color, 0.2));
-    grad.addColorStop(0.5, color);
-    grad.addColorStop(1, darken(color, 0.16));
-    ctx.fillStyle = grad;
-    ctx.fillRect(x, y, cell, cell);
-
-    if (threeD) {
-      const e = Math.max(1.5, cell * 0.11);
-      // 상단 글로시 하이라이트 띠
-      ctx.globalAlpha = 0.6;
-      ctx.fillStyle = lighten(color, 0.55);
-      ctx.fillRect(x, y, cell, e);
-      // 좌측 옅은 하이라이트
-      ctx.globalAlpha = 0.35;
-      ctx.fillRect(x, y, e * 0.8, cell);
-      // 하단/우측 부드러운 음영
-      ctx.globalAlpha = 0.45;
-      ctx.fillStyle = darken(color, 0.4);
-      ctx.fillRect(x, y + cell - e, cell, e);
-      ctx.fillRect(x + cell - e * 0.8, y, e * 0.8, cell);
-      ctx.globalAlpha = 1;
+    if (!threeD) {
+      const grad = ctx.createLinearGradient(x, y, x, y + cell);
+      grad.addColorStop(0, lighten(color, 0.18));
+      grad.addColorStop(1, darken(color, 0.16));
+      ctx.fillStyle = grad;
+      ctx.fillRect(x, y, cell, cell);
+      ctx.strokeStyle = darken(color, 0.5);
+      ctx.lineWidth = Math.max(1, cell * 0.045);
+      ctx.strokeRect(x + 0.5, y + 0.5, cell - 1, cell - 1);
+      return;
     }
 
-    // 얇은 테두리 — 피스 색을 어둡게(셀 구분, 부드러움)
+    // ---- 3D 베벨 타일(은은하게) ----
+    const b = Math.max(1.5, cell * 0.1); // 얇은 경사면
+    const x0 = x;
+    const y0 = y;
+    const x1 = x + cell;
+    const y1 = y + cell;
+    const ix0 = x + b;
+    const iy0 = y + b;
+    const ix1 = x + cell - b;
+    const iy1 = y + cell - b;
+
+    // 안쪽 캡(대부분의 면) — 글로시 세로 그라데이션
+    const ig = ctx.createLinearGradient(x0, y0, x0, y1);
+    ig.addColorStop(0, lighten(color, 0.16));
+    ig.addColorStop(0.55, color);
+    ig.addColorStop(1, darken(color, 0.14));
+    ctx.fillStyle = ig;
+    ctx.fillRect(x0, y0, cell, cell);
+
+    const quad = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number, dx: number, dy: number, fill: string) => {
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(dx, dy);
+      ctx.closePath();
+      ctx.fillStyle = fill;
+      ctx.fill();
+    };
+    // 4면 경사 — 상(밝음) / 좌(중밝) / 우(중어둠) / 하(어둠). 대비는 약하게.
+    quad(x0, y0, x1, y0, ix1, iy0, ix0, iy0, lighten(color, 0.4));
+    quad(x0, y0, ix0, iy0, ix0, iy1, x0, y1, lighten(color, 0.18));
+    quad(x1, y0, x1, y1, ix1, iy1, ix1, iy0, darken(color, 0.16));
+    quad(x0, y1, ix0, iy1, ix1, iy1, x1, y1, darken(color, 0.32));
+
+    // 얇은 외곽 테두리 — 셀 분리
     ctx.strokeStyle = darken(color, 0.5);
     ctx.lineWidth = Math.max(1, cell * 0.045);
     ctx.strokeRect(x + 0.5, y + 0.5, cell - 1, cell - 1);

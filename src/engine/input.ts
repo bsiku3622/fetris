@@ -30,10 +30,70 @@ export const DEFAULT_KEYMAP: KeyMap = {
   rotateCW: ["ArrowUp", "KeyX"],
   rotateCCW: ["KeyZ"],
   rotate180: ["KeyA"],
-  hold: ["KeyC", "ShiftLeft", "ShiftRight"],
+  hold: ["KeyC", "ShiftLeft"],
   retry: ["KeyR"],
   pause: ["Escape", "F1"],
 };
+
+/** 클래식(가이드라인) — 화살표 + Z/X 회전, Ctrl로 CCW 추가. */
+const CLASSIC_KEYMAP: KeyMap = {
+  moveLeft: ["ArrowLeft"],
+  moveRight: ["ArrowRight"],
+  softDrop: ["ArrowDown"],
+  hardDrop: ["Space"],
+  rotateCW: ["ArrowUp", "KeyX"],
+  rotateCCW: ["KeyZ", "ControlLeft"],
+  rotate180: ["KeyA"],
+  hold: ["KeyC", "ShiftLeft"],
+  retry: ["KeyR"],
+  pause: ["Escape", "F1"],
+};
+
+/** WASD — 왼손 이동(A/D/S/W), 오른손 화살표 회전, Space 홀드. */
+const WASD_KEYMAP: KeyMap = {
+  moveLeft: ["KeyA"],
+  moveRight: ["KeyD"],
+  softDrop: ["KeyS"],
+  hardDrop: ["KeyW"],
+  rotateCW: ["ArrowUp"],
+  rotateCCW: ["ArrowLeft"],
+  rotate180: ["ArrowDown"],
+  hold: ["Space"],
+  retry: ["KeyR"],
+  pause: ["Escape", "F1"],
+};
+
+/** IOP — 오른손 홈 포지션(L;'Op[/). */
+const IOP_KEYMAP: KeyMap = {
+  moveLeft: ["KeyL"],
+  moveRight: ["Quote"],
+  softDrop: ["KeyP"],
+  hardDrop: ["Semicolon"],
+  rotateCW: ["BracketLeft"],
+  rotateCCW: ["KeyO"],
+  rotate180: ["Slash"],
+  hold: ["KeyC", "ShiftLeft"],
+  retry: ["KeyR"],
+  pause: ["Escape", "F1"],
+};
+
+export const KEYMAP_PRESETS: { id: string; label: string; keymap: KeyMap }[] = [
+  { id: "classic", label: "클래식", keymap: CLASSIC_KEYMAP },
+  { id: "wasd", label: "WASD", keymap: WASD_KEYMAP },
+  { id: "iop", label: "IOP", keymap: IOP_KEYMAP },
+];
+
+/** 여러 프리셋을 합쳐 하나의 키맵으로(동작별 키 union, 최대 3개). 선택 순서대로 우선. */
+export function mergeKeymaps(maps: KeyMap[]): KeyMap {
+  const actions = Object.keys(DEFAULT_KEYMAP) as (keyof KeyMap)[];
+  const out = {} as KeyMap;
+  for (const a of actions) {
+    const codes: string[] = [];
+    for (const m of maps) for (const c of m[a] ?? []) if (!codes.includes(c)) codes.push(c);
+    out[a] = codes.slice(0, 3);
+  }
+  return out;
+}
 
 type Action = keyof KeyMap;
 

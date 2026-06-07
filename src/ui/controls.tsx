@@ -131,19 +131,36 @@ const KEY_LABELS: Record<string, string> = {
   ShiftRight: "R-Shift",
   ControlLeft: "L-Ctrl",
   ControlRight: "R-Ctrl",
+  AltLeft: "L-Alt",
+  AltRight: "R-Alt",
   Escape: "Esc",
+  Enter: "Enter",
+  Tab: "Tab",
+  Backspace: "⌫",
+  Semicolon: ";",
+  Quote: "'",
+  BracketLeft: "[",
+  BracketRight: "]",
+  Backslash: "\\",
+  Slash: "/",
+  Comma: ",",
+  Period: ".",
+  Minus: "-",
+  Equal: "=",
+  Backquote: "`",
 };
 
 export function keyLabel(code: string): string {
   if (KEY_LABELS[code]) return KEY_LABELS[code];
   if (code.startsWith("Key")) return code.slice(3);
   if (code.startsWith("Digit")) return code.slice(5);
+  if (code.startsWith("Numpad")) return "N" + code.slice(6);
   return code;
 }
 
-export function KeyBind({ codes, onChange }: { codes: string[]; onChange: (codes: string[]) => void }) {
+/** 단일 키 슬롯 — 한 버튼에 키 1개. 클릭 후 키 입력으로 지정, Backspace/Delete로 해제, Esc로 취소. */
+export function KeySlot({ code, onSet, onClear }: { code: string | null; onSet: (code: string) => void; onClear: () => void }) {
   const [listening, setListening] = useState(false);
-  const ref = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!listening) return;
@@ -154,18 +171,21 @@ export function KeyBind({ codes, onChange }: { codes: string[]; onChange: (codes
         setListening(false);
         return;
       }
-      // 새 키를 첫 번째로, 최대 2개 유지
-      const next = [e.code, ...codes.filter((c) => c !== e.code)].slice(0, 2);
-      onChange(next);
+      if (e.code === "Backspace" || e.code === "Delete") {
+        onClear();
+        setListening(false);
+        return;
+      }
+      onSet(e.code);
       setListening(false);
     };
     window.addEventListener("keydown", handler, { capture: true });
     return () => window.removeEventListener("keydown", handler, { capture: true } as EventListenerOptions);
-  }, [listening, codes, onChange]);
+  }, [listening, onSet, onClear]);
 
   return (
-    <button ref={ref} className={`fx-key ${listening ? "listening" : ""}`} onClick={() => setListening(true)}>
-      {listening ? "..." : codes.map(keyLabel).join(" / ") || "—"}
+    <button className={`fx-key fx-key--slot ${listening ? "listening" : ""} ${code ? "" : "fx-key--empty"}`} onClick={() => setListening(true)}>
+      {listening ? "..." : code ? keyLabel(code) : "+"}
     </button>
   );
 }

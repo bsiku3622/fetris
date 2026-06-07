@@ -252,10 +252,11 @@ export class SoundEngine {
         break;
       case "harddrop":
         // 저역 쿵 + 서브 + 짧은 클릭 + 가벼운 에어리 스네어. 리버브로 "쿵—" 울림.
+        // 묵직함은 유지하되 클릭/스네어를 조금 밝게 해 덜 먹먹하게.
         this.tone(150, 0.13, "sine", 0.16, 0, 78);
         this.tone(60, 0.18, "sine", 0.12, 0, 40);
-        this.tone(420, 0.035, "triangle", 0.06, 0, 200);
-        this.fnoise(0.05, 0.025, "bandpass", 3000, 0.9, 1100);
+        this.tone(500, 0.03, "triangle", 0.07, 0, 340);
+        this.fnoise(0.05, 0.032, "bandpass", 4200, 0.9, 1600);
         break;
       case "hold":
         // 부드러운 더블 비프(낮고 둥글게).

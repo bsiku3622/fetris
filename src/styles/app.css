@@ -116,60 +116,7 @@ body,
   height: 100%;
 }
 
-/* HUD 오버레이 — 게임 중 React 리렌더 없이 직접 갱신 */
-.fx-hud {
-  position: absolute;
-  top: 1rem;
-  left: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  pointer-events: none;
-  z-index: 5;
-}
-.fx-hud-primary {
-  background: rgba(26, 21, 40, 0.6);
-  border: 2px solid rgba(61, 236, 253, 0.45);
-  border-radius: 2px;
-  box-shadow: 0 0 16px rgba(61, 236, 253, 0.15), inset 0 0 0 1px rgba(0, 0, 0, 0.3);
-  padding: 0.5rem 0.9rem;
-}
-.fx-hud-primary .lbl {
-  font-size: 0.7rem;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  color: rgba(61, 236, 253, 0.8);
-  text-transform: uppercase;
-}
-.fx-hud-primary .val {
-  font-size: 1.8rem;
-  font-weight: 900;
-  line-height: 1;
-  color: #fff;
-  font-variant-numeric: tabular-nums;
-}
-.fx-hud-secondary {
-  display: flex;
-  gap: 0.4rem;
-  flex-wrap: wrap;
-  max-width: 240px;
-}
-.fx-hud-chip {
-  background: rgba(20, 15, 34, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 2px;
-  padding: 0.25rem 0.5rem;
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.9);
-  font-variant-numeric: tabular-nums;
-}
-.fx-hud-chip .k {
-  color: rgba(255, 255, 255, 0.45);
-  font-weight: 900;
-  font-size: 0.65rem;
-  margin-right: 0.25rem;
-}
+/* 통계 HUD는 캔버스에 직접 그려짐(필드 가장자리 정렬). DOM은 FPS만. */
 .fx-fps {
   position: absolute;
   top: 0.5rem;
@@ -393,6 +340,43 @@ body,
   50% {
     opacity: 0.6;
   }
+}
+/* 단축키 슬롯 — 액션당 3개 나란히 */
+.fx-keyslots {
+  display: flex;
+  gap: 0.4rem;
+}
+.fx-key--slot {
+  min-width: 56px;
+  text-align: center;
+}
+.fx-key--empty {
+  background: #fff0b8;
+  color: #6f6a52;
+  border-style: dashed;
+  box-shadow: none;
+}
+/* 프리셋 바 */
+.fx-preset-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.75rem;
+  margin-bottom: 0.5rem;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.12);
+}
+.fx-preset-label {
+  font-weight: 900;
+  font-size: 0.8rem;
+  color: #6f6a52;
+  letter-spacing: 0.05em;
+  margin-right: 0.25rem;
+}
+.fx-preset-hint {
+  font-size: 0.75rem;
+  color: #6f6a52;
+  margin-left: 0.25rem;
 }
 
 .fx-mode-grid {

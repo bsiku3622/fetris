@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { Button, Tabs, Text } from "@studio-baeks/funky-ui";
 import type { Settings } from "../app/store";
 import type { Handling, GameModeName, RuleSet } from "../engine/types";
 import type { KeyMap } from "../engine/input";
-import { Row, Slider, Toggle, Segmented, KeyBind } from "./controls";
+import { KEYMAP_PRESETS, mergeKeymaps } from "../engine/input";
+import { GFX_PRESETS } from "../render/renderer";
+import { Row, Slider, Toggle, Segmented, KeySlot } from "./controls";
 
 const fmtFrameMs = (f: number) => `${f}f / ${Math.round((f * 1000) / 60)}ms`;
 
@@ -18,11 +21,43 @@ export function SettingsScreen({
   onBack: () => void;
 }) {
   const setHandling = (patch: Partial<Handling>) => updateSettings((s) => ({ ...s, handling: { ...s.handling, ...patch } }));
-  const setGfx = (patch: Partial<Settings["gfx"]>) => updateSettings((s) => ({ ...s, gfx: { ...s.gfx, ...patch } }));
+  const [gfxPreset, setGfxPreset] = useState<string | null>(null);
+  const setGfx = (patch: Partial<Settings["gfx"]>) => {
+    setGfxPreset(null); // 수동 조정 시 프리셋 강조 해제
+    updateSettings((s) => ({ ...s, gfx: { ...s.gfx, ...patch } }));
+  };
+  const applyGfxPreset = (p: (typeof GFX_PRESETS)[number]) => {
+    setGfxPreset(p.id);
+    updateSettings((s) => ({ ...s, gfx: { ...s.gfx, ...p.gfx } }));
+  };
   const setAudio = (patch: Partial<Settings["audio"]>) => updateSettings((s) => ({ ...s, audio: { ...s.audio, ...patch } }));
   const setPerf = (patch: Partial<Settings["perf"]>) => updateSettings((s) => ({ ...s, perf: { ...s.perf, ...patch } }));
-  const setKey = (action: keyof KeyMap, codes: string[]) =>
-    updateSettings((s) => ({ ...s, keymap: { ...s.keymap, [action]: codes } }));
+  // 슬롯 i에 키 지정 — 같은 액션 내 중복 제거 후 교체/추가(최대 3개)
+  const setKeyAt = (action: keyof KeyMap, i: number, code: string) =>
+    updateSettings((s) => {
+      let arr = (s.keymap[action] ?? []).slice(0, 3).filter(Boolean);
+      arr = arr.filter((c) => c !== code); // 다른 슬롯에 있던 동일 키 제거
+      if (i < arr.length) arr[i] = code;
+      else arr.push(code);
+      arr = arr.slice(0, 3);
+      return { ...s, keymap: { ...s.keymap, [action]: arr } };
+    });
+  const clearKeyAt = (action: keyof KeyMap, i: number) =>
+    updateSettings((s) => {
+      const arr = (s.keymap[action] ?? []).slice(0, 3).filter(Boolean);
+      arr.splice(i, 1);
+      return { ...s, keymap: { ...s.keymap, [action]: arr } };
+    });
+  // 프리셋 다중 선택 — 선택된 프리셋들을 합쳐 키맵 적용(WASD+IOP 등 동시 사용)
+  const [selectedPresets, setSelectedPresets] = useState<Set<string>>(new Set());
+  const togglePreset = (id: string) => {
+    const next = new Set(selectedPresets);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedPresets(next);
+    const maps = KEYMAP_PRESETS.filter((p) => next.has(p.id)).map((p) => p.keymap);
+    if (maps.length) updateSettings((s) => ({ ...s, keymap: mergeKeymaps(maps) }));
+  };
 
   const h = settings.handling;
 
@@ -83,6 +118,15 @@ export function SettingsScreen({
           {/* ---- Controls ---- */}
           <Tabs.Panel value="controls">
             <div className="fx-section">
+              <div className="fx-preset-bar">
+                <span className="fx-preset-label">프리셋</span>
+                {KEYMAP_PRESETS.map((p) => (
+                  <Button key={p.id} variant={selectedPresets.has(p.id) ? "primary" : "secondary"} onClick={() => togglePreset(p.id)}>
+                    {p.label}
+                  </Button>
+                ))}
+                <span className="fx-preset-hint">여러 개 선택 시 합쳐서 적용</span>
+              </div>
               {(
                 [
                   ["moveLeft", "왼쪽 이동"],
@@ -98,11 +142,15 @@ export function SettingsScreen({
                 ] as [keyof KeyMap, string][]
               ).map(([action, label]) => (
                 <Row key={action} label={label}>
-                  <KeyBind codes={settings.keymap[action]} onChange={(c) => setKey(action, c)} />
+                  <div className="fx-keyslots">
+                    {[0, 1, 2].map((i) => (
+                      <KeySlot key={i} code={settings.keymap[action][i] ?? null} onSet={(c) => setKeyAt(action, i, c)} onClear={() => clearKeyAt(action, i)} />
+                    ))}
+                  </div>
                 </Row>
               ))}
               <Text variant="body" muted style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}>
-                키 버튼을 누르고 새 키를 입력하세요. Esc로 취소. 최대 2개까지 매핑됩니다.
+                슬롯을 누르고 새 키를 입력하세요. 한 동작에 최대 3개. Backspace/Delete로 해제, Esc로 취소.
               </Text>
             </div>
           </Tabs.Panel>
@@ -110,6 +158,14 @@ export function SettingsScreen({
           {/* ---- Graphics ---- */}
           <Tabs.Panel value="graphics">
             <div className="fx-section">
+              <div className="fx-preset-bar">
+                <span className="fx-preset-label">프리셋</span>
+                {GFX_PRESETS.map((p) => (
+                  <Button key={p.id} variant={gfxPreset === p.id ? "primary" : "secondary"} onClick={() => applyGfxPreset(p)}>
+                    {p.label}
+                  </Button>
+                ))}
+              </div>
               <Row label="고스트 피스">
                 <Toggle value={settings.gfx.ghost} onChange={(v) => setGfx({ ghost: v })} />
               </Row>
@@ -133,6 +189,12 @@ export function SettingsScreen({
               </Row>
               <Row label="파티클" desc="양">
                 <Slider value={settings.gfx.particles} min={0} max={1} step={0.05} onChange={(v) => setGfx({ particles: v })} format={(v) => v.toFixed(2)} />
+              </Row>
+              <Row label="배경 화려함" desc="네온 블롭 밝기">
+                <Slider value={settings.gfx.bgIntensity} min={0} max={1} step={0.05} onChange={(v) => setGfx({ bgIntensity: v })} format={(v) => v.toFixed(2)} />
+              </Row>
+              <Row label="블록 글로우" desc="네온 발광 세기">
+                <Slider value={settings.gfx.glow} min={0} max={1} step={0.05} onChange={(v) => setGfx({ glow: v })} format={(v) => v.toFixed(2)} />
               </Row>
             </div>
           </Tabs.Panel>
