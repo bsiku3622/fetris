@@ -61,8 +61,6 @@ export class Renderer {
   dropTrailX0 = 0; // 하드드롭 트레일(컬럼 범위)
   dropTrailX1 = 0;
   dropTrailAlpha = 0;
-  shockAlpha = 0; // 퍼펙트클리어 충격파
-  shockR = 0;
   framePulse = 0; // 클리어 시 프레임 번쩍
 
   constructor(canvas: HTMLCanvasElement) {
@@ -161,18 +159,6 @@ export class Renderer {
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(bx, fieldTop, boardW, cell * rows);
       ctx.globalAlpha = 1;
-    }
-
-    // 퍼펙트클리어 충격파 — 필드 중앙에서 퍼지는 링
-    if (this.shockAlpha > 0.01) {
-      ctx.save();
-      ctx.globalAlpha = this.shockAlpha;
-      ctx.strokeStyle = FUNKY.pink;
-      ctx.lineWidth = Math.max(2, cell * 0.4);
-      ctx.beginPath();
-      ctx.arc(bx + boardW / 2, fieldTop + fieldH / 2, this.shockR * cell, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
     }
 
     // 클리어 프레임 펄스 — 네온 프레임이 번쩍

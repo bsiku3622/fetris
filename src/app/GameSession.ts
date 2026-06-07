@@ -194,11 +194,6 @@ export class GameSession {
     if (r.dropTrailAlpha < 0.02) r.dropTrailAlpha = 0;
     r.framePulse *= 0.86;
     if (r.framePulse < 0.02) r.framePulse = 0;
-    if (r.shockAlpha > 0) {
-      r.shockR += 0.9;
-      r.shockAlpha *= 0.9;
-      if (r.shockAlpha < 0.02) r.shockAlpha = 0;
-    }
 
     this.particles.intensity = this.gfx.particles;
     this.particles.update(1 / 60);
@@ -343,14 +338,17 @@ export class GameSession {
         case EventType.B2B:
           this.sound.play("b2b");
           break;
-        case EventType.PerfectClear:
+        case EventType.PerfectClear: {
           this.sound.play("pc");
+          // 화려한 다색 파티클 분수(원형 충격파 제거)
+          const palette = [Piece.I, Piece.O, Piece.T, Piece.S, Piece.Z, Piece.J, Piece.L].map((p) => PIECE_COLORS[p]);
+          this.particles.celebrate(b.cols, b.rows, palette);
           this.renderer.flash = 1;
-          this.shakeMag = 1.2;
-          this.renderer.shockR = 0;
-          this.renderer.shockAlpha = 1; // 충격파 발사
-          this.actionText.push("PERFECT CLEAR", FUNKY.pink, 1.25, 1.8);
+          this.renderer.framePulse = 1; // 네온 프레임 번쩍
+          this.shakeMag = 1.4;
+          this.actionText.push("PERFECT CLEAR", FUNKY.pink, 1.35, 2.0);
           break;
+        }
         case EventType.TopOut:
           this.sound.death(); // 사망/리셋 — 큰 폭발음
           this.renderer.flash = 1;

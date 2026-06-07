@@ -26,7 +26,7 @@ export const FUNKY = {
   stageBottom: "#140f22",
   playfield: "#1a1528",
   playfieldEdge: "#0e0a18",
-  gridLine: "rgba(255,255,255,0.05)",
+  gridLine: "rgba(255,255,255,0.13)",
 } as const;
 
 /** 피스별 면색 — 표준 테트리스 색배치(직관적). I=청록, J=파랑, L=주황, O=노랑, S=초록, T=보라, Z=빨강. */

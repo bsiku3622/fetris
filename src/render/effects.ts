@@ -81,6 +81,22 @@ export class ParticleSystem {
     }
   }
 
+  /** 퍼펙트클리어 축하 — 필드 바닥에서 다색 파티클이 분수처럼 위로 솟구침 */
+  celebrate(cols: number, rows: number, colors: string[]): void {
+    if (this.intensity <= 0 || colors.length === 0) return;
+    const n = Math.round(90 * this.intensity);
+    for (let k = 0; k < n; k++) {
+      const px = Math.random() * cols;
+      const py = rows - Math.random() * 3; // 바닥 부근에서 시작
+      const vx = (Math.random() - 0.5) * 3; // 좌우로 퍼지는 분수
+      const vy = -4.5 - Math.random() * 6; // 위로 강하게
+      const life = 1.0 + Math.random() * 0.7;
+      const size = 0.12 + Math.random() * 0.2;
+      const c = colors[(Math.random() * colors.length) | 0];
+      this.spawn(px, py, vx, vy, life, size, c);
+    }
+  }
+
   update(dt: number): void {
     for (let i = 0; i < MAX; i++) {
       if (!this.active[i]) continue;
