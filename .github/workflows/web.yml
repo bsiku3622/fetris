@@ -1,20 +1,14 @@
-name: web-build
+name: web-ci
 
-# 웹 빌드 + GitHub Pages 배포. main push 또는 수동 실행.
+# 웹 빌드 + 타입체크 + 테스트 검증(CI). 배포는 Vercel이 담당.
+# main push / PR 시 자동 검증, 수동 실행 가능.
 
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
 
 jobs:
   build:
@@ -26,18 +20,6 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm run build
+      - run: npm run typecheck
       - run: npm test
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - run: npm run build
