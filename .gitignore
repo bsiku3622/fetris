@@ -24,3 +24,6 @@ settings.png
 .idea/
 *.log
 .playwright-mcp/
+
+# Claude Code 세션 상태
+.claude/

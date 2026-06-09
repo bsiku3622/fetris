@@ -1,6 +1,7 @@
 import { Piece, Rot, SpinType, LastAction } from "./types";
-import type { Handling, RuleSet, Stats, ClearResult } from "./types";
+import type { Handling, RuleSet, Stats, ClearResult, GarbageChunk } from "./types";
 import { Board } from "./board";
+import { GarbageGen, cancelGarbage, queuedLines } from "./garbage";
 import { Randomizer, Queue } from "./randomizer";
 import type { QueueSnapshot } from "./randomizer";
 import { shapeOf, spawnX, ALL_PIECES } from "./pieces";
@@ -40,6 +41,8 @@ export const enum EventType {
   Hit, // 벽/바닥 충돌(이동 실패)
   Combo,
   B2B,
+  Attack, // 대전: 상쇄 후 상대에게 보낼 순수 공격(a=줄수, cells=구멍 배열)
+  GarbageIn, // 대전: 쌓인 가비지가 보드에 투하됨(a=줄수)
 }
 
 export interface GameEvent {
@@ -91,6 +94,7 @@ interface UndoSnap {
   queue: QueueSnapshot;
   scoring: { b2b: number; combo: number; surge: number };
   stats: Stats;
+  garbageQueue: GarbageChunk[];
 }
 
 const EMPTY_CMD: InputCommands = {
@@ -139,6 +143,11 @@ export class Game {
   topOutResets = false; // Zen: 막히면 게임오버 대신 필드 리셋
   private undoStack: UndoSnap[] = [];
 
+  // 대전(versus) — garbageEnabled일 때만 동작
+  attackMultiplier = 1; // 플레이어별 보낼 공격 배수(상쇄 이후 적용)
+  private garbageQueue: GarbageChunk[] = []; // 받았지만 아직 투하 안 된 가비지
+  private garbageGen: GarbageGen;
+
   constructor(rule: RuleSet, handling: Handling, seed: number) {
     this.rule = rule;
     this.seed = seed >>> 0;
@@ -148,6 +157,8 @@ export class Game {
     this.kickset = getKickset(rule.kickset);
     this.scoring = new B2BSurge(rule);
     this.handling = new HandlingController(handling);
+    // 가비지 구멍 생성기 — 피스 가방과 상관없게 시드를 분리
+    this.garbageGen = new GarbageGen((this.seed ^ 0x9e3779b9) >>> 0, rule.cols, rule.garbageMessiness);
     this.stats = this.freshStats();
     this.phaseTimer = 60; // 1초 Ready
   }
@@ -175,6 +186,8 @@ export class Game {
     this.scoring.reset();
     this.handling.reset();
     this.undoStack.length = 0;
+    this.garbageQueue.length = 0;
+    this.garbageGen.reset((this.seed ^ 0x9e3779b9) >>> 0);
     this.stats = this.freshStats();
     this.cur = Piece.None;
     this.holdPiece = Piece.None;
@@ -260,6 +273,7 @@ export class Game {
       queue: this.queue.snapshot(),
       scoring: this.scoring.snapshot(),
       stats: { ...this.stats },
+      garbageQueue: this.garbageQueue.map((c) => ({ holes: c.holes.slice() })),
     });
     if (this.undoStack.length > 300) this.undoStack.shift();
   }
@@ -279,6 +293,7 @@ export class Game {
     this.queue.restore(s.queue);
     this.scoring.restoreFrom(s.scoring);
     this.stats = { ...s.stats };
+    this.garbageQueue = s.garbageQueue.map((c) => ({ holes: c.holes.slice() }));
     // 피스 진행 상태 초기화
     this.gravityAccum = 0;
     this.lockTimer = 0;
@@ -289,6 +304,33 @@ export class Game {
     this.phase = Phase.Playing;
     this.push(EventType.Spawn, { piece: this.cur });
     return true;
+  }
+
+  // ---- 대전(versus) 가비지 -------------------------------------------------
+
+  /** 상대가 보낸 가비지를 받아 큐에 적재(다음 비-클리어 락에 투하). */
+  receiveGarbage(chunk: GarbageChunk): void {
+    if (!this.rule.garbageEnabled || chunk.holes.length === 0) return;
+    this.garbageQueue.push({ holes: chunk.holes.slice() });
+  }
+
+  /** 현재 큐에 쌓여 투하 대기 중인 가비지 줄 수(메터/디버그용). */
+  get pendingGarbage(): number {
+    return queuedLines(this.garbageQueue);
+  }
+
+  /** 클리어 없는 락에서 호출 — 큐에 쌓인 가비지를 보드에 투하한다. */
+  private dumpGarbage(): void {
+    if (this.garbageQueue.length === 0) return;
+    let dumped = 0;
+    for (const chunk of this.garbageQueue) {
+      for (const hole of chunk.holes) {
+        this.board.addGarbage(1, hole);
+        dumped++;
+      }
+    }
+    this.garbageQueue.length = 0;
+    if (dumped > 0) this.push(EventType.GarbageIn, { a: dumped });
   }
 
   /** 전체 상태 직렬화 (Zen 이어하기 등). 보드+현재피스+큐+홀드+B2B+통계 */
@@ -494,6 +536,18 @@ export class Game {
     if (result.b2b > this.stats.maxB2b) this.stats.maxB2b = result.b2b;
     if (result.combo > this.stats.maxCombo) this.stats.maxCombo = result.combo;
     if (isPC) this.stats.perfectClears++;
+
+    // 대전: 클리어 턴엔 들어온 가비지를 상쇄하고 남은 공격을 방출,
+    // 클리어 없는 락엔 쌓인 가비지를 보드에 투하한다.
+    if (this.rule.garbageEnabled) {
+      if (cleared > 0) {
+        const remaining = cancelGarbage(this.garbageQueue, result.attack);
+        const out = Math.floor(remaining * this.attackMultiplier + 1e-9);
+        if (out > 0) this.push(EventType.Attack, { a: out, cells: this.garbageGen.holes(out) });
+      } else {
+        this.dumpGarbage();
+      }
+    }
 
     if (spin !== SpinType.None) {
       this.push(EventType.Spin, { piece: this.cur, spin, a: cleared });

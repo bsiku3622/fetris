@@ -13,7 +13,7 @@ const MODES: { mode: GameModeName; name: string; desc: string }[] = [
   { mode: "marathon", name: "Marathon", desc: "중력이 점점 빨라진다" },
   { mode: "fourwide", name: "4-Wide", desc: "4칸 좁은 보드 Zen" },
   { mode: "combo", name: "Combo", desc: "4칸 보드 · 가비지 보충 콤보 연습" },
-  { mode: "custom", name: "Custom", desc: "모든 룰을 직접 설정" },
+  { mode: "custom", name: "Custom 1v1", desc: "온라인 커스텀 방 대전" },
 ];
 
 const SHAPES = [
@@ -28,10 +28,12 @@ const SHAPES = [
 export function MenuScreen({
   settings,
   onPlay,
+  onPlayVersus,
   onSettings,
 }: {
   settings: Settings;
   onPlay: (m: GameModeName) => void;
+  onPlayVersus: () => void;
   onSettings: () => void;
 }) {
   const records = loadRecords();
@@ -76,7 +78,7 @@ export function MenuScreen({
           if (m.mode === "sprint" && records.sprint40 != null) rec = fmtTime(records.sprint40);
           if (m.mode === "blitz" && records.blitz != null) rec = records.blitz.toLocaleString();
           return (
-            <button key={m.mode} className="fx-mode-card" onClick={() => onPlay(m.mode)}>
+            <button key={m.mode} className="fx-mode-card" onClick={() => (m.mode === "custom" ? onPlayVersus() : onPlay(m.mode))}>
               <div className="name">{m.name}</div>
               <div className="desc">{m.desc}</div>
               {rec && <div className="desc" style={{ marginTop: 6, fontWeight: 900, color: "#222" }}>★ {rec}</div>}

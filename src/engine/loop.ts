@@ -23,6 +23,8 @@ export interface LoopHooks {
   pollInput: () => InputCommands;
   /** 매 렌더 1회. alpha = 다음 시뮬 틱까지의 보간 계수(0..1). */
   render: (game: Game, alpha: number, fps: number) => void;
+  /** 시뮬 틱 처리 override(대전 등). 주어지면 game.update 대신 호출된다. */
+  stepGame?: (dtFrames: number, cmd: InputCommands, now: number) => void;
 }
 
 const MAX_TICKS_PER_FRAME = 8;
@@ -89,7 +91,8 @@ export class GameLoop {
     while (this.accumulator >= simStep && ticks < MAX_TICKS_PER_FRAME) {
       if (cmd === null) cmd = this.hooks.pollInput();
       else cmd = this.continuousOnly(cmd);
-      this.game.update(dtFrames, cmd, t);
+      if (this.hooks.stepGame) this.hooks.stepGame(dtFrames, cmd, t);
+      else this.game.update(dtFrames, cmd, t);
       this.accumulator -= simStep;
       ticks++;
     }

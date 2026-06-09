@@ -5,8 +5,9 @@ import type { Settings } from "./store";
 import { MenuScreen } from "../ui/MenuScreen";
 import { GameScreen } from "../ui/GameScreen";
 import { SettingsScreen } from "../ui/SettingsScreen";
+import { VersusScreen } from "../ui/VersusScreen";
 
-type Screen = { name: "menu" } | { name: "game"; mode: GameModeName } | { name: "settings" };
+type Screen = { name: "menu" } | { name: "game"; mode: GameModeName } | { name: "settings" } | { name: "versus" };
 
 export function App() {
   const [settings, setSettings] = useState<Settings>(() => loadSettings());
@@ -28,9 +29,11 @@ export function App() {
         <MenuScreen
           settings={settings}
           onPlay={(mode) => setScreen({ name: "game", mode })}
+          onPlayVersus={() => setScreen({ name: "versus" })}
           onSettings={() => setScreen({ name: "settings" })}
         />
       )}
+      {screen.name === "versus" && <VersusScreen settings={settings} onExit={() => setScreen({ name: "menu" })} />}
       {screen.name === "game" && (
         <GameScreen mode={screen.mode} settings={settings} onExit={() => setScreen({ name: "menu" })} updateSettings={updateSettings} />
       )}
