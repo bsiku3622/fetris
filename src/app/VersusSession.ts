@@ -172,10 +172,10 @@ export class VersusSession {
 
     // 로컬: 풀 렌더(이펙트 + 가비지 게이지 포함)
     this.localRenderer.render(localGame, alpha, this.gfx, this.particles, this.actionText, this.damage, undefined, localGame.pendingGarbage);
-    // 원격: 각 상대 미러 단순 렌더(이펙트 없음)
+    // 원격: 각 상대 미러 단순 렌더(이펙트 없음, 게이지는 표시)
     for (const [playerId, renderer] of this.remoteRenderers) {
       const remoteGame = this.match.remotes.get(playerId);
-      if (remoteGame) renderer.render(remoteGame, 0, this.gfx);
+      if (remoteGame) renderer.render(remoteGame, 0, this.gfx, undefined, undefined, undefined, undefined, remoteGame.pendingGarbage);
     }
 
     this.cbs.onFps?.(fps);

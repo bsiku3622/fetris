@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Text } from "@studio-baeks/funky-ui";
 import type { Settings } from "../app/store";
-import type { RuleSet, KicksetName, SpinBonusName } from "../engine/types";
+import type { RuleSet, KicksetName, SpinBonusName, GarbageHoleMode } from "../engine/types";
 import { NetClient } from "../net/client";
 import type { GameMessage, PlayerInfo } from "../net/protocol";
 import { Side, FALLBACK_PEER_ID } from "../net/protocol";
@@ -66,6 +66,8 @@ type Cfg = {
   garbageMultiplier: number;
   garbageMessiness: number;
   garbageCap: number;
+  garbageHoleMode: GarbageHoleMode;
+  perfectClearDamage: number;
   rounds: number;
 };
 
@@ -80,7 +82,9 @@ const DEFAULT_CFG: Cfg = {
   b2bMode: "surge",
   garbageMultiplier: 1,
   garbageMessiness: 0.4,
-  garbageCap: 20,
+  garbageCap: 8,
+  garbageHoleMode: "clean",
+  perfectClearDamage: 5,
   rounds: 3,
 };
 
@@ -148,6 +152,8 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     garbageMultiplier: c.garbageMultiplier,
     garbageMessiness: c.garbageMessiness,
     garbageCap: c.garbageCap,
+    garbageHoleMode: c.garbageHoleMode,
+    perfectClearDamage: c.perfectClearDamage,
   });
 
   const beginPlaying = (p: PlayParams) => {
@@ -279,7 +285,9 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
           b2bMode: m.rule.b2bMode,
           garbageMultiplier: m.rule.garbageMultiplier,
           garbageMessiness: m.rule.garbageMessiness,
-          garbageCap: m.rule.garbageCap ?? 20,
+          garbageCap: m.rule.garbageCap ?? 8,
+          garbageHoleMode: m.rule.garbageHoleMode ?? "clean",
+          perfectClearDamage: m.rule.perfectClearDamage ?? 5,
         };
         cfgRef.current = newCfg;
         setCfg({ ...newCfg });
@@ -644,7 +652,18 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
             <ToggleField label="가비지(공격) 사용" value={cfg.garbage} disabled={!isHost} onChange={(v) => applyEdit({ garbage: v })} />
             <NumField label="가비지 배수" value={cfg.garbageMultiplier} min={0} max={5} step={0.1} disabled={!isHost} onChange={(v) => applyEdit({ garbageMultiplier: v })} />
             <NumField label="가비지 혼잡도" value={cfg.garbageMessiness} min={0} max={1} step={0.05} disabled={!isHost} onChange={(v) => applyEdit({ garbageMessiness: v })} />
-            <NumField label="가비지 캡 (줄)" value={cfg.garbageCap} min={1} max={40} step={1} disabled={!isHost} onChange={(v) => applyEdit({ garbageCap: Math.round(v) })} />
+            <NumField label="가비지 캡 (한 번에, 줄)" value={cfg.garbageCap} min={1} max={40} step={1} disabled={!isHost} onChange={(v) => applyEdit({ garbageCap: Math.round(v) })} />
+            <SelectField
+              label="방해줄 모양"
+              value={cfg.garbageHoleMode}
+              disabled={!isHost}
+              options={[
+                { value: "clean", label: "깔끔 (한 공격=한 줄)" },
+                { value: "cheese", label: "치즈 (줄마다 랜덤)" },
+              ]}
+              onChange={(v) => applyEdit({ garbageHoleMode: v as GarbageHoleMode })}
+            />
+            <NumField label="퍼펙트 클리어 데미지" value={cfg.perfectClearDamage} min={0} max={20} step={1} disabled={!isHost} onChange={(v) => applyEdit({ perfectClearDamage: Math.round(v) })} />
 
             <SectionLabel>게임 규칙</SectionLabel>
             <SelectField

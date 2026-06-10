@@ -1,5 +1,5 @@
 import { mulberry32 } from "./randomizer";
-import type { GarbageChunk } from "./types";
+import type { GarbageChunk, GarbageHoleMode } from "./types";
 
 // ============================================================================
 // 가비지 hole 패턴 생성 — 송신측(sender-authoritative)이 결정해 상대에게 보낸다.
@@ -24,14 +24,24 @@ export class GarbageGen {
     this.lastHole = -1;
   }
 
-  /** lines줄짜리 구멍 배열 생성. 첫 줄은 항상 새로, 이후는 messiness 확률로 변경. */
-  holes(lines: number): number[] {
+  /**
+   * lines줄짜리 구멍 배열 생성.
+   *  - clean: 이번 공격(한 번의 holes 호출) 전체를 한 컬럼으로(테트리스/스핀이 깔끔하게 들어감).
+   *           직전 공격 컬럼은 messiness 확률로만 새로 바뀐다.
+   *  - cheese: 줄마다 새 컬럼(들쭉날쭉).
+   */
+  holes(lines: number, mode: GarbageHoleMode = "clean"): number[] {
     const out: number[] = [];
-    for (let i = 0; i < lines; i++) {
+    if (mode === "clean") {
       if (this.lastHole < 0 || this.rng() < this.messiness) {
         this.lastHole = Math.floor(this.rng() * this.cols);
       }
-      out.push(this.lastHole);
+      for (let i = 0; i < lines; i++) out.push(this.lastHole);
+    } else {
+      for (let i = 0; i < lines; i++) {
+        this.lastHole = Math.floor(this.rng() * this.cols);
+        out.push(this.lastHole);
+      }
     }
     return out;
   }

@@ -162,8 +162,8 @@ export class B2BSurge {
         }
       }
       attack = applyCombo(base, combo, rule.comboTable);
-      // 퍼펙트 클리어 보너스
-      if (board_isEmpty) attack += 5;
+      // 퍼펙트 클리어 보너스(룰값, Tetr.io 시즌2 기본 5)
+      if (board_isEmpty) attack += rule.perfectClearDamage ?? 5;
       attack *= rule.garbageMultiplier;
       attack = Math.floor(attack + 1e-9);
     }

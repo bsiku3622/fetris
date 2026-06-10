@@ -76,6 +76,8 @@ export class Renderer {
   private bgIntensityCache = -1; // 배경 화려함 캐시(변경 시 재계산)
   // 화려한 연출 상태 (GameSession이 설정/감쇠)
   framePulse = 0; // 클리어 시 프레임 번쩍
+  private garbageMeterValue = 0; // 가비지 게이지 애니메이션 보간값(현재 표시 줄수)
+  private garbagePulse = 0; // 게이지 cap 도달/증가 시 펄스(0..1, 감쇠)
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -148,9 +150,17 @@ export class Renderer {
     // 블록 스프라이트 준비(셀 크기/3d/글로우 변경 시에만 재생성)
     this.ensureSprites(cell, gfx.block3d, this.glowLevel);
 
-    // 가비지 게이지 — 필드 왼쪽에 빨간 세로 바
-    if (pendingGarbage > 0) {
-      this.drawGarbageMeter(bx, fieldTop, fieldH, cell, pendingGarbage, game.rule.garbageCap ?? 20);
+    // 가비지 게이지 — 대전(garbageEnabled)에서 항상 표시, 값은 부드럽게 보간
+    if (game.rule.garbageEnabled) {
+      const gcap = game.rule.garbageCap ?? 8;
+      const prev = this.garbageMeterValue;
+      this.garbageMeterValue += (pendingGarbage - this.garbageMeterValue) * 0.3;
+      if (Math.abs(pendingGarbage - this.garbageMeterValue) < 0.03) this.garbageMeterValue = pendingGarbage;
+      // 증가 순간 펄스(차오르는 느낌)
+      if (pendingGarbage > prev + 0.01) this.garbagePulse = 1;
+      this.garbagePulse *= 0.9;
+      if (this.garbagePulse < 0.02) this.garbagePulse = 0;
+      this.drawGarbageMeter(bx, fieldTop, fieldH, cell, this.garbageMeterValue, pendingGarbage, gcap);
     }
 
     // 스택
@@ -256,38 +266,57 @@ export class Renderer {
     ctx.restore();
   }
 
-  /** 가비지 게이지 — 필드 왼쪽에 좁은 세로 바로 대기 중인 가비지 라인 수를 표시. */
-  private drawGarbageMeter(fieldX: number, fieldY: number, fieldH: number, cell: number, lines: number, cap: number): void {
+  /**
+   * 가비지 게이지 — 필드 왼쪽 세로 바. 대전 중 항상 표시.
+   * @param animated 표시용 보간값(부드러운 채움)
+   * @param actual 실제 대기 줄 수(숫자/색 기준)
+   */
+  private drawGarbageMeter(fieldX: number, fieldY: number, fieldH: number, cell: number, animated: number, actual: number, cap: number): void {
     const ctx = this.ctx;
-    const meterW = Math.max(4, Math.round(cell * 0.35));
-    const mx = fieldX - meterW - Math.max(2, Math.round(cell * 0.12));
-    const ratio = Math.min(1, lines / Math.max(1, cap));
-    const barH = Math.round(fieldH * ratio);
+    const meterW = Math.max(8, Math.round(cell * 0.55));
+    const gap = Math.max(3, Math.round(cell * 0.16));
+    const mx = fieldX - meterW - gap;
+    const animRatio = Math.min(1, animated / Math.max(1, cap));
+    const actualRatio = Math.min(1, actual / Math.max(1, cap));
+    const barH = fieldH * animRatio;
+    const danger = actual >= cap; // cap 도달(이번에 다 들어옴)
 
     ctx.save();
-    // 배경
-    ctx.fillStyle = "rgba(255,0,0,0.12)";
+    // 배경 트랙(항상 표시)
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
     ctx.fillRect(mx, fieldY, meterW, fieldH);
-    // 채움 — 아래에서 위로, 줄 수에 따라 주황→빨강
-    const red = Math.round(255);
-    const green = Math.round(100 * (1 - ratio));
-    ctx.fillStyle = `rgba(${red},${green},0,0.88)`;
-    ctx.fillRect(mx, fieldY + fieldH - barH, meterW, barH);
-    // 테두리
-    ctx.strokeStyle = `rgba(255,${green},0,0.55)`;
     ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(255,255,255,0.16)";
     ctx.strokeRect(mx, fieldY, meterW, fieldH);
-    // 숫자
-    if (lines > 0) {
-      const fs = Math.max(9, Math.floor(cell * 0.42));
+
+    // 채움(아래→위)
+    if (barH > 0.5) {
+      const g = Math.round(150 * (1 - actualRatio));
+      const fill = danger ? "rgba(255,45,45,0.96)" : `rgba(255,${g},25,0.92)`;
+      // 증가 펄스 또는 cap 도달 시 글로우
+      const glow = Math.max(this.garbagePulse, danger ? 0.7 : 0);
+      if (glow > 0.02) {
+        ctx.shadowColor = danger ? "rgba(255,45,45,0.9)" : "rgba(255,170,30,0.8)";
+        ctx.shadowBlur = cell * 0.7 * glow;
+      }
+      ctx.fillStyle = fill;
+      ctx.fillRect(mx, fieldY + fieldH - barH, meterW, barH);
+    }
+
+    // 숫자(실제값)
+    if (actual >= 1) {
+      ctx.shadowBlur = 0;
+      const fs = Math.max(10, Math.floor(cell * 0.5));
       ctx.font = `900 ${fs}px Pretendard, system-ui, sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "bottom";
+      ctx.lineWidth = Math.max(2, fs * 0.18);
+      ctx.strokeStyle = "rgba(0,0,0,0.7)";
+      const label = String(Math.round(actual));
+      const ty = Math.max(fieldY + fs + 2, fieldY + fieldH - barH - 4);
+      ctx.strokeText(label, mx + meterW / 2, ty);
       ctx.fillStyle = "#fff";
-      ctx.shadowColor = "rgba(0,0,0,0.6)";
-      ctx.shadowBlur = 3;
-      const ty = fieldY + fieldH - barH - 3;
-      ctx.fillText(String(lines), mx + meterW / 2, Math.max(fieldY + fs + 2, ty));
+      ctx.fillText(label, mx + meterW / 2, ty);
     }
     ctx.restore();
   }

@@ -80,6 +80,7 @@ export interface GameSnapshot {
   buf?: Piece[]; // 레거시 호환(구버전 저장)
   scoring: { b2b: number; combo: number; surge: number };
   stats: Stats;
+  pending?: number; // 대기 중 가비지 줄수(상대 게이지 표시용)
 }
 
 /** undo 스냅샷 — 피스 한 턴 시작 시점의 상태 */
@@ -364,6 +365,7 @@ export class Game {
       queue: this.queue.snapshot(),
       scoring: this.scoring.snapshot(),
       stats: { ...this.stats },
+      pending: this.pendingGarbage,
     };
   }
 
@@ -381,6 +383,9 @@ export class Game {
     else if (Array.isArray(s.buf)) this.queue.restoreBuffer(s.buf); // 레거시 저장 호환
     if (s.scoring) this.scoring.restoreFrom(s.scoring);
     if (s.stats) this.stats = { ...s.stats };
+    // 미러 게이지용 — pending 줄수를 더미 큐로 반영(미러는 시뮬을 돌지 않아 투하되지 않음)
+    const pend = s.pending ?? 0;
+    this.garbageQueue = pend > 0 ? [{ holes: new Array(pend).fill(0), delay: 0 }] : [];
     this.gravityAccum = 0;
     this.lockTimer = 0;
     this.lockResetCount = 0;
@@ -561,7 +566,7 @@ export class Game {
       if (cleared > 0) {
         const remaining = cancelGarbage(this.garbageQueue, result.attack);
         const out = Math.floor(remaining * this.attackMultiplier + 1e-9);
-        if (out > 0) this.push(EventType.Attack, { a: out, cells: this.garbageGen.holes(out) });
+        if (out > 0) this.push(EventType.Attack, { a: out, cells: this.garbageGen.holes(out, this.rule.garbageHoleMode) });
       } else {
         this.dumpGarbage();
       }

@@ -42,8 +42,10 @@ export const STANDARD_RULESET: RuleSet = {
   garbageMultiplier: 1,
   garbageEnabled: false, // 솔로 기본 비활성; 1대1 방에서만 켠다
   garbageMessiness: 0.4,
-  garbageCap: 20,
+  garbageCap: 8, // Tetr.io 시즌2 기본 — 초과분은 다음 락에 나눠 투하
   garbageSpeed: 20, // 받은 가비지가 올라오기까지 ~0.33s(20프레임). 그 사이 상쇄 가능
+  garbageHoleMode: "clean", // 한 공격은 한 컬럼으로 깔끔하게(테트리스/스핀)
+  perfectClearDamage: 5, // Tetr.io 시즌2 All Clear = +5 (시즌1의 10에서 감소)
 };
 
 function clone(base: RuleSet, over: Partial<RuleSet>): RuleSet {
