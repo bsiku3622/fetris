@@ -99,6 +99,10 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
   const [maxPlayers, setMaxPlayers] = useState(2);
   const [roster, setRoster] = useState<PlayerInfo[]>([]); // 나를 제외한 상대들
   const [targetId, setTargetId] = useState<string | null>(null);
+  const [chat, setChat] = useState<{ nick: string; text: string }[]>([]);
+  const [chatInput, setChatInput] = useState("");
+
+  const myNick = settings.profile?.nickname?.trim() || "Player";
 
   const roundStateRef = useRef<RoundState>({ myWins: 0, oppWins: 0 });
   const activeRoundsRef = useRef(3);
@@ -205,6 +209,19 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     roundStateRef.current = { myWins: 0, oppWins: 0 };
   };
 
+  // 채팅 — nick=""이면 시스템 메시지(입퇴장 등)
+  const pushChat = (nick: string, text: string) => {
+    setChat((prev) => [...prev.slice(-49), { nick, text }]);
+  };
+  const sendChat = () => {
+    const text = chatInput.trim();
+    const net = netRef.current;
+    if (!text || !net) return;
+    net.sendGame({ t: "chat", nick: myNick, text });
+    pushChat(myNick, text); // 내 메시지는 로컬에 즉시
+    setChatInput("");
+  };
+
   const host = async () => {
     setError("");
     setIsHost(true);
@@ -224,16 +241,22 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     };
     net.onPeerJoinedFull = (player) => {
       // 구버전 서버는 player를 안 보냄 → placeholder로 단일 상대 인식(1대1만 가능)
-      const p: PlayerInfo = player && typeof player.id === "string" ? player : { id: FALLBACK_PEER_ID, isHost: false };
+      const p: PlayerInfo = player && typeof player.id === "string" ? player : { id: FALLBACK_PEER_ID, isHost: false, nick: "상대" };
       setRosterBoth([...rosterRef.current.filter((x) => x.id !== p.id), p]);
+      pushChat("", `${p.nick}님이 입장했습니다`);
       sendSettings(net); // 입장자에게 현재 설정 동기화
     };
     net.onPeerLeftById = (playerId) => {
+      const left = rosterRef.current.find((p) => p.id === playerId);
+      if (left) pushChat("", `${left.nick}님이 나갔습니다`);
       setRosterBoth(rosterRef.current.filter((p) => p.id !== playerId));
+    };
+    net.onGameMessage = (m: GameMessage) => {
+      if (m.t === "chat") pushChat(m.nick, m.text);
     };
     try {
       await net.connect();
-      net.createRoom(maxPlayers);
+      net.createRoom(maxPlayers, myNick);
     } catch {
       setError("서버에 연결할 수 없습니다. 주소를 확인해주세요.");
     }
@@ -260,14 +283,17 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     };
     net.onJoined = () => {
       // 구버전 서버는 players를 안 보냄 → 호스트 placeholder로 단일 상대 인식
-      if (rosterRef.current.length === 0) setRosterBoth([{ id: FALLBACK_PEER_ID, isHost: true }]);
+      if (rosterRef.current.length === 0) setRosterBoth([{ id: FALLBACK_PEER_ID, isHost: true, nick: "호스트" }]);
       setPhase("room");
     };
     net.onPeerJoinedFull = (player) => {
       if (!player || typeof player.id !== "string") return;
       setRosterBoth([...rosterRef.current.filter((p) => p.id !== player.id), player]);
+      pushChat("", `${player.nick}님이 입장했습니다`);
     };
     net.onPeerLeftById = (playerId) => {
+      const left = rosterRef.current.find((p) => p.id === playerId);
+      if (left) pushChat("", `${left.nick}님이 나갔습니다`);
       setRosterBoth(rosterRef.current.filter((p) => p.id !== playerId));
     };
     net.onGameMessage = (m: GameMessage) => {
@@ -305,11 +331,13 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
           rounds: roomCfg.rounds,
           opponents: [...rosterRef.current],
         });
+      } else if (m.t === "chat") {
+        pushChat(m.nick, m.text);
       }
     };
     try {
       await net.connect();
-      net.joinRoom(joinCode);
+      net.joinRoom(joinCode, myNick);
     } catch {
       setError("서버에 연결할 수 없습니다. 주소를 확인해주세요.");
     }
@@ -349,6 +377,7 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     setResult(null);
     resetRound();
     setRosterBoth([]);
+    setChat([]);
     setCode("");
     setPhase("lobby");
   };
@@ -459,7 +488,7 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
             if (el) oppCanvasRefs.current.set(opp.id, el);
             else oppCanvasRefs.current.delete(opp.id);
           }}
-          label={labelOverride ?? `P${idx + 2}`}
+          label={labelOverride ?? opp.nick ?? `P${idx + 2}`}
           color={c}
         />
         {isTargeted && (
@@ -486,9 +515,9 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
           // 2인: 나 | 상대 좌우 분할. 상단 스코어보드와 안 겹치게 보드를 아래로.
           <div style={{ display: "flex", width: "100%", height: "100%", gap: 8, padding: 8, paddingTop: 48, boxSizing: "border-box" }}>
             <div style={{ flex: "1 1 50%", display: "flex" }}>
-              <BoardPane canvasRef={localCanvasRef} label={`YOU (${isHost ? "P1" : "P2"})`} color={myColor} />
+              <BoardPane canvasRef={localCanvasRef} label={myNick} color={myColor} />
             </div>
-            {matchOpponents[0] && renderOppPane(matchOpponents[0], 0, { flex: "1 1 50%" }, `OPP (${isHost ? "P2" : "P1"})`)}
+            {matchOpponents[0] && renderOppPane(matchOpponents[0], 0, { flex: "1 1 50%" }, matchOpponents[0].nick)}
           </div>
         ) : (
           // 다대일(FFA): 나를 가운데 크게, 상대들은 오른쪽 위 구석부터 작게
@@ -496,7 +525,7 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
             {/* 내 보드 — 화면 중앙 */}
             <div style={{ position: "absolute", inset: 0, display: "flex", justifyContent: "center", alignItems: "center", padding: 12, boxSizing: "border-box" }}>
               <div style={{ width: "44%", height: "94%", display: "flex" }}>
-                <BoardPane canvasRef={localCanvasRef} label={`YOU (${isHost ? "P1" : "P2"})`} color={myColor} />
+                <BoardPane canvasRef={localCanvasRef} label={myNick} color={myColor} />
               </div>
             </div>
             {/* 상대 보드들 — 오른쪽 위 구석부터 작게 작게, 줄바꿈(아래로) */}
@@ -615,9 +644,9 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
 
           {/* 로스터 */}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <RosterChip label={isHost ? "나 (호스트)" : "나"} color={myColor} present />
+            <RosterChip label={`${myNick} (나)`} color={myColor} present />
             {roster.map((p, i) => (
-              <RosterChip key={p.id} label={p.isHost ? "호스트" : `P${i + 2}`} color={oppColorOf(i)} present />
+              <RosterChip key={p.id} label={p.isHost ? `${p.nick} (호스트)` : p.nick} color={oppColorOf(i)} present />
             ))}
           </div>
 
@@ -714,6 +743,9 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
             </Text>
           )}
 
+          {/* 채팅 */}
+          <ChatBox chat={chat} value={chatInput} onChange={setChatInput} onSend={sendChat} myNick={myNick} />
+
           {isHost ? (
             <Button variant="primary" size="lg" onClick={startMatch} disabled={roster.length === 0}>
               {roster.length > 0 ? "대결 시작" : "상대 대기 중…"}
@@ -728,6 +760,63 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+function ChatBox({ chat, value, onChange, onSend, myNick }: {
+  chat: { nick: string; text: string }[];
+  value: string;
+  onChange: (v: string) => void;
+  onSend: () => void;
+  myNick: string;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [chat]);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <SectionLabel>채팅</SectionLabel>
+      <div
+        ref={listRef}
+        style={{
+          height: 110,
+          overflowY: "auto",
+          border: "3px solid #000",
+          borderRadius: 8,
+          padding: "0.4rem 0.6rem",
+          background: "rgba(0,0,0,0.04)",
+          fontSize: "0.82rem",
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+        }}
+      >
+        {chat.length === 0 && <span style={{ opacity: 0.4, fontWeight: 700 }}>아직 메시지가 없어요</span>}
+        {chat.map((m, i) =>
+          m.nick === "" ? (
+            <div key={i} style={{ opacity: 0.55, fontWeight: 800, fontStyle: "italic" }}>{m.text}</div>
+          ) : (
+            <div key={i} style={{ fontWeight: 700 }}>
+              <span style={{ fontWeight: 900, color: m.nick === myNick ? FUNKY.sky : FUNKY.pink }}>{m.nick}</span>
+              <span style={{ opacity: 0.5 }}>: </span>
+              <span>{m.text}</span>
+            </div>
+          ),
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <input
+          value={value}
+          maxLength={120}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onSend(); } }}
+          placeholder="메시지 입력 후 Enter"
+          style={{ ...inputStyle, flex: 1, fontSize: "0.85rem", padding: "0.45rem 0.6rem" }}
+        />
+        <Button variant="secondary" size="md" onClick={onSend}>전송</Button>
+      </div>
     </div>
   );
 }

@@ -111,8 +111,8 @@ export class NetClient {
     if (this.ws && this.state === "open") this.ws.send(JSON.stringify(msg));
   }
 
-  createRoom(maxPlayers = 4): void {
-    this.sendControl({ t: "create", maxPlayers });
+  createRoom(maxPlayers = 4, nick?: string): void {
+    this.sendControl({ t: "create", maxPlayers, nick });
   }
   sendGame(msg: GameMessage): void {
     this.sendControl({ t: "relay", msg });
@@ -120,8 +120,8 @@ export class NetClient {
   sendGameTo(targetId: string, msg: GameMessage): void {
     this.sendControl({ t: "relay-to", targetId, msg });
   }
-  joinRoom(code: string): void {
-    this.sendControl({ t: "join", code: code.toUpperCase().trim() });
+  joinRoom(code: string, nick?: string): void {
+    this.sendControl({ t: "join", code: code.toUpperCase().trim(), nick });
   }
   leaveRoom(): void {
     this.sendControl({ t: "leave" });

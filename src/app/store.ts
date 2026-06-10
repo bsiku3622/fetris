@@ -13,13 +13,23 @@ import { DEFAULT_AUDIO } from "../audio/sound";
 // 설정 영속화 — localStorage. 깊은 병합으로 신규 필드 호환.
 // ============================================================================
 
+export interface Profile {
+  nickname: string;
+}
+
 export interface Settings {
+  profile: Profile;
   handling: Handling;
   keymap: KeyMap;
   gfx: GfxOptions;
   audio: AudioOptions;
   perf: LoopPerfOptions;
   rulesets: Record<GameModeName, RuleSet>;
+}
+
+/** 랜덤 기본 닉네임 — 매 새 설치마다 다르게 */
+function randomNickname(): string {
+  return "Player" + Math.floor(1000 + Math.random() * 9000);
 }
 
 export const DEFAULT_PERF: LoopPerfOptions = {
@@ -33,6 +43,7 @@ const KEY = "fetris.settings.v1";
 
 export function defaultSettings(): Settings {
   return {
+    profile: { nickname: randomNickname() },
     handling: { ...DEFAULT_HANDLING },
     keymap: structuredClone(DEFAULT_KEYMAP),
     gfx: { ...DEFAULT_GFX },

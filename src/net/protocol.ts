@@ -10,6 +10,7 @@ import type { GameSnapshot } from "../engine/game";
 export interface PlayerInfo {
   id: string;
   isHost: boolean;
+  nick: string;
 }
 
 /**
@@ -29,13 +30,15 @@ export type GameMessage =
   | { t: "attack"; holes: number[]; targetId?: string }
   /** 상대 화면 표시용 보드 스냅샷 */
   | { t: "board"; snap: GameSnapshot }
+  /** 대기실 채팅 메시지 */
+  | { t: "chat"; nick: string; text: string }
   /** 내 게임오버 통지 */
   | { t: "dead" };
 
 /** 클라이언트→서버 제어 메시지(방 수명 관리) */
 export type ClientControl =
-  | { t: "create"; maxPlayers?: number }
-  | { t: "join"; code: string }
+  | { t: "create"; maxPlayers?: number; nick?: string }
+  | { t: "join"; code: string; nick?: string }
   | { t: "leave" }
   | { t: "relay"; msg: GameMessage }
   | { t: "relay-to"; targetId: string; msg: GameMessage };

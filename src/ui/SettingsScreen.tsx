@@ -78,8 +78,9 @@ export function SettingsScreen({
       </div>
 
       <div className="fx-settings-body">
-        <Tabs defaultValue="handling">
+        <Tabs defaultValue="profile">
           <Tabs.List>
+            <Tabs.Trigger value="profile">Profile</Tabs.Trigger>
             <Tabs.Trigger value="handling">Handling</Tabs.Trigger>
             <Tabs.Trigger value="controls">Controls</Tabs.Trigger>
             <Tabs.Trigger value="graphics">Graphics</Tabs.Trigger>
@@ -87,6 +88,20 @@ export function SettingsScreen({
             <Tabs.Trigger value="perf">Performance</Tabs.Trigger>
             <Tabs.Trigger value="rules">Rules</Tabs.Trigger>
           </Tabs.List>
+
+          {/* ---- Profile ---- */}
+          <Tabs.Panel value="profile">
+            <div className="fx-section">
+              <Row label="닉네임" desc="대전 방에서 다른 플레이어에게 보이는 이름 (최대 16자)">
+                <input
+                  value={settings.profile.nickname}
+                  maxLength={16}
+                  onChange={(e) => updateSettings((s) => ({ ...s, profile: { ...s.profile, nickname: e.target.value } }))}
+                  style={{ padding: "0.5rem 0.7rem", border: "3px solid #000", borderRadius: 8, fontWeight: 800, fontSize: "1rem", width: 220 }}
+                />
+              </Row>
+            </div>
+          </Tabs.Panel>
 
           {/* ---- Handling ---- */}
           <Tabs.Panel value="handling">
