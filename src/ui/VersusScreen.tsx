@@ -130,9 +130,11 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     };
   }, []);
 
-  const setRosterBoth = (next: PlayerInfo[]) => {
-    rosterRef.current = next;
-    setRoster(next);
+  // 네트워크 입력은 신뢰 불가 — 구버전 서버나 누락 필드로 undefined가 섞이는 걸 방어
+  const setRosterBoth = (next: PlayerInfo[] | undefined) => {
+    const clean = (Array.isArray(next) ? next : []).filter((p): p is PlayerInfo => !!p && typeof p.id === "string");
+    rosterRef.current = clean;
+    setRoster(clean);
   };
 
   const ruleFromCfg = (c: Cfg): RuleSet => ({
@@ -199,6 +201,7 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
       setPhase("room");
     };
     net.onPeerJoinedFull = (player) => {
+      if (!player || typeof player.id !== "string") return;
       setRosterBoth([...rosterRef.current.filter((p) => p.id !== player.id), player]);
       sendSettings(net); // 입장자에게 현재 설정 동기화
     };
@@ -236,6 +239,7 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
       setPhase("room");
     };
     net.onPeerJoinedFull = (player) => {
+      if (!player || typeof player.id !== "string") return;
       setRosterBoth([...rosterRef.current.filter((p) => p.id !== player.id), player]);
     };
     net.onPeerLeftById = (playerId) => {
