@@ -13,7 +13,7 @@ const MODES: { mode: GameModeName; name: string; desc: string }[] = [
   { mode: "marathon", name: "Marathon", desc: "중력이 점점 빨라진다" },
   { mode: "fourwide", name: "4-Wide", desc: "4칸 좁은 보드 Zen" },
   { mode: "combo", name: "Combo", desc: "4칸 보드 · 가비지 보충 콤보 연습" },
-  { mode: "custom", name: "Custom 1v1", desc: "온라인 커스텀 방 대전" },
+  { mode: "custom", name: "Custom Room", desc: "온라인 커스텀 방 대전 (최대 8인)" },
 ];
 
 const SHAPES = [

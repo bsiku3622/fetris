@@ -107,6 +107,7 @@ export interface RuleSet {
   // 대전(versus) — 솔로 모드는 garbageEnabled=false라 영향 없음
   garbageEnabled: boolean; // 받은 가비지 큐/상쇄/투하 활성(1대1 방에서만 true)
   garbageMessiness: number; // 0~1: 가비지 줄 구멍이 라인마다 바뀔 확률(0=일렬, 1=매줄 랜덤)
+  garbageCap: number; // 한 번에 투하되는 최대 가비지 줄 수 (Tetr.io 기본 20)
 }
 
 /** 가비지 한 묶음 — 한 번의 공격이 만든 줄들. holes[i]가 i번째 줄의 구멍 컬럼. */

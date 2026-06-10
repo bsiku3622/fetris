@@ -102,7 +102,7 @@ export class Renderer {
     }
   }
 
-  render(game: Game, _alpha: number, gfx: GfxOptions, particles?: ParticleSystem, action?: ActionTextManager, damage?: DamageNumberManager, hud?: HudInfo): void {
+  render(game: Game, _alpha: number, gfx: GfxOptions, particles?: ParticleSystem, action?: ActionTextManager, damage?: DamageNumberManager, hud?: HudInfo, pendingGarbage = 0): void {
     const ctx = this.ctx;
     const { cols, rows } = game.board;
     const W = this.cssW;
@@ -147,6 +147,11 @@ export class Renderer {
 
     // 블록 스프라이트 준비(셀 크기/3d/글로우 변경 시에만 재생성)
     this.ensureSprites(cell, gfx.block3d, this.glowLevel);
+
+    // 가비지 게이지 — 필드 왼쪽에 빨간 세로 바
+    if (pendingGarbage > 0) {
+      this.drawGarbageMeter(bx, fieldTop, fieldH, cell, pendingGarbage, game.rule.garbageCap ?? 20);
+    }
 
     // 스택
     this.drawStack(game, bx, by, cell, renderTop);
@@ -248,6 +253,42 @@ export class Renderer {
       if (hud.right.length) this.drawStatStack(hud.right, bx + boardW + pad * 1.4, statBottom, cell, "left");
     }
 
+    ctx.restore();
+  }
+
+  /** 가비지 게이지 — 필드 왼쪽에 좁은 세로 바로 대기 중인 가비지 라인 수를 표시. */
+  private drawGarbageMeter(fieldX: number, fieldY: number, fieldH: number, cell: number, lines: number, cap: number): void {
+    const ctx = this.ctx;
+    const meterW = Math.max(4, Math.round(cell * 0.35));
+    const mx = fieldX - meterW - Math.max(2, Math.round(cell * 0.12));
+    const ratio = Math.min(1, lines / Math.max(1, cap));
+    const barH = Math.round(fieldH * ratio);
+
+    ctx.save();
+    // 배경
+    ctx.fillStyle = "rgba(255,0,0,0.12)";
+    ctx.fillRect(mx, fieldY, meterW, fieldH);
+    // 채움 — 아래에서 위로, 줄 수에 따라 주황→빨강
+    const red = Math.round(255);
+    const green = Math.round(100 * (1 - ratio));
+    ctx.fillStyle = `rgba(${red},${green},0,0.88)`;
+    ctx.fillRect(mx, fieldY + fieldH - barH, meterW, barH);
+    // 테두리
+    ctx.strokeStyle = `rgba(255,${green},0,0.55)`;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(mx, fieldY, meterW, fieldH);
+    // 숫자
+    if (lines > 0) {
+      const fs = Math.max(9, Math.floor(cell * 0.42));
+      ctx.font = `900 ${fs}px Pretendard, system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      ctx.fillStyle = "#fff";
+      ctx.shadowColor = "rgba(0,0,0,0.6)";
+      ctx.shadowBlur = 3;
+      const ty = fieldY + fieldH - barH - 3;
+      ctx.fillText(String(lines), mx + meterW / 2, Math.max(fieldY + fs + 2, ty));
+    }
     ctx.restore();
   }
 

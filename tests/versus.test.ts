@@ -85,13 +85,15 @@ describe("VersusMatch 공격 라우팅", () => {
   it("상대 보드 스냅샷이 미러에 반영된다", () => {
     const [a, b] = makePair();
     bothToPlaying(a, b);
-    // a가 보드에 블록을 두고 스냅샷이 b.remote로 전달되도록 여러 틱 진행
+    // a가 보드에 블록을 두고 스냅샷이 b.primaryRemote로 전달되도록 여러 틱 진행
     setupQuad(a, 4);
     // quad 직전 상태(채워진 보드)를 스냅샷으로 보내기 위해 클리어 없이 스냅샷 주기만큼 진행
     for (let i = 0; i < 4; i++) a.tick(1, CMD());
-    // b.remote 보드에 가비지가 보여야 함
+    // b.primaryRemote 보드에 가비지가 보여야 함
+    const remote = b.primaryRemote;
+    expect(remote).not.toBeNull();
     let filled = 0;
-    const grid = b.remote.board.grid;
+    const grid = remote!.board.grid;
     for (let i = 0; i < grid.length; i++) if (grid[i] !== 0) filled++;
     expect(filled).toBeGreaterThan(0);
   });

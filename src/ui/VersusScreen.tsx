@@ -1,20 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Text } from "@studio-baeks/funky-ui";
 import type { Settings } from "../app/store";
-import type { RuleSet } from "../engine/types";
+import type { RuleSet, KicksetName, SpinBonusName } from "../engine/types";
 import { NetClient } from "../net/client";
-import type { GameMessage } from "../net/protocol";
+import type { GameMessage, PlayerInfo } from "../net/protocol";
 import { Side } from "../net/protocol";
 import { VersusSession } from "../app/VersusSession";
 import type { MatchResult } from "../app/VersusMatch";
 import { FUNKY } from "../render/theme";
 
 // ============================================================================
-// VersusScreen — 커스텀 1대1 방.
-//  lobby:  방 만들기 / 코드로 입장
+// VersusScreen — Custom Room 대전 (1v1 ~ 다대일 FFA, 최대 8인).
+//  lobby:  방 만들기(인원 설정) / 코드로 입장
 //  room:   대기실 — 코드·로스터·설정(호스트 편집, 게스트 표시) + 대결 시작
-//  playing: 좌(나)/우(상대) 대전. 게임오버 → 결과 → 대기실로 복귀(재대결).
-// 연결은 대기실에 머무는 동안 유지되어, 같은 세팅으로 재대결할 수 있다.
+//  playing: 내 보드(크게) + 상대 보드들(그리드). 게임오버 → 라운드 집계 → 재대결.
 // ============================================================================
 
 type Phase = "lobby" | "room" | "playing";
@@ -24,6 +23,7 @@ interface RoomConfig {
   attackMul: [number, number];
   undo: boolean;
   sharePieces: boolean;
+  rounds: number;
 }
 
 interface PlayParams {
@@ -32,6 +32,13 @@ interface PlayParams {
   side: Side;
   myAttackMul: number;
   undo: boolean;
+  rounds: number;
+  opponents: PlayerInfo[];
+}
+
+interface RoundState {
+  myWins: number;
+  oppWins: number;
 }
 
 const rnd = () => (Math.random() * 0xffffffff) >>> 0;
@@ -44,41 +51,76 @@ function humanError(reason: string): string {
 
 const P1_COLOR = FUNKY.sky;
 const P2_COLOR = FUNKY.pink;
+// 상대 보드 컬러 팔레트(FFA에서 순환)
+const OPP_PALETTE = [FUNKY.pink, FUNKY.orange, FUNKY.green, FUNKY.purple, FUNKY.yellow, FUNKY.danger, FUNKY.sky];
+
+type Cfg = {
+  mulP1: number;
+  mulP2: number;
+  undo: boolean;
+  garbage: boolean;
+  sharePieces: boolean;
+  kickset: KicksetName;
+  spinBonus: SpinBonusName;
+  b2bMode: "surge" | "chaining" | "none";
+  garbageMultiplier: number;
+  garbageMessiness: number;
+  garbageCap: number;
+  rounds: number;
+};
+
+const DEFAULT_CFG: Cfg = {
+  mulP1: 1,
+  mulP2: 1,
+  undo: false,
+  garbage: true,
+  sharePieces: true,
+  kickset: "SRS+",
+  spinBonus: "all-mini+",
+  b2bMode: "surge",
+  garbageMultiplier: 1,
+  garbageMessiness: 0.4,
+  garbageCap: 20,
+  rounds: 3,
+};
 
 export function VersusScreen({ settings, onExit }: { settings: Settings; onExit: () => void }) {
   const [phase, setPhase] = useState<Phase>("lobby");
   const [isHost, setIsHost] = useState(true);
   const [code, setCode] = useState("");
   const [joinCode, setJoinCode] = useState("");
-  const [opponentPresent, setOpponentPresent] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<MatchResult>(null);
-  const [lastResult, setLastResult] = useState<MatchResult>(null);
+  const [roundState, setRoundState] = useState<RoundState>({ myWins: 0, oppWins: 0 });
+  const [maxPlayers, setMaxPlayers] = useState(2);
+  const [roster, setRoster] = useState<PlayerInfo[]>([]); // 나를 제외한 상대들
+  const [targetId, setTargetId] = useState<string | null>(null);
+
+  const roundStateRef = useRef<RoundState>({ myWins: 0, oppWins: 0 });
+  const activeRoundsRef = useRef(3);
+  const rosterRef = useRef<PlayerInfo[]>([]);
 
   const [serverUrl, setServerUrl] = useState(() => {
     const env = (import.meta as unknown as { env?: Record<string, string> }).env;
     return env?.VITE_FETRIS_WS_URL || "ws://localhost:8787";
   });
 
-  // 룸 설정(호스트 편집 / 게스트는 수신 표시)
-  const [mulP1, setMulP1] = useState(1);
-  const [mulP2, setMulP2] = useState(1);
-  const [undo, setUndo] = useState(false);
-  const [garbage, setGarbage] = useState(true);
-  const [sharePieces, setSharePieces] = useState(true);
+  const [cfg, setCfg] = useState<Cfg>(DEFAULT_CFG);
+
+  const matchKeyRef = useRef(0);
+  const [matchKey, setMatchKey] = useState(0);
 
   const netRef = useRef<NetClient | null>(null);
   const sessionRef = useRef<VersusSession | null>(null);
   const playParamsRef = useRef<PlayParams | null>(null);
-  const roomCfgRef = useRef<RoomConfig | null>(null); // 게스트: 마지막 수신 설정(start 시 사용)
+  const roomCfgRef = useRef<RoomConfig | null>(null);
   const localCanvasRef = useRef<HTMLCanvasElement>(null);
-  const remoteCanvasRef = useRef<HTMLCanvasElement>(null);
+  const oppCanvasRefs = useRef<Map<string, HTMLCanvasElement>>(new Map());
   const phaseRef = useRef<Phase>("lobby");
   useEffect(() => {
     phaseRef.current = phase;
   }, [phase]);
-  // 설정 source of truth(ref) — 콜백/타이머의 stale closure 방지. 화면 state는 표시용.
-  const cfgRef = useRef({ mulP1: 1, mulP2: 1, undo: false, garbage: true, sharePieces: true });
+  const cfgRef = useRef<Cfg>({ ...DEFAULT_CFG });
   const isHostRef = useRef(true);
 
   useEffect(() => {
@@ -88,39 +130,63 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     };
   }, []);
 
-  type Cfg = { mulP1: number; mulP2: number; undo: boolean; garbage: boolean; sharePieces: boolean };
-  const ruleFromCfg = (c: Cfg): RuleSet => ({ ...settings.rulesets.custom, garbageEnabled: c.garbage });
+  const setRosterBoth = (next: PlayerInfo[]) => {
+    rosterRef.current = next;
+    setRoster(next);
+  };
+
+  const ruleFromCfg = (c: Cfg): RuleSet => ({
+    ...settings.rulesets.custom,
+    garbageEnabled: c.garbage,
+    kickset: c.kickset,
+    spinBonus: c.spinBonus,
+    b2bMode: c.b2bMode,
+    garbageMultiplier: c.garbageMultiplier,
+    garbageMessiness: c.garbageMessiness,
+    garbageCap: c.garbageCap,
+  });
 
   const beginPlaying = (p: PlayParams) => {
+    matchKeyRef.current += 1;
     playParamsRef.current = p;
+    activeRoundsRef.current = p.rounds;
+    setTargetId(p.opponents[0]?.id ?? null);
     setResult(null);
+    setMatchKey(matchKeyRef.current);
     setPhase("playing");
   };
 
-  // 호스트: 현재 설정(ref)을 게스트에게 전송
   const sendSettings = (net: NetClient) => {
     const c = cfgRef.current;
-    net.sendGame({ t: "settings", rule: ruleFromCfg(c), attackMul: [c.mulP1, c.mulP2], undo: c.undo, sharePieces: c.sharePieces });
+    net.sendGame({
+      t: "settings",
+      rule: ruleFromCfg(c),
+      attackMul: [c.mulP1, c.mulP2],
+      undo: c.undo,
+      sharePieces: c.sharePieces,
+      rounds: c.rounds,
+    });
   };
 
-  // 호스트 설정 편집 — ref를 즉시 갱신하고(동기), 표시 state 갱신 + 게스트에 전송
   const applyEdit = (patch: Partial<Cfg>) => {
     const next = { ...cfgRef.current, ...patch };
     cfgRef.current = next;
-    if ("mulP1" in patch) setMulP1(next.mulP1);
-    if ("mulP2" in patch) setMulP2(next.mulP2);
-    if ("undo" in patch) setUndo(next.undo);
-    if ("garbage" in patch) setGarbage(next.garbage);
-    if ("sharePieces" in patch) setSharePieces(next.sharePieces);
+    setCfg({ ...next });
     const net = netRef.current;
     if (net && isHostRef.current && phaseRef.current === "room") sendSettings(net);
+  };
+
+  const resetRound = () => {
+    setRoundState({ myWins: 0, oppWins: 0 });
+    roundStateRef.current = { myWins: 0, oppWins: 0 };
   };
 
   const host = async () => {
     setError("");
     setIsHost(true);
     isHostRef.current = true;
-    setLastResult(null);
+    resetRound();
+    setRosterBoth([]);
     const net = new NetClient(serverUrl);
     netRef.current = net;
     net.onError = (r) => setError(humanError(r));
@@ -129,20 +195,19 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     };
     net.onCreated = (c) => {
       setCode(c);
-      setOpponentPresent(false);
+      setRosterBoth([]);
       setPhase("room");
     };
-    net.onPeerJoined = () => {
-      setOpponentPresent(true);
-      sendSettings(net); // 입장한 게스트에게 현재 설정 동기화
+    net.onPeerJoinedFull = (player) => {
+      setRosterBoth([...rosterRef.current.filter((p) => p.id !== player.id), player]);
+      sendSettings(net); // 입장자에게 현재 설정 동기화
     };
-    net.onPeerLeft = () => {
-      setOpponentPresent(false);
-      if (phaseRef.current === "playing") setResult("win");
+    net.onPeerLeftById = (playerId) => {
+      setRosterBoth(rosterRef.current.filter((p) => p.id !== playerId));
     };
     try {
       await net.connect();
-      net.createRoom();
+      net.createRoom(maxPlayers);
     } catch {
       setError("서버에 연결할 수 없습니다. 주소를 확인해주세요.");
     }
@@ -156,35 +221,59 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     }
     setIsHost(false);
     isHostRef.current = false;
-    setLastResult(null);
+    resetRound();
+    setRosterBoth([]);
     const net = new NetClient(serverUrl);
     netRef.current = net;
     net.onError = (r) => setError(humanError(r));
     net.onDisconnect = () => {
       if (phaseRef.current !== "playing") setError("서버 연결이 끊겼습니다.");
     };
+    net.onPlayerList = (players) => {
+      setRosterBoth(players); // 입장 시점의 기존 플레이어들(나 제외)
+    };
     net.onJoined = () => {
-      setOpponentPresent(true); // 호스트가 방에 있음
       setPhase("room");
     };
-    net.onPeerLeft = () => {
-      setOpponentPresent(false);
-      if (phaseRef.current === "playing") setResult("win");
-      else setError("상대가 방을 떠났어요.");
+    net.onPeerJoinedFull = (player) => {
+      setRosterBoth([...rosterRef.current.filter((p) => p.id !== player.id), player]);
+    };
+    net.onPeerLeftById = (playerId) => {
+      setRosterBoth(rosterRef.current.filter((p) => p.id !== playerId));
     };
     net.onGameMessage = (m: GameMessage) => {
       if (m.t === "settings") {
-        roomCfgRef.current = { rule: m.rule, attackMul: m.attackMul, undo: m.undo, sharePieces: m.sharePieces };
-        setMulP1(m.attackMul[0]);
-        setMulP2(m.attackMul[1]);
-        setGarbage(m.rule.garbageEnabled);
-        setUndo(m.undo);
-        setSharePieces(m.sharePieces);
+        const newCfg: Cfg = {
+          ...cfgRef.current,
+          mulP1: m.attackMul[0],
+          mulP2: m.attackMul[1],
+          undo: m.undo,
+          sharePieces: m.sharePieces,
+          rounds: m.rounds ?? 3,
+          garbage: m.rule.garbageEnabled,
+          kickset: m.rule.kickset,
+          spinBonus: m.rule.spinBonus,
+          b2bMode: m.rule.b2bMode,
+          garbageMultiplier: m.rule.garbageMultiplier,
+          garbageMessiness: m.rule.garbageMessiness,
+          garbageCap: m.rule.garbageCap ?? 20,
+        };
+        cfgRef.current = newCfg;
+        setCfg({ ...newCfg });
+        roomCfgRef.current = { rule: m.rule, attackMul: m.attackMul, undo: m.undo, sharePieces: m.sharePieces, rounds: m.rounds ?? 3 };
       } else if (m.t === "start") {
-        const cfg = roomCfgRef.current;
-        if (!cfg) return;
-        const seed = cfg.sharePieces ? m.seed : rnd();
-        beginPlaying({ rule: cfg.rule, seed, side: Side.P2, myAttackMul: cfg.attackMul[1], undo: cfg.undo });
+        const roomCfg = roomCfgRef.current;
+        if (!roomCfg) return;
+        const seed = roomCfg.sharePieces ? m.seed : rnd();
+        beginPlaying({
+          rule: roomCfg.rule,
+          seed,
+          side: Side.P2,
+          myAttackMul: roomCfg.attackMul[1],
+          undo: roomCfg.undo,
+          rounds: roomCfg.rounds,
+          opponents: [...rosterRef.current],
+        });
       }
     };
     try {
@@ -195,19 +284,31 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     }
   };
 
-  // 호스트: 대결 시작(매번 새 시드)
   const startMatch = () => {
     const net = netRef.current;
-    if (!net || !isHost || !opponentPresent) return;
+    if (!net || !isHost || rosterRef.current.length === 0) return;
     const c = cfgRef.current;
-    sendSettings(net); // 최신 설정 확정 전송
+    sendSettings(net);
     const seed = rnd();
     net.sendGame({ t: "start", seed });
-    beginPlaying({ rule: ruleFromCfg(c), seed, side: Side.P1, myAttackMul: c.mulP1, undo: c.undo });
+    beginPlaying({
+      rule: ruleFromCfg(c),
+      seed,
+      side: Side.P1,
+      myAttackMul: c.mulP1,
+      undo: c.undo,
+      rounds: c.rounds,
+      opponents: [...rosterRef.current],
+    });
   };
 
   const returnToRoom = () => {
-    setLastResult(result);
+    setResult(null);
+    setPhase("room");
+  };
+
+  const resetAndReturnToRoom = () => {
+    resetRound();
     setResult(null);
     setPhase("room");
   };
@@ -216,9 +317,9 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     netRef.current?.disconnect();
     netRef.current = null;
     setResult(null);
-    setLastResult(null);
+    resetRound();
+    setRosterBoth([]);
     setCode("");
-    setOpponentPresent(false);
     setPhase("lobby");
   };
 
@@ -228,12 +329,18 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     const p = playParamsRef.current;
     const net = netRef.current;
     const lc = localCanvasRef.current;
-    const rc = remoteCanvasRef.current;
-    if (!p || !net || !lc || !rc) return;
+    if (!p || !net || !lc) return;
+
+    // roster 상대들의 canvas를 모아 Map 구성
+    const remoteCanvases = new Map<string, HTMLCanvasElement>();
+    for (const opp of p.opponents) {
+      const cv = oppCanvasRefs.current.get(opp.id);
+      if (cv) remoteCanvases.set(opp.id, cv);
+    }
 
     const session = new VersusSession(
       lc,
-      rc,
+      remoteCanvases,
       {
         rule: p.rule,
         handling: settings.handling,
@@ -247,9 +354,21 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
         transport: net.transport(),
         undoEnabled: p.undo,
       },
-      { onResult: (r) => setResult(r) },
+      {
+        onResult: (r) => {
+          const next = {
+            myWins: roundStateRef.current.myWins + (r === "win" ? 1 : 0),
+            oppWins: roundStateRef.current.oppWins + (r === "lose" ? 1 : 0),
+          };
+          roundStateRef.current = next;
+          setRoundState({ ...next });
+          setResult(r);
+        },
+      },
     );
     sessionRef.current = session;
+    // 초기 타겟 설정
+    session.match.setTarget(p.opponents[0]?.id ?? null);
     session.start();
     if (import.meta.env.DEV) (window as unknown as { __fetrisVersus?: VersusSession }).__fetrisVersus = session;
 
@@ -257,7 +376,6 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     window.addEventListener("resize", onResize);
     const ro = new ResizeObserver(() => session.resize());
     if (lc.parentElement) ro.observe(lc.parentElement);
-    if (rc.parentElement) ro.observe(rc.parentElement);
 
     return () => {
       window.removeEventListener("resize", onResize);
@@ -266,28 +384,131 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
       sessionRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase]);
+  }, [phase, matchKey]);
 
-  const mySide = playParamsRef.current?.side ?? (isHost ? Side.P1 : Side.P2);
-  const myColor = mySide === Side.P1 ? P1_COLOR : P2_COLOR;
-  const oppColor = mySide === Side.P1 ? P2_COLOR : P1_COLOR;
+  // 타겟 변경 시 세션에 반영
+  useEffect(() => {
+    sessionRef.current?.match.setTarget(targetId);
+  }, [targetId]);
+
+  const myColor = isHost ? P1_COLOR : P2_COLOR;
+  const matchOpponents = playParamsRef.current?.opponents ?? [];
+  const isFFA = matchOpponents.length > 1;
+  const ft = activeRoundsRef.current;
+  const oppColorOf = (idx: number) => (isFFA ? OPP_PALETTE[idx % OPP_PALETTE.length] : isHost ? P2_COLOR : P1_COLOR);
+
+  const isMatchOver = result !== null && (roundState.myWins >= ft || roundState.oppWins >= ft);
+  const isMatchWin = isMatchOver && roundState.myWins >= ft;
+
+  // 상대 보드 패널 (타겟 클릭 가능) — 공용 렌더러
+  const renderOppPane = (opp: PlayerInfo, idx: number, style: React.CSSProperties, labelOverride?: string) => {
+    const c = oppColorOf(idx);
+    const isTargeted = targetId === opp.id;
+    return (
+      <div
+        key={opp.id}
+        onClick={() => setTargetId(opp.id)}
+        style={{
+          position: "relative",
+          cursor: "pointer",
+          border: isTargeted ? `3px solid ${FUNKY.danger}` : "3px solid transparent",
+          borderRadius: 8,
+          display: "flex",
+          boxSizing: "border-box",
+          ...style,
+        }}
+      >
+        <OppBoardPane
+          canvasRef={(el) => {
+            if (el) oppCanvasRefs.current.set(opp.id, el);
+            else oppCanvasRefs.current.delete(opp.id);
+          }}
+          label={labelOverride ?? `P${idx + 2}`}
+          color={c}
+        />
+        {isTargeted && (
+          <div style={{ position: "absolute", top: 4, right: 6, fontWeight: 900, fontSize: "0.7rem", color: FUNKY.danger, pointerEvents: "none", zIndex: 2 }}>
+            🎯 TARGET
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // ---- 대전 화면 ----
   if (phase === "playing") {
     return (
       <div className="fx-versus">
-        <div className="fx-versus-boards">
-          <BoardPane canvasRef={localCanvasRef} label={`YOU (${mySide === Side.P1 ? "P1" : "P2"})`} color={myColor} />
-          <BoardPane canvasRef={remoteCanvasRef} label={`OPP (${mySide === Side.P1 ? "P2" : "P1"})`} color={oppColor} />
-        </div>
+        {/* 라운드 스코어보드 (1v1만) */}
+        {!isFFA && (
+          <div style={{ position: "absolute", top: 8, left: 0, right: 0, display: "flex", justifyContent: "center", zIndex: 10, pointerEvents: "none" }}>
+            <RoundScoreboard myWins={roundState.myWins} oppWins={roundState.oppWins} ft={ft} myColor={myColor} oppColor={oppColorOf(0)} />
+          </div>
+        )}
+
+        {!isFFA ? (
+          // 2인: 나 | 상대 좌우 분할
+          <div style={{ display: "flex", width: "100%", height: "100%", gap: 8, padding: 8, boxSizing: "border-box" }}>
+            <div style={{ flex: "1 1 50%", display: "flex" }}>
+              <BoardPane canvasRef={localCanvasRef} label={`YOU (${isHost ? "P1" : "P2"})`} color={myColor} />
+            </div>
+            {matchOpponents[0] && renderOppPane(matchOpponents[0], 0, { flex: "1 1 50%" }, `OPP (${isHost ? "P2" : "P1"})`)}
+          </div>
+        ) : (
+          // 다대일(FFA): 나를 가운데 크게, 상대들은 오른쪽 위 구석부터 작게
+          <div style={{ position: "relative", width: "100%", height: "100%", boxSizing: "border-box" }}>
+            {/* 내 보드 — 화면 중앙 */}
+            <div style={{ position: "absolute", inset: 0, display: "flex", justifyContent: "center", alignItems: "center", padding: 12, boxSizing: "border-box" }}>
+              <div style={{ width: "44%", height: "94%", display: "flex" }}>
+                <BoardPane canvasRef={localCanvasRef} label={`YOU (${isHost ? "P1" : "P2"})`} color={myColor} />
+              </div>
+            </div>
+            {/* 상대 보드들 — 오른쪽 위 구석부터 작게 작게, 줄바꿈(아래로) */}
+            <div
+              style={{
+                position: "absolute",
+                top: 10,
+                right: 10,
+                width: "46%",
+                display: "flex",
+                flexWrap: "wrap",
+                justifyContent: "flex-end",
+                alignContent: "flex-start",
+                gap: 8,
+                zIndex: 5,
+              }}
+            >
+              {matchOpponents.map((opp, idx) =>
+                renderOppPane(opp, idx, { width: 150, height: 220, flex: "0 0 auto" }),
+              )}
+            </div>
+          </div>
+        )}
 
         {result && (
           <div className="fx-overlay">
             <div className="fx-panel">
-              <h2 style={{ color: result === "win" ? FUNKY.green : FUNKY.danger }}>{result === "win" ? "WIN!" : "LOSE"}</h2>
-              <Button variant="primary" size="lg" onClick={returnToRoom}>
-                대기실로
-              </Button>
+              {isMatchOver ? (
+                <>
+                  <h2 style={{ color: isMatchWin ? FUNKY.green : FUNKY.danger }}>{isMatchWin ? "MATCH WIN!" : "MATCH LOSE"}</h2>
+                  <div style={{ fontWeight: 800, opacity: 0.7, marginBottom: 8 }}>
+                    {roundState.myWins} — {roundState.oppWins}
+                  </div>
+                  <Button variant="primary" size="lg" onClick={resetAndReturnToRoom}>
+                    대기실로
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <h2 style={{ color: result === "win" ? FUNKY.green : FUNKY.danger }}>{result === "win" ? "ROUND WIN" : "ROUND LOSE"}</h2>
+                  <div style={{ fontWeight: 800, opacity: 0.7, marginBottom: 8 }}>
+                    {roundState.myWins} — {roundState.oppWins} / FT{ft}
+                  </div>
+                  <Button variant="primary" size="lg" onClick={returnToRoom}>
+                    대기실로
+                  </Button>
+                </>
+              )}
               <Button variant="neutral" size="md" onClick={leaveRoom}>
                 방 나가기
               </Button>
@@ -299,13 +520,14 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
   }
 
   // ---- 로비 / 대기실 ----
+  const totalPlayers = roster.length + 1;
   return (
     <div className="fx-menu">
       <div className="fx-logo" style={{ fontSize: "2.5rem" }}>
-        <span style={{ color: P1_COLOR }}>VERSUS</span> <span style={{ color: P2_COLOR }}>1 v 1</span>
+        <span style={{ color: P1_COLOR }}>CUSTOM</span> <span style={{ color: P2_COLOR }}>ROOM</span>
       </div>
       <Text variant="chrome" muted>
-        커스텀 룸 대전
+        커스텀 룸 대전 (최대 8인)
       </Text>
 
       {error && (
@@ -316,10 +538,16 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
 
       {phase === "lobby" && (
         <div className="fx-panel" style={{ gap: "1rem", minWidth: 360 }}>
-          <label style={fieldCol}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontWeight: 800, fontSize: "0.85rem" }}>
             <span>서버 주소</span>
             <input value={serverUrl} onChange={(e) => setServerUrl(e.target.value)} style={inputStyle} placeholder="ws://localhost:8787" />
           </label>
+          <SelectField
+            label="방 인원"
+            value={String(maxPlayers)}
+            options={[2, 3, 4, 5, 6, 7, 8].map((n) => ({ value: String(n), label: `${n}인` }))}
+            onChange={(v) => setMaxPlayers(Number(v))}
+          />
           <Button variant="primary" size="lg" onClick={host}>
             방 만들기
           </Button>
@@ -342,42 +570,106 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
       )}
 
       {phase === "room" && (
-        <div className="fx-panel" style={{ gap: "0.9rem", minWidth: 400 }}>
-          {/* 방 코드 */}
+        <div className="fx-panel" style={{ gap: "0.8rem", minWidth: 440, maxHeight: "90vh", overflowY: "auto" }}>
           <div style={{ textAlign: "center" }}>
-            <Text variant="chrome" muted>
-              방 코드
-            </Text>
+            <Text variant="chrome" muted>방 코드</Text>
             <div style={{ fontSize: "2.6rem", fontWeight: 900, letterSpacing: "0.3em", color: P1_COLOR }}>{code || joinCode}</div>
+            <Text variant="chrome" muted style={{ fontSize: "0.72rem" }}>{totalPlayers}명 접속 중</Text>
           </div>
 
           {/* 로스터 */}
-          <div style={{ display: "flex", gap: 8 }}>
-            <RosterChip label={isHost ? "P1 (나)" : "P1 (상대)"} color={P1_COLOR} present />
-            <RosterChip label={isHost ? "P2 (상대)" : "P2 (나)"} color={P2_COLOR} present={opponentPresent} />
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <RosterChip label={isHost ? "나 (호스트)" : "나"} color={myColor} present />
+            {roster.map((p, i) => (
+              <RosterChip key={p.id} label={p.isHost ? "호스트" : `P${i + 2}`} color={oppColorOf(i)} present />
+            ))}
           </div>
 
-          {lastResult && (
-            <div style={{ textAlign: "center", fontWeight: 900, color: lastResult === "win" ? FUNKY.green : FUNKY.danger }}>
-              지난 판: {lastResult === "win" ? "승리" : "패배"}
+          {(roundState.myWins > 0 || roundState.oppWins > 0) && (
+            <div style={{ textAlign: "center", fontWeight: 900, fontSize: "0.9rem" }}>
+              <span style={{ color: myColor }}>{roundState.myWins}</span>
+              <span style={{ opacity: 0.5 }}> — </span>
+              <span style={{ color: P2_COLOR }}>{roundState.oppWins}</span>
+              <span style={{ opacity: 0.5, fontSize: "0.75rem" }}> / FT{cfg.rounds}</span>
             </div>
           )}
 
-          {/* 설정 — 호스트 편집, 게스트 표시 */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", opacity: isHost ? 1 : 0.85 }}>
-            <NumField label="P1 공격 배수" value={mulP1} disabled={!isHost} onChange={(v) => applyEdit({ mulP1: v })} />
-            <NumField label="P2 공격 배수" value={mulP2} disabled={!isHost} onChange={(v) => applyEdit({ mulP2: v })} />
-            <ToggleField label="가비지(공격) 사용" value={garbage} disabled={!isHost} onChange={(v) => applyEdit({ garbage: v })} />
-            <ToggleField label="교육 모드 (Ctrl+Z 되돌리기)" value={undo} disabled={!isHost} onChange={(v) => applyEdit({ undo: v })} />
-            <ToggleField label="같은 조각 순서 공유" value={sharePieces} disabled={!isHost} onChange={(v) => applyEdit({ sharePieces: v })} />
+          {/* 설정 */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", opacity: isHost ? 1 : 0.8 }}>
+            <SectionLabel>매치 설정</SectionLabel>
+            <SelectField
+              label="라운드 (FT)"
+              value={String(cfg.rounds)}
+              disabled={!isHost}
+              options={[
+                { value: "1", label: "FT-1 (단판)" },
+                { value: "3", label: "FT-3" },
+                { value: "5", label: "FT-5" },
+                { value: "7", label: "FT-7" },
+              ]}
+              onChange={(v) => applyEdit({ rounds: Number(v) })}
+            />
+            <NumField label="호스트 공격 배수" value={cfg.mulP1} min={0} step={0.1} disabled={!isHost} onChange={(v) => applyEdit({ mulP1: v })} />
+            <NumField label="게스트 공격 배수" value={cfg.mulP2} min={0} step={0.1} disabled={!isHost} onChange={(v) => applyEdit({ mulP2: v })} />
+
+            <SectionLabel>가비지 설정</SectionLabel>
+            <ToggleField label="가비지(공격) 사용" value={cfg.garbage} disabled={!isHost} onChange={(v) => applyEdit({ garbage: v })} />
+            <NumField label="가비지 배수" value={cfg.garbageMultiplier} min={0} max={5} step={0.1} disabled={!isHost} onChange={(v) => applyEdit({ garbageMultiplier: v })} />
+            <NumField label="가비지 혼잡도" value={cfg.garbageMessiness} min={0} max={1} step={0.05} disabled={!isHost} onChange={(v) => applyEdit({ garbageMessiness: v })} />
+            <NumField label="가비지 캡 (줄)" value={cfg.garbageCap} min={1} max={40} step={1} disabled={!isHost} onChange={(v) => applyEdit({ garbageCap: Math.round(v) })} />
+
+            <SectionLabel>게임 규칙</SectionLabel>
+            <SelectField
+              label="킥 테이블"
+              value={cfg.kickset}
+              disabled={!isHost}
+              options={[
+                { value: "SRS+", label: "SRS+" },
+                { value: "SRS-X", label: "SRS-X" },
+                { value: "SRS", label: "SRS" },
+                { value: "none", label: "없음" },
+              ]}
+              onChange={(v) => applyEdit({ kickset: v as KicksetName })}
+            />
+            <SelectField
+              label="스핀 보너스"
+              value={cfg.spinBonus}
+              disabled={!isHost}
+              options={[
+                { value: "all-mini+", label: "올스핀 (all-mini+)" },
+                { value: "all-mini", label: "올스핀 (all-mini)" },
+                { value: "all", label: "올스핀 (all)" },
+                { value: "t-spins", label: "T-스핀만" },
+                { value: "none", label: "없음" },
+              ]}
+              onChange={(v) => applyEdit({ spinBonus: v as SpinBonusName })}
+            />
+            <SelectField
+              label="B2B 모드"
+              value={cfg.b2bMode}
+              disabled={!isHost}
+              options={[
+                { value: "surge", label: "Surge (시즌2)" },
+                { value: "chaining", label: "Chaining (시즌1)" },
+                { value: "none", label: "없음" },
+              ]}
+              onChange={(v) => applyEdit({ b2bMode: v as "surge" | "chaining" | "none" })}
+            />
+
+            <SectionLabel>기타</SectionLabel>
+            <ToggleField label="같은 조각 순서 공유" value={cfg.sharePieces} disabled={!isHost} onChange={(v) => applyEdit({ sharePieces: v })} />
+            <ToggleField label="교육 모드 (Ctrl+Z)" value={cfg.undo} disabled={!isHost} onChange={(v) => applyEdit({ undo: v })} />
           </div>
-          <Text variant="chrome" muted style={{ fontSize: "0.72rem" }}>
-            룰·킥테이블은 설정의 Custom 룰셋을 따릅니다. {isHost ? "" : "설정은 호스트가 조정합니다."}
-          </Text>
+
+          {!isHost && (
+            <Text variant="chrome" muted style={{ fontSize: "0.72rem" }}>
+              설정은 호스트가 조정합니다.
+            </Text>
+          )}
 
           {isHost ? (
-            <Button variant="primary" size="lg" onClick={startMatch} disabled={!opponentPresent}>
-              {opponentPresent ? "대결 시작" : "상대 대기 중…"}
+            <Button variant="primary" size="lg" onClick={startMatch} disabled={roster.length === 0}>
+              {roster.length > 0 ? "대결 시작" : "상대 대기 중…"}
             </Button>
           ) : (
             <Text variant="chrome" muted style={{ textAlign: "center" }}>
@@ -393,9 +685,49 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
   );
 }
 
+function RoundScoreboard({ myWins, oppWins, ft, myColor, oppColor }: {
+  myWins: number; oppWins: number; ft: number; myColor: string; oppColor: string;
+}) {
+  const dots = (wins: number, color: string) =>
+    Array.from({ length: ft }, (_, i) => (
+      <span
+        key={i}
+        style={{
+          display: "inline-block",
+          width: 12,
+          height: 12,
+          borderRadius: "50%",
+          background: i < wins ? color : "transparent",
+          border: `2px solid ${color}`,
+          margin: "0 2px",
+        }}
+      />
+    ));
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 16, background: "rgba(0,0,0,0.5)", padding: "4px 16px", borderRadius: 20, backdropFilter: "blur(4px)" }}>
+      <span>{dots(myWins, myColor)}</span>
+      <span style={{ fontWeight: 900, fontSize: "0.85rem", opacity: 0.7 }}>FT{ft}</span>
+      <span>{dots(oppWins, oppColor)}</span>
+    </div>
+  );
+}
+
 function BoardPane({ canvasRef, label, color }: { canvasRef: React.RefObject<HTMLCanvasElement>; label: string; color: string }) {
   return (
-    <div className="fx-versus-pane" style={{ borderColor: color }}>
+    <div className="fx-versus-pane" style={{ borderColor: color, flex: 1 }}>
+      <div className="fx-versus-label" style={{ color, borderColor: color }}>
+        {label}
+      </div>
+      <div className="fx-canvas-wrap">
+        <canvas ref={canvasRef} />
+      </div>
+    </div>
+  );
+}
+
+function OppBoardPane({ canvasRef, label, color }: { canvasRef: (el: HTMLCanvasElement | null) => void; label: string; color: string }) {
+  return (
+    <div className="fx-versus-pane" style={{ borderColor: color, flex: 1, minWidth: 0 }}>
       <div className="fx-versus-label" style={{ color, borderColor: color }}>
         {label}
       </div>
@@ -410,7 +742,8 @@ function RosterChip({ label, color, present }: { label: string; color: string; p
   return (
     <div
       style={{
-        flex: 1,
+        flex: "1 1 auto",
+        minWidth: 80,
         textAlign: "center",
         fontWeight: 900,
         padding: "0.5rem",
@@ -426,21 +759,37 @@ function RosterChip({ label, color, present }: { label: string; color: string; p
   );
 }
 
-const fieldCol: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontWeight: 800, fontSize: "0.85rem" };
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ fontWeight: 900, fontSize: "0.7rem", letterSpacing: "0.08em", opacity: 0.5, marginTop: 4, textTransform: "uppercase" }}>
+      {children}
+    </div>
+  );
+}
+
 const fieldRow: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: 800, fontSize: "0.85rem" };
 const inputStyle: React.CSSProperties = { padding: "0.6rem 0.8rem", border: "3px solid #000", borderRadius: 8, fontWeight: 800, fontSize: "1rem" };
 
-function NumField({ label, value, onChange, disabled }: { label: string; value: number; onChange: (n: number) => void; disabled?: boolean }) {
+function NumField({
+  label, value, onChange, disabled, min = 0, max, step = 0.1,
+}: {
+  label: string; value: number; onChange: (n: number) => void; disabled?: boolean; min?: number; max?: number; step?: number;
+}) {
   return (
     <label style={fieldRow}>
       <span>{label}</span>
       <input
         type="number"
-        min={0}
-        step={0.1}
+        min={min}
+        max={max}
+        step={step}
         value={value}
         disabled={disabled}
-        onChange={(e) => onChange(Math.max(0, Number(e.target.value) || 0))}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          const clamped = max !== undefined ? Math.min(max, Math.max(min, v)) : Math.max(min, v);
+          onChange(isNaN(clamped) ? min : clamped);
+        }}
         style={{ ...inputStyle, width: 90, textAlign: "right", opacity: disabled ? 0.6 : 1 }}
       />
     </label>
@@ -452,6 +801,32 @@ function ToggleField({ label, value, onChange, disabled }: { label: string; valu
     <label style={{ ...fieldRow, cursor: disabled ? "default" : "pointer" }}>
       <span>{label}</span>
       <input type="checkbox" checked={value} disabled={disabled} onChange={(e) => onChange(e.target.checked)} style={{ width: 22, height: 22 }} />
+    </label>
+  );
+}
+
+function SelectField({
+  label, value, options, onChange, disabled,
+}: {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label style={fieldRow}>
+      <span>{label}</span>
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ ...inputStyle, width: 160, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.6 : 1, appearance: "auto" }}
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
     </label>
   );
 }

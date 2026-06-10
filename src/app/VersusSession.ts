@@ -12,7 +12,7 @@ import { InputManager } from "../engine/input";
 import type { KeyMap } from "../engine/input";
 import { VersusMatch } from "./VersusMatch";
 import type { MatchResult } from "./VersusMatch";
-import type { Transport } from "../net/transport";
+import type { MultiTransport } from "../net/transport";
 import { Side } from "../net/protocol";
 import type { Handling, RuleSet } from "../engine/types";
 import { SpinType, Piece } from "../engine/types";
@@ -39,7 +39,7 @@ export interface VersusSessionOptions {
   seed: number;
   myAttackMul: number;
   side: Side;
-  transport: Transport;
+  transport: MultiTransport;
   /** 교육 모드: Ctrl+Z 되돌리기 허용 */
   undoEnabled: boolean;
 }
@@ -47,7 +47,10 @@ export interface VersusSessionOptions {
 export class VersusSession {
   readonly match: VersusMatch;
   private localRenderer: Renderer;
-  private remoteRenderer: Renderer;
+  /** playerId → Renderer. 대전 시작 시 roster의 모든 상대 canvas를 등록. */
+  private remoteRenderers = new Map<string, Renderer>();
+  /** playerId → canvas (아직 board 스냅샷이 안 온 상대도 등록해 둠) */
+  private remoteCanvases: Map<string, HTMLCanvasElement>;
   private particles = new ParticleSystem();
   private actionText = new ActionTextManager();
   private damage = new DamageNumberManager();
@@ -61,9 +64,15 @@ export class VersusSession {
   private lastB2b = 0;
   private spinThisPiece = false;
 
-  constructor(localCanvas: HTMLCanvasElement, remoteCanvas: HTMLCanvasElement, opts: VersusSessionOptions, cbs: VersusCallbacks = {}) {
+  constructor(
+    localCanvas: HTMLCanvasElement,
+    remoteCanvases: Map<string, HTMLCanvasElement>,
+    opts: VersusSessionOptions,
+    cbs: VersusCallbacks = {},
+  ) {
     this.cbs = cbs;
     this.gfx = opts.gfx;
+    this.remoteCanvases = new Map(remoteCanvases);
     this.match = new VersusMatch({
       rule: opts.rule,
       handling: opts.handling,
@@ -75,11 +84,18 @@ export class VersusSession {
     this.match.local.undoEnabled = opts.undoEnabled;
     this.match.onLocalEvents = (events) => this.drainEvents(events);
     this.match.onResult = (r) => this.cbs.onResult?.(r);
+    // 새 플레이어가 board 스냅샷을 보내면 해당 canvas에 렌더러 바인딩
+    this.match.onPlayerAdded = (playerId) => {
+      this.bindRemoteRenderer(playerId);
+    };
+    this.match.onPlayerRemoved = (playerId) => {
+      this.remoteRenderers.delete(playerId);
+    };
 
     this.localRenderer = new Renderer(localCanvas);
-    this.remoteRenderer = new Renderer(remoteCanvas);
     this.localRenderer.resize();
-    this.remoteRenderer.resize();
+    // 알려진 roster 상대 canvas를 미리 렌더러로 등록
+    for (const id of this.remoteCanvases.keys()) this.bindRemoteRenderer(id);
     this.particles.intensity = opts.gfx.particles;
     this.sound = new SoundEngine(opts.audio);
 
@@ -114,7 +130,23 @@ export class VersusSession {
 
   resize(): void {
     this.localRenderer.resize();
-    this.remoteRenderer.resize();
+    for (const r of this.remoteRenderers.values()) r.resize();
+  }
+
+  /** playerId에 등록된 canvas가 있으면 Renderer를 만들어 바인딩(중복 방지). */
+  private bindRemoteRenderer(playerId: string): void {
+    if (this.remoteRenderers.has(playerId)) return;
+    const canvas = this.remoteCanvases.get(playerId);
+    if (!canvas) return;
+    const renderer = new Renderer(canvas);
+    renderer.resize();
+    this.remoteRenderers.set(playerId, renderer);
+  }
+
+  /** N인 대전: 상대 canvas를 동적으로 등록(roster 변경 시). */
+  addRemoteCanvas(playerId: string, canvas: HTMLCanvasElement): void {
+    this.remoteCanvases.set(playerId, canvas);
+    this.bindRemoteRenderer(playerId);
   }
 
   setGfx(gfx: GfxOptions): void {
@@ -138,10 +170,13 @@ export class VersusSession {
     this.actionText.update(1 / 60);
     this.damage.update(1 / 60);
 
-    // 로컬: 풀 렌더(이펙트 포함)
-    this.localRenderer.render(localGame, alpha, this.gfx, this.particles, this.actionText, this.damage);
-    // 원격: 미러 단순 렌더(이펙트 없음 — 상대 화면 표시용)
-    this.remoteRenderer.render(this.match.remote, 0, this.gfx);
+    // 로컬: 풀 렌더(이펙트 + 가비지 게이지 포함)
+    this.localRenderer.render(localGame, alpha, this.gfx, this.particles, this.actionText, this.damage, undefined, localGame.pendingGarbage);
+    // 원격: 각 상대 미러 단순 렌더(이펙트 없음)
+    for (const [playerId, renderer] of this.remoteRenderers) {
+      const remoteGame = this.match.remotes.get(playerId);
+      if (remoteGame) renderer.render(remoteGame, 0, this.gfx);
+    }
 
     this.cbs.onFps?.(fps);
   }

@@ -1,89 +1,127 @@
 import { Game, EventType } from "../engine/game";
 import type { GameEvent, InputCommands } from "../engine/game";
 import type { Handling, RuleSet } from "../engine/types";
-import type { Transport } from "../net/transport";
+import type { MultiTransport } from "../net/transport";
 import { Side } from "../net/protocol";
 import type { GameMessage } from "../net/protocol";
 
 // ============================================================================
-// VersusMatch — 1대1 대전의 헤드리스 코어(렌더/입력 비의존).
+// VersusMatch — Custom Room 대전의 헤드리스 코어(렌더/입력 비의존).
 //  - local: 내가 조종하는 Game(시뮬 진행)
-//  - remote: 상대 화면을 그리기 위한 미러 Game(스냅샷만 적용, 시뮬 안 함)
-// 공격은 sender-authoritative: 내 Attack 이벤트 → 상대에게 송신, 수신 공격은
-// 내 local에 가비지로 적재. 보드 스냅샷은 주기적으로 송신해 상대 화면을 갱신.
-// UI(VersusSession)는 onLocalEvents로 이펙트/사운드를 처리한다.
+//  - remotes: 상대 플레이어들(playerId → Game). 스냅샷만 적용, 시뮬 안 함.
+// 공격은 sender-authoritative: 내 Attack 이벤트 → currentTarget에게 송신.
+// 수신 공격은 내 local에 가비지로 적재.
+// 보드 스냅샷은 주기적으로 모두에게 브로드캐스트해 상대 화면을 갱신.
 // ============================================================================
 
-/** 약 20Hz로 보드 스냅샷 송신(60Hz 기준 3프레임마다) */
 const SNAPSHOT_EVERY_FRAMES = 3;
 
 export interface VersusOptions {
   rule: RuleSet;
   handling: Handling;
   seed: number;
-  /** 내 쪽 공격 배수(플레이어별 핸디캡) */
   myAttackMul: number;
-  /** 내가 P1(좌)인지 P2(우)인지 — 렌더 컬러 구분용 */
   side: Side;
-  transport: Transport;
+  transport: MultiTransport;
 }
 
 export type MatchResult = "win" | "lose" | null;
 
 export class VersusMatch {
   readonly local: Game;
-  readonly remote: Game;
+  /** playerId → 상대 미러 Game */
+  readonly remotes = new Map<string, Game>();
+  /** 아직 Game이 없는 상대(스냅샷 수신 전)의 도착 순서 추적 */
+  private remoteOrder: string[] = [];
   readonly side: Side;
-  private transport: Transport;
+  private transport: MultiTransport;
   private snapAccum = 0;
   result: MatchResult = null;
-  /** 상대가 아직 접속해 있는지 */
-  peerConnected = true;
 
-  /** UI 이펙트/사운드용 — 매 tick에 로컬 이벤트를 넘긴다(클리어 전에 호출) */
+  /** 현재 공격 타겟 playerId. null이면 자동(첫 번째 살아있는 상대) */
+  private currentTarget: string | null = null;
+
   onLocalEvents?: (events: GameEvent[]) => void;
-  /** 상대 보드 스냅샷이 갱신될 때(리렌더 트리거용) */
-  onRemoteUpdate?: () => void;
-  /** 승패가 확정될 때 */
+  /** playerId별 보드 스냅샷 갱신 콜백 */
+  onRemoteUpdate?: (playerId: string) => void;
   onResult?: (result: MatchResult) => void;
+  /** 새 플레이어가 추가됐을 때(렌더러 등록용) */
+  onPlayerAdded?: (playerId: string) => void;
+  /** 플레이어가 이탈했을 때 */
+  onPlayerRemoved?: (playerId: string) => void;
 
   constructor(opts: VersusOptions) {
     this.side = opts.side;
     this.local = new Game(opts.rule, opts.handling, opts.seed);
     this.local.attackMultiplier = opts.myAttackMul;
-    // 상대 미러: 같은 룰로 만들되 시뮬은 돌리지 않고 deserialize로만 갱신
-    this.remote = new Game(opts.rule, opts.handling, opts.seed);
     this.transport = opts.transport;
-    this.transport.onMessage((m) => this.onMessage(m));
+    this.transport.onMessage((m, from) => this.onMessage(m, from));
     this.transport.onClose(() => {
-      this.peerConnected = false;
-      // 대전 중 상대 이탈 → 부전승
-      if (this.result === null) this.setResult("win");
+      // 2인 대전: 상대 이탈 → 부전승
+      if (this.remotes.size <= 1 && this.result === null) this.setResult("win");
+    });
+    this.transport.onPlayerLeft?.((playerId) => {
+      this.remotes.delete(playerId);
+      this.remoteOrder = this.remoteOrder.filter((id) => id !== playerId);
+      this.onPlayerRemoved?.(playerId);
+      this.checkWinCondition();
+    });
+    this.transport.onPlayerJoined?.((playerId, isHost) => {
+      if (!this.remotes.has(playerId)) {
+        const remote = new Game(opts.rule, opts.handling, opts.seed);
+        this.remotes.set(playerId, remote);
+        this.remoteOrder.push(playerId);
+        this.onPlayerAdded?.(playerId);
+        // 새 플레이어에게 내 보드 즉시 전송
+        this.transport.sendTo(playerId, { t: "board", snap: this.local.serialize() });
+      }
+      void isHost;
     });
   }
 
-  /** 한 시뮬 틱 진행 + 네트워크 동기화 */
+  get primaryRemoteId(): string | null {
+    return this.remoteOrder[0] ?? null;
+  }
+
+  get primaryRemote(): Game | null {
+    const id = this.primaryRemoteId;
+    return id ? (this.remotes.get(id) ?? null) : null;
+  }
+
+  setTarget(playerId: string | null): void {
+    this.currentTarget = playerId;
+  }
+
+  private resolveTarget(): string | null {
+    if (this.currentTarget && this.remotes.has(this.currentTarget)) return this.currentTarget;
+    return this.remoteOrder[0] ?? null;
+  }
+
   tick(dtFrames: number, cmd: InputCommands, now = 0): void {
     this.local.update(dtFrames, cmd, now);
 
-    // 로컬 이벤트 처리: 공격 포워드 → UI 이펙트 → 비우기
     const evs = this.local.events;
     for (let i = 0; i < evs.length; i++) {
       const e = evs[i];
       if (e.type === EventType.Attack && e.cells && e.cells.length > 0) {
-        this.transport.send({ t: "attack", holes: e.cells.slice() });
+        const targetId = this.resolveTarget();
+        const msg: GameMessage = { t: "attack", holes: e.cells.slice(), targetId: targetId ?? undefined };
+        if (targetId) {
+          this.transport.sendTo(targetId, msg);
+        } else {
+          // 상대가 없으면 브로드캐스트(2인 호환)
+          this.transport.send(msg);
+        }
       }
     }
     this.onLocalEvents?.(evs);
     this.local.events.length = 0;
 
-    // 게임오버 → 상대에게 통지(내가 졌음)
     if (this.local.isGameOver() && this.result === null) {
       this.transport.send({ t: "dead" });
       this.setResult("lose");
     }
 
-    // 주기적 보드 스냅샷 송신
     this.snapAccum += dtFrames;
     if (this.snapAccum >= SNAPSHOT_EVERY_FRAMES) {
       this.snapAccum = 0;
@@ -91,20 +129,46 @@ export class VersusMatch {
     }
   }
 
-  private onMessage(m: GameMessage): void {
+  private onMessage(m: GameMessage, from?: string): void {
     switch (m.t) {
-      case "attack":
-        this.local.receiveGarbage({ holes: m.holes });
+      case "attack": {
+        // 나를 타겟으로 하거나 targetId가 없는 공격만 수신
+        const myId = this.transport.myId;
+        if (!m.targetId || m.targetId === myId) {
+          this.local.receiveGarbage({ holes: m.holes });
+        }
         break;
-      case "board":
-        this.remote.deserialize(m.snap);
-        this.onRemoteUpdate?.();
+      }
+      case "board": {
+        const senderId = from;
+        if (!senderId) break;
+        // 새 발신자면 remote Game 등록
+        if (!this.remotes.has(senderId)) {
+          const remote = new Game(this.local.rule, this.local.handling.h, this.local.seed);
+          this.remotes.set(senderId, remote);
+          this.remoteOrder.push(senderId);
+          this.onPlayerAdded?.(senderId);
+        }
+        this.remotes.get(senderId)?.deserialize(m.snap);
+        this.onRemoteUpdate?.(senderId);
         break;
-      case "dead":
-        // 상대가 죽음 → 내 승리
-        if (this.result === null) this.setResult("win");
+      }
+      case "dead": {
+        // 발신자 제거
+        if (from) {
+          this.remotes.delete(from);
+          this.remoteOrder = this.remoteOrder.filter((id) => id !== from);
+          this.onPlayerRemoved?.(from);
+        }
+        this.checkWinCondition();
         break;
+      }
     }
+  }
+
+  private checkWinCondition(): void {
+    if (this.result !== null) return;
+    if (this.remotes.size === 0) this.setResult("win");
   }
 
   private setResult(r: MatchResult): void {

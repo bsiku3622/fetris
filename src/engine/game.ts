@@ -95,6 +95,7 @@ interface UndoSnap {
   scoring: { b2b: number; combo: number; surge: number };
   stats: Stats;
   garbageQueue: GarbageChunk[];
+  pendingGarbageDump: boolean;
 }
 
 const EMPTY_CMD: InputCommands = {
@@ -147,6 +148,7 @@ export class Game {
   attackMultiplier = 1; // 플레이어별 보낼 공격 배수(상쇄 이후 적용)
   private garbageQueue: GarbageChunk[] = []; // 받았지만 아직 투하 안 된 가비지
   private garbageGen: GarbageGen;
+  private pendingGarbageDump = false; // 클리어 후 잔여 가비지를 다음 스폰 직전에 투하
 
   constructor(rule: RuleSet, handling: Handling, seed: number) {
     this.rule = rule;
@@ -187,6 +189,7 @@ export class Game {
     this.handling.reset();
     this.undoStack.length = 0;
     this.garbageQueue.length = 0;
+    this.pendingGarbageDump = false;
     this.garbageGen.reset((this.seed ^ 0x9e3779b9) >>> 0);
     this.stats = this.freshStats();
     this.cur = Piece.None;
@@ -274,6 +277,7 @@ export class Game {
       scoring: this.scoring.snapshot(),
       stats: { ...this.stats },
       garbageQueue: this.garbageQueue.map((c) => ({ holes: c.holes.slice() })),
+      pendingGarbageDump: this.pendingGarbageDump,
     });
     if (this.undoStack.length > 300) this.undoStack.shift();
   }
@@ -294,6 +298,7 @@ export class Game {
     this.scoring.restoreFrom(s.scoring);
     this.stats = { ...s.stats };
     this.garbageQueue = s.garbageQueue.map((c) => ({ holes: c.holes.slice() }));
+    this.pendingGarbageDump = s.pendingGarbageDump;
     // 피스 진행 상태 초기화
     this.gravityAccum = 0;
     this.lockTimer = 0;
@@ -319,15 +324,18 @@ export class Game {
     return queuedLines(this.garbageQueue);
   }
 
-  /** 클리어 없는 락에서 호출 — 큐에 쌓인 가비지를 보드에 투하한다. */
+  /** 큐에 쌓인 가비지를 보드에 투하한다. garbageCap 초과분은 버린다. */
   private dumpGarbage(): void {
     if (this.garbageQueue.length === 0) return;
+    const cap = this.rule.garbageCap ?? 20;
     let dumped = 0;
     for (const chunk of this.garbageQueue) {
       for (const hole of chunk.holes) {
+        if (dumped >= cap) break;
         this.board.addGarbage(1, hole);
         dumped++;
       }
+      if (dumped >= cap) break;
     }
     this.garbageQueue.length = 0;
     if (dumped > 0) this.push(EventType.GarbageIn, { a: dumped });
@@ -369,6 +377,7 @@ export class Game {
     this.grounded = false;
     this.lastAction = LastAction.None;
     this.undoStack.length = 0;
+    this.pendingGarbageDump = false;
     this.phase = Phase.Playing; // 즉시 재개
   }
 
@@ -537,13 +546,15 @@ export class Game {
     if (result.combo > this.stats.maxCombo) this.stats.maxCombo = result.combo;
     if (isPC) this.stats.perfectClears++;
 
-    // 대전: 클리어 턴엔 들어온 가비지를 상쇄하고 남은 공격을 방출,
-    // 클리어 없는 락엔 쌓인 가비지를 보드에 투하한다.
+    // 대전: 클리어 턴엔 들어온 가비지를 상쇄하고 남은 공격을 방출.
+    // 상쇄 후 큐에 잔여가 있으면 LineClear ARE 종료 시 투하 예약(pendingGarbageDump).
+    // 클리어 없는 락엔 쌓인 가비지를 즉시 투하한다.
     if (this.rule.garbageEnabled) {
       if (cleared > 0) {
         const remaining = cancelGarbage(this.garbageQueue, result.attack);
         const out = Math.floor(remaining * this.attackMultiplier + 1e-9);
         if (out > 0) this.push(EventType.Attack, { a: out, cells: this.garbageGen.holes(out) });
+        if (this.garbageQueue.length > 0) this.pendingGarbageDump = true;
       } else {
         this.dumpGarbage();
       }
@@ -596,6 +607,10 @@ export class Game {
       case Phase.Are:
         this.phaseTimer -= dtFrames;
         if (this.phaseTimer <= 0) {
+          if (this.pendingGarbageDump) {
+            this.pendingGarbageDump = false;
+            this.dumpGarbage();
+          }
           this.phase = Phase.Playing;
           this.spawn();
         }

@@ -1,14 +1,15 @@
-import type { Transport } from "./transport";
+import type { MultiTransport } from "./transport";
 import type { ClientControl, ServerControl, GameMessage } from "./protocol";
+import type { PlayerInfo } from "./protocol";
 
 // ============================================================================
 // NetClient — 브라우저 WebSocket으로 릴레이 서버에 붙어 방 생성/입장을 처리하고,
-// VersusMatch가 쓸 Transport(게임 메시지 채널)를 제공한다.
+// VersusMatch가 쓸 MultiTransport(게임 메시지 채널)를 제공한다.
 //  - 제어 메시지(create/join/leave)는 콜백으로 노출.
 //  - 게임 메시지는 {t:"relay"}로 감싸 보내고, 수신 relay는 transport로 흘린다.
+//  - relay-to: 특정 플레이어(targetId)에게만 전송.
 // ============================================================================
 
-/** 빌드 환경변수에서 기본 서버 URL을 읽되, 없으면 로컬 개발 서버로 폴백 */
 function defaultUrl(): string {
   const env = (import.meta as unknown as { env?: Record<string, string> }).env;
   return env?.VITE_FETRIS_WS_URL || "ws://localhost:8787";
@@ -21,9 +22,13 @@ export class NetClient {
   private url: string;
   state: ConnState = "idle";
 
-  // 게임 메시지 채널(Transport용)
-  private msgCb: ((m: GameMessage) => void) | null = null;
+  myId: string | null = null;
+
+  // 게임 메시지 채널(MultiTransport용)
+  private msgCb: ((m: GameMessage, from?: string) => void) | null = null;
   private transportCloseCb: (() => void) | null = null;
+  private playerLeftCb: ((id: string) => void) | null = null;
+  private playerJoinedCb: ((id: string, isHost: boolean) => void) | null = null;
 
   // 제어 이벤트
   onCreated?: (code: string) => void;
@@ -32,6 +37,9 @@ export class NetClient {
   onPeerLeft?: () => void;
   onError?: (reason: string) => void;
   onDisconnect?: () => void;
+  onPlayerList?: (players: PlayerInfo[]) => void;
+  onPeerJoinedFull?: (player: PlayerInfo) => void;
+  onPeerLeftById?: (playerId: string) => void;
   /** 앱 레벨에서 게임 메시지를 엿보기(룰 핸드셰이크 등). transport보다 먼저 호출됨. */
   onGameMessage?: (m: GameMessage) => void;
 
@@ -39,7 +47,6 @@ export class NetClient {
     this.url = url || defaultUrl();
   }
 
-  /** 서버에 연결. open 되면 resolve. */
   connect(): Promise<void> {
     if (this.ws && this.state === "open") return Promise.resolve();
     this.state = "connecting";
@@ -71,24 +78,31 @@ export class NetClient {
     }
     switch (msg.t) {
       case "created":
+        this.myId = msg.myId;
         this.onCreated?.(msg.code);
         break;
       case "joined":
-        this.onJoined?.(msg.code, msg.asHost);
+        this.myId = msg.myId;
+        this.onPlayerList?.(msg.players);
+        this.onJoined?.(msg.code, false);
         break;
       case "peer-joined":
         this.onPeerJoined?.();
+        this.onPeerJoinedFull?.(msg.player);
+        this.playerJoinedCb?.(msg.player.id, msg.player.isHost);
         break;
       case "peer-left":
         this.transportCloseCb?.();
         this.onPeerLeft?.();
+        this.onPeerLeftById?.(msg.playerId);
+        this.playerLeftCb?.(msg.playerId);
         break;
       case "error":
         this.onError?.(msg.reason);
         break;
       case "relay":
         this.onGameMessage?.(msg.msg);
-        this.msgCb?.(msg.msg);
+        this.msgCb?.(msg.msg, msg.from);
         break;
     }
   }
@@ -97,12 +111,14 @@ export class NetClient {
     if (this.ws && this.state === "open") this.ws.send(JSON.stringify(msg));
   }
 
-  createRoom(): void {
-    this.sendControl({ t: "create" });
+  createRoom(maxPlayers = 4): void {
+    this.sendControl({ t: "create", maxPlayers });
   }
-  /** 게임 메시지를 상대에게 중계(룰 핸드셰이크 등 앱 레벨 송신용) */
   sendGame(msg: GameMessage): void {
     this.sendControl({ t: "relay", msg });
+  }
+  sendGameTo(targetId: string, msg: GameMessage): void {
+    this.sendControl({ t: "relay-to", targetId, msg });
   }
   joinRoom(code: string): void {
     this.sendControl({ t: "join", code: code.toUpperCase().trim() });
@@ -116,20 +132,32 @@ export class NetClient {
     this.ws = null;
   }
 
-  /** VersusMatch에 주입할 게임 메시지 Transport */
-  transport(): Transport {
+  /** VersusMatch에 주입할 MultiTransport */
+  transport(): MultiTransport {
+    const client = this;
     return {
-      send: (msg) => this.sendControl({ t: "relay", msg }),
+      get myId() {
+        return client.myId ?? "";
+      },
+      send: (msg) => client.sendControl({ t: "relay", msg }),
+      sendTo: (targetId, msg) => client.sendGameTo(targetId, msg),
       onMessage: (cb) => {
-        this.msgCb = cb;
+        client.msgCb = cb;
       },
       onClose: (cb) => {
-        this.transportCloseCb = cb;
+        client.transportCloseCb = cb;
       },
-      // 매치 종료 시 채널만 분리한다. 방(연결)은 재대결을 위해 유지.
+      onPlayerLeft: (cb) => {
+        client.playerLeftCb = cb;
+      },
+      onPlayerJoined: (cb) => {
+        client.playerJoinedCb = cb;
+      },
       close: () => {
-        this.msgCb = null;
-        this.transportCloseCb = null;
+        client.msgCb = null;
+        client.transportCloseCb = null;
+        client.playerLeftCb = null;
+        client.playerJoinedCb = null;
       },
     };
   }

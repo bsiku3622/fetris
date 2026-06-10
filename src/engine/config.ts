@@ -42,6 +42,7 @@ export const STANDARD_RULESET: RuleSet = {
   garbageMultiplier: 1,
   garbageEnabled: false, // 솔로 기본 비활성; 1대1 방에서만 켠다
   garbageMessiness: 0.4,
+  garbageCap: 20,
 };
 
 function clone(base: RuleSet, over: Partial<RuleSet>): RuleSet {
