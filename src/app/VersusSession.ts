@@ -63,6 +63,7 @@ export class VersusSession {
   private spikeValue = 0;
   private lastB2b = 0;
   private spinThisPiece = false;
+  private dangerBeepAccum = 0.6; // 위험 경고음 누적(진입 시 즉시 울리도록 초기값 충전)
 
   constructor(
     localCanvas: HTMLCanvasElement,
@@ -178,6 +179,19 @@ export class VersusSession {
       if (remoteGame) renderer.render(remoteGame, 0, this.gfx, undefined, undefined, undefined, undefined, remoteGame.pendingGarbage);
     }
 
+    // 위험 경고음 — 스택이 천장 근처면 주기적으로 삐
+    const b = localGame.board;
+    const inDanger = !localGame.isGameOver() && b.highestRow() < b.bufferRows + b.rows * 0.2;
+    if (inDanger) {
+      this.dangerBeepAccum += 1 / 60;
+      if (this.dangerBeepAccum >= 0.55) {
+        this.dangerBeepAccum = 0;
+        this.sound.dangerBeep();
+      }
+    } else {
+      this.dangerBeepAccum = 0.55; // 다음 진입 시 즉시 울림
+    }
+
     this.cbs.onFps?.(fps);
   }
 
@@ -278,8 +292,8 @@ export class VersusSession {
           break;
         }
         case EventType.GarbageIn: {
-          // 가비지가 바닥에서 솟음 — 묵직한 충격
-          this.sound.play("harddrop");
+          // 가비지가 바닥에서 솟음 — 줄 수만큼 "텅텅" + 묵직한 흔들림
+          this.sound.garbageRise(e.a ?? 0);
           this.shakeMag = Math.max(this.shakeMag, Math.min(1.4, 0.3 + (e.a ?? 0) * 0.15));
           break;
         }

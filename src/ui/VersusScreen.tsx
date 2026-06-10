@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Text } from "@studio-baeks/funky-ui";
 import type { Settings } from "../app/store";
-import type { RuleSet, KicksetName, SpinBonusName, GarbageHoleMode } from "../engine/types";
+import type { RuleSet, KicksetName, SpinBonusName, GarbageHoleMode, RandomizerName } from "../engine/types";
 import { NetClient } from "../net/client";
 import type { GameMessage, PlayerInfo } from "../net/protocol";
 import { Side, FALLBACK_PEER_ID } from "../net/protocol";
@@ -67,7 +67,14 @@ type Cfg = {
   garbageMessiness: number;
   garbageCap: number;
   garbageHoleMode: GarbageHoleMode;
+  garbageSpeed: number;
   perfectClearDamage: number;
+  gravity: number;
+  lockDelay: number;
+  are: number;
+  randomizer: RandomizerName;
+  nextCount: number;
+  allow180: boolean;
   rounds: number;
 };
 
@@ -84,7 +91,14 @@ const DEFAULT_CFG: Cfg = {
   garbageMessiness: 0.4,
   garbageCap: 8,
   garbageHoleMode: "clean",
+  garbageSpeed: 20,
   perfectClearDamage: 5,
+  gravity: 0.02,
+  lockDelay: 30,
+  are: 0,
+  randomizer: "7-bag",
+  nextCount: 5,
+  allow180: true,
   rounds: 3,
 };
 
@@ -157,7 +171,14 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     garbageMessiness: c.garbageMessiness,
     garbageCap: c.garbageCap,
     garbageHoleMode: c.garbageHoleMode,
+    garbageSpeed: c.garbageSpeed,
     perfectClearDamage: c.perfectClearDamage,
+    gravity: c.gravity,
+    lockDelay: c.lockDelay,
+    are: c.are,
+    randomizer: c.randomizer,
+    nextCount: c.nextCount,
+    allow180: c.allow180,
   });
 
   const beginPlaying = (p: PlayParams) => {
@@ -313,7 +334,14 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
           garbageMessiness: m.rule.garbageMessiness,
           garbageCap: m.rule.garbageCap ?? 8,
           garbageHoleMode: m.rule.garbageHoleMode ?? "clean",
+          garbageSpeed: m.rule.garbageSpeed ?? 20,
           perfectClearDamage: m.rule.perfectClearDamage ?? 5,
+          gravity: m.rule.gravity,
+          lockDelay: m.rule.lockDelay,
+          are: m.rule.are,
+          randomizer: m.rule.randomizer,
+          nextCount: m.rule.nextCount,
+          allow180: m.rule.allow180,
         };
         cfgRef.current = newCfg;
         setCfg({ ...newCfg });
@@ -682,6 +710,7 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
             <NumField label="가비지 배수" value={cfg.garbageMultiplier} min={0} max={5} step={0.1} disabled={!isHost} onChange={(v) => applyEdit({ garbageMultiplier: v })} />
             <NumField label="가비지 혼잡도" value={cfg.garbageMessiness} min={0} max={1} step={0.05} disabled={!isHost} onChange={(v) => applyEdit({ garbageMessiness: v })} />
             <NumField label="가비지 캡 (한 번에, 줄)" value={cfg.garbageCap} min={1} max={40} step={1} disabled={!isHost} onChange={(v) => applyEdit({ garbageCap: Math.round(v) })} />
+            <NumField label="가비지 속도 (프레임)" value={cfg.garbageSpeed} min={0} max={120} step={1} disabled={!isHost} onChange={(v) => applyEdit({ garbageSpeed: Math.round(v) })} />
             <SelectField
               label="방해줄 모양"
               value={cfg.garbageHoleMode}
@@ -731,6 +760,26 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
               ]}
               onChange={(v) => applyEdit({ b2bMode: v as "surge" | "chaining" | "none" })}
             />
+            <SelectField
+              label="조각 가방"
+              value={cfg.randomizer}
+              disabled={!isHost}
+              options={[
+                { value: "7-bag", label: "7-bag (표준)" },
+                { value: "14-bag", label: "14-bag" },
+                { value: "classic", label: "Classic (NES)" },
+                { value: "pairs", label: "Pairs" },
+                { value: "random", label: "Total Mayhem" },
+              ]}
+              onChange={(v) => applyEdit({ randomizer: v as RandomizerName })}
+            />
+            <NumField label="NEXT 개수" value={cfg.nextCount} min={1} max={7} step={1} disabled={!isHost} onChange={(v) => applyEdit({ nextCount: Math.round(v) })} />
+            <ToggleField label="180° 회전 허용" value={cfg.allow180} disabled={!isHost} onChange={(v) => applyEdit({ allow180: v })} />
+
+            <SectionLabel>타이밍</SectionLabel>
+            <NumField label="중력 (G)" value={cfg.gravity} min={0} max={20} step={0.01} disabled={!isHost} onChange={(v) => applyEdit({ gravity: v })} />
+            <NumField label="락 딜레이 (프레임)" value={cfg.lockDelay} min={0} max={120} step={1} disabled={!isHost} onChange={(v) => applyEdit({ lockDelay: Math.round(v) })} />
+            <NumField label="ARE / 스폰 딜레이 (프레임)" value={cfg.are} min={0} max={60} step={1} disabled={!isHost} onChange={(v) => applyEdit({ are: Math.round(v) })} />
 
             <SectionLabel>기타</SectionLabel>
             <ToggleField label="같은 조각 순서 공유" value={cfg.sharePieces} disabled={!isHost} onChange={(v) => applyEdit({ sharePieces: v })} />

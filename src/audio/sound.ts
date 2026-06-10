@@ -424,6 +424,26 @@ export class SoundEngine {
     }
   }
 
+  /** 방해줄 투하 — 줄 수만큼 "텅텅" 묵직한 thud(저역 사인 + 짧은 lowpass 노이즈). */
+  garbageRise(lines: number): void {
+    if (!this.opts.enabled || lines <= 0) return;
+    this.ensure();
+    const n = Math.min(lines, 8);
+    for (let i = 0; i < n; i++) {
+      const dl = i * 0.045;
+      this.tone(96, 0.11, "sine", 0.13, dl, 56);
+      this.fnoise(0.06, 0.06, "lowpass", 320, 0.8, 120, dl);
+    }
+  }
+
+  /** 필드 위험 경고 — 긴장된 2음 삐(높이 위험 진입/지속 시 주기 호출). */
+  dangerBeep(): void {
+    if (!this.opts.enabled) return;
+    this.ensure();
+    this.tone(990, 0.1, "square", 0.045, 0, 990, 0.004);
+    this.tone(740, 0.1, "square", 0.038, 0.11, 740, 0.004);
+  }
+
   resetCombo(): void {
     /* no-op */
   }

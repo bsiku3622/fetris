@@ -35,6 +35,15 @@ export class Board {
     return this.grid[y * this.cols + x];
   }
 
+  /** 점유된 최고 셀의 행(없으면 totalRows). 값이 작을수록 높이 쌓인 것. */
+  highestRow(): number {
+    const { cols, totalRows, grid } = this;
+    for (let y = 0; y < totalRows; y++) {
+      for (let x = 0; x < cols; x++) if (grid[y * cols + x]) return y;
+    }
+    return totalRows;
+  }
+
   /**
    * 주어진 형상이 (px,py) 위치에 놓일 때 충돌하는지.
    * 벽/바닥/기존 블록과 겹치면 true. 천장 위(y<0)는 통과 허용(스폰/회전 여유).

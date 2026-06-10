@@ -172,6 +172,27 @@ export class Renderer {
       this.drawActive(game, bx, by, cell, renderTop);
     }
 
+    // 위험 표시 — 스택이 천장 근처면 빨간 경고 비네트(필드 상단부터 짙게)
+    if (game.rule.topOutEnabled || game.rule.garbageEnabled) {
+      const topRow = game.board.highestRow();
+      const dangerSpan = rows * 0.35; // 상단 35% 진입 시 경고 시작
+      const dangerStart = game.board.bufferRows + dangerSpan;
+      if (topRow < dangerStart) {
+        const intensity = Math.min(1, (dangerStart - topRow) / dangerSpan);
+        const pulse = 0.55 + 0.45 * Math.sin(this.bgPhase * 6); // 맥동
+        const a = intensity * (0.18 + 0.16 * pulse);
+        const grad = ctx.createLinearGradient(0, fieldTop, 0, fieldTop + fieldH * 0.6);
+        grad.addColorStop(0, `rgba(255,30,30,${a})`);
+        grad.addColorStop(1, "rgba(255,30,30,0)");
+        ctx.fillStyle = grad;
+        ctx.fillRect(bx, fieldTop, boardW, fieldH * 0.6);
+        // 상단 테두리 강조
+        ctx.strokeStyle = `rgba(255,40,40,${intensity * (0.4 + 0.3 * pulse)})`;
+        ctx.lineWidth = 3;
+        ctx.strokeRect(bx + 1.5, fieldTop + 1.5, boardW - 3, fieldH - 3);
+      }
+    }
+
     // 라인클리어 플래시 (필드 영역)
     if (gfx.flashOnClear && this.flash > 0) {
       ctx.globalAlpha = this.flash * 0.6;
