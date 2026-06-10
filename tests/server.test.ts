@@ -106,9 +106,9 @@ describe("릴레이 서버", () => {
     guest.close();
   });
 
-  it("꽉 찬 방에는 입장 불가", async () => {
+  it("꽉 찬 방에는 입장 불가 (maxPlayers=2)", async () => {
     const host = await Client.connect();
-    host.send({ t: "create" });
+    host.send({ t: "create", maxPlayers: 2 });
     const code = (await host.next() as { code: string }).code;
     const g1 = await Client.connect();
     g1.send({ t: "join", code });
@@ -119,6 +119,48 @@ describe("릴레이 서버", () => {
     const m = await g2.next();
     expect(m.t).toBe("error");
     if (m.t === "error") expect(m.reason).toBe("room-full");
+    host.close();
+    g1.close();
+    g2.close();
+  });
+
+  it("N인 방: 정원에 따라 여러 명이 입장한다", async () => {
+    const host = await Client.connect();
+    host.send({ t: "create", maxPlayers: 4 });
+    const code = (await host.next() as { code: string }).code;
+    const g1 = await Client.connect();
+    g1.send({ t: "join", code });
+    expect((await g1.next()).t).toBe("joined");
+    await host.next(); // peer-joined
+    const g2 = await Client.connect();
+    g2.send({ t: "join", code });
+    expect((await g2.next()).t).toBe("joined"); // 3번째 입장도 OK
+    host.close();
+    g1.close();
+    g2.close();
+  });
+
+  it("relay는 발신자를 제외한 방 전체에 브로드캐스트된다", async () => {
+    const host = await Client.connect();
+    host.send({ t: "create", maxPlayers: 4 });
+    const code = (await host.next() as { code: string }).code;
+    const g1 = await Client.connect();
+    g1.send({ t: "join", code });
+    await g1.next();
+    await host.next(); // peer-joined
+    const g2 = await Client.connect();
+    g2.send({ t: "join", code });
+    await g2.next();
+    await host.next(); // peer-joined (g2)
+    await g1.next(); // peer-joined (g2) — g1도 받음
+
+    // 호스트가 relay → g1, g2 모두 수신
+    host.send({ t: "relay", msg: { t: "attack", holes: [5] } });
+    const r1 = await g1.next();
+    const r2 = await g2.next();
+    expect(r1.t).toBe("relay");
+    expect(r2.t).toBe("relay");
+    if (r1.t === "relay") expect(r1.msg).toEqual({ t: "attack", holes: [5] });
     host.close();
     g1.close();
     g2.close();
@@ -149,9 +191,9 @@ describe("릴레이 서버", () => {
     guest.close();
   });
 
-  it("한쪽이 끊기면 상대에게 peer-left가 가고 방이 정리된다", async () => {
+  it("한 명이 나가도 남은 사람이 있으면 방은 유지된다", async () => {
     const host = await Client.connect();
-    host.send({ t: "create" });
+    host.send({ t: "create", maxPlayers: 2 });
     const code = (await host.next() as { code: string }).code;
     const guest = await Client.connect();
     guest.send({ t: "join", code });
@@ -161,9 +203,22 @@ describe("릴레이 서버", () => {
     guest.close();
     const m = await host.next();
     expect(m.t).toBe("peer-left");
-    // 방 정리 확인(약간의 처리 지연 허용)
+    // 새 N인 모델: 호스트가 남아 있으므로 방은 유지 → 재입장 가능
     await new Promise((r) => setTimeout(r, 50));
-    expect(server.roomCount()).toBe(0);
+    const late = await Client.connect();
+    late.send({ t: "join", code });
+    const reJoin = await late.next();
+    expect(reJoin.t).toBe("joined");
+
+    // 모두 나가면 방 삭제
     host.close();
+    late.close();
+    await new Promise((r) => setTimeout(r, 50));
+    const orphan = await Client.connect();
+    orphan.send({ t: "join", code });
+    const m2 = await orphan.next();
+    expect(m2.t).toBe("error");
+    if (m2.t === "error") expect(m2.reason).toBe("room-not-found");
+    orphan.close();
   });
 });

@@ -1,26 +1,34 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer, type Server } from "node:http";
-import type { ClientControl, ServerControl } from "./protocol.js";
+import type { ClientControl, ServerControl, PlayerInfo } from "./protocol.js";
 
 // ============================================================================
-// Fetris 1대1 대전 릴레이 서버.
-//  - 방 코드 기반 매칭(매치메이킹 없음): 호스트가 방을 만들고 게스트가 코드로 입장.
-//  - sender-authoritative 릴레이: 게임 메시지는 내용 해석 없이 상대에게 그대로 전달.
-//  - 한 방은 최대 2명. 누구든 나가면 방은 정리되고 상대에게 peer-left 통지.
+// Fetris Custom Room 릴레이 서버 — N인 멀티플레이어 지원.
+//  - 방 코드 기반 매칭. 호스트가 방 생성, 참가자가 코드로 입장.
+//  - sender-authoritative 릴레이: 게임 메시지를 내용 해석 없이 중계.
+//  - relay: 발신자 제외 방 전체 브로드캐스트.
+//  - relay-to: 특정 플레이어(targetId)에게만 전달.
+//  - 플레이어가 나가면 방은 유지, 마지막 인원이 나가면 방 삭제.
+//  - 호스트 이탈 시 다음 플레이어가 호스트 승계.
 // ============================================================================
 
-interface Room {
-  code: string;
-  host: WebSocket;
-  guest: WebSocket | null;
+let _idCounter = 0;
+function genPlayerId(): string {
+  return `p${(++_idCounter).toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
-interface SockInfo {
-  code: string;
+interface Player {
+  ws: WebSocket;
+  id: string;
   isHost: boolean;
 }
 
-// 헷갈리는 문자(0/O/1/I) 제외한 방 코드 알파벳
+interface Room {
+  code: string;
+  players: Player[];
+  maxPlayers: number;
+}
+
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const CODE_LEN = 4;
 const HEARTBEAT_MS = 30_000;
@@ -33,21 +41,19 @@ function genCode(rooms: Map<string, Room>): string {
     }
     if (!rooms.has(code)) return code;
   }
-  // 극히 드문 충돌 폭주 — 길이를 늘려 회피
   return genCode(rooms) + CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
 }
 
 export interface RelayServer {
   http: Server;
   wss: WebSocketServer;
-  /** 현재 활성 방 수(모니터링/테스트용) */
   roomCount(): number;
   close(): Promise<void>;
 }
 
 export function startServer(port: number): RelayServer {
   const rooms = new Map<string, Room>();
-  const sockInfo = new Map<WebSocket, SockInfo>();
+  const sockToPlayer = new Map<WebSocket, { room: Room; player: Player }>();
   const alive = new WeakMap<WebSocket, boolean>();
 
   const http = createServer((req, res) => {
@@ -66,38 +72,47 @@ export function startServer(port: number): RelayServer {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   };
 
-  const peerOf = (ws: WebSocket): WebSocket | null => {
-    const info = sockInfo.get(ws);
-    if (!info) return null;
-    const room = rooms.get(info.code);
-    if (!room) return null;
-    return info.isHost ? room.guest : room.host;
+  const broadcast = (room: Room, msg: ServerControl, exclude?: WebSocket): void => {
+    for (const p of room.players) {
+      if (p.ws !== exclude) send(p.ws, msg);
+    }
   };
 
-  /** 소켓이 속한 방을 정리하고 남은 상대에게 통지. 1대1이라 한 명이라도 나가면 방 종료. */
-  const teardown = (ws: WebSocket): void => {
-    const info = sockInfo.get(ws);
-    if (!info) return;
-    const room = rooms.get(info.code);
-    sockInfo.delete(ws);
-    if (!room) return;
-    const peer = info.isHost ? room.guest : room.host;
-    if (peer && peer !== ws) {
-      send(peer, { t: "peer-left" });
-      sockInfo.delete(peer);
+  const playerInfoOf = (p: Player): PlayerInfo => ({ id: p.id, isHost: p.isHost });
+
+  const teardownPlayer = (ws: WebSocket): void => {
+    const entry = sockToPlayer.get(ws);
+    if (!entry) return;
+    sockToPlayer.delete(ws);
+    const { room, player } = entry;
+    room.players = room.players.filter((p) => p !== player);
+
+    if (room.players.length === 0) {
+      rooms.delete(room.code);
+      return;
     }
-    rooms.delete(info.code);
+
+    // 호스트가 나갔으면 첫 번째 남은 플레이어가 호스트 승계
+    if (player.isHost && room.players.length > 0) {
+      room.players[0].isHost = true;
+    }
+
+    broadcast(room, { t: "peer-left", playerId: player.id });
   };
 
   const handle = (ws: WebSocket, raw: ClientControl): void => {
     switch (raw.t) {
       case "create": {
-        // 이미 방에 속해 있으면 먼저 정리(중복 생성 방지)
-        if (sockInfo.has(ws)) teardown(ws);
+        // 기존 방에 있으면 먼저 나가기
+        if (sockToPlayer.has(ws)) teardownPlayer(ws);
         const code = genCode(rooms);
-        rooms.set(code, { code, host: ws, guest: null });
-        sockInfo.set(ws, { code, isHost: true });
-        send(ws, { t: "created", code });
+        const maxPlayers = Math.min(8, Math.max(2, (raw.maxPlayers ?? 4)));
+        const playerId = genPlayerId();
+        const player: Player = { ws, id: playerId, isHost: true };
+        const room: Room = { code, players: [player], maxPlayers };
+        rooms.set(code, room);
+        sockToPlayer.set(ws, { room, player });
+        send(ws, { t: "created", code, myId: playerId });
         break;
       }
       case "join": {
@@ -107,23 +122,35 @@ export function startServer(port: number): RelayServer {
           send(ws, { t: "error", reason: "room-not-found" });
           return;
         }
-        if (room.guest) {
+        if (room.players.length >= room.maxPlayers) {
           send(ws, { t: "error", reason: "room-full" });
           return;
         }
-        room.guest = ws;
-        sockInfo.set(ws, { code, isHost: false });
-        send(ws, { t: "joined", code, asHost: false });
-        send(room.host, { t: "peer-joined" });
+        if (sockToPlayer.has(ws)) teardownPlayer(ws);
+        const playerId = genPlayerId();
+        const player: Player = { ws, id: playerId, isHost: false };
+        room.players.push(player);
+        sockToPlayer.set(ws, { room, player });
+        const currentPlayers = room.players.filter((p) => p !== player).map(playerInfoOf);
+        send(ws, { t: "joined", code, myId: playerId, players: currentPlayers });
+        broadcast(room, { t: "peer-joined", player: playerInfoOf(player) }, ws);
         break;
       }
       case "relay": {
-        const peer = peerOf(ws);
-        if (peer) send(peer, { t: "relay", msg: raw.msg });
+        const entry = sockToPlayer.get(ws);
+        if (!entry) return;
+        broadcast(entry.room, { t: "relay", from: entry.player.id, msg: raw.msg }, ws);
+        break;
+      }
+      case "relay-to": {
+        const entry = sockToPlayer.get(ws);
+        if (!entry) return;
+        const target = entry.room.players.find((p) => p.id === raw.targetId);
+        if (target) send(target.ws, { t: "relay", from: entry.player.id, msg: raw.msg });
         break;
       }
       case "leave": {
-        teardown(ws);
+        teardownPlayer(ws);
         break;
       }
     }
@@ -137,15 +164,14 @@ export function startServer(port: number): RelayServer {
       try {
         msg = JSON.parse(data.toString()) as ClientControl;
       } catch {
-        return; // 잘못된 JSON은 무시
+        return;
       }
       if (msg && typeof msg.t === "string") handle(ws, msg);
     });
-    ws.on("close", () => teardown(ws));
-    ws.on("error", () => teardown(ws));
+    ws.on("close", () => teardownPlayer(ws));
+    ws.on("error", () => teardownPlayer(ws));
   });
 
-  // 죽은 연결 감지(끊긴 소켓이 방을 점유하는 것 방지)
   const heartbeat = setInterval(() => {
     for (const ws of wss.clients) {
       if (alive.get(ws) === false) {
