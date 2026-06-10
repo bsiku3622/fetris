@@ -12,6 +12,13 @@ export interface PlayerInfo {
   isHost: boolean;
 }
 
+/**
+ * 구버전 릴레이 서버 호환용 단일-상대 ID.
+ * 구버전 서버는 myId/player/players/from 필드를 보내지 않으므로, 1대1에서
+ * 상대를 식별할 수 없다. 그 경우 이 고정 ID로 단일 상대를 다룬다(N인은 새 서버 필요).
+ */
+export const FALLBACK_PEER_ID = "__peer__";
+
 /** 방 안에서 플레이어가 주고받는 게임 메시지(서버는 상대에게 그대로 중계) */
 export type GameMessage =
   /** 호스트→게스트: 대기실 룸 설정(룰·공격배수·옵션) 동기화. 입장 시·편집 시 전송. */

@@ -108,11 +108,14 @@ export interface RuleSet {
   garbageEnabled: boolean; // 받은 가비지 큐/상쇄/투하 활성(1대1 방에서만 true)
   garbageMessiness: number; // 0~1: 가비지 줄 구멍이 라인마다 바뀔 확률(0=일렬, 1=매줄 랜덤)
   garbageCap: number; // 한 번에 투하되는 최대 가비지 줄 수 (Tetr.io 기본 20)
+  garbageSpeed: number; // 받은 가비지가 보드에 올라오기까지의 대기 프레임(예고+상쇄 시간). 0이면 즉시
 }
 
 /** 가비지 한 묶음 — 한 번의 공격이 만든 줄들. holes[i]가 i번째 줄의 구멍 컬럼. */
 export interface GarbageChunk {
   holes: number[];
+  /** 보드에 올라오기까지 남은 대기 프레임(garbageSpeed에서 카운트다운). 0 이하면 투하 준비됨. */
+  delay?: number;
 }
 
 export type GameModeName = "sprint" | "blitz" | "zen" | "custom" | "marathon" | "fourwide" | "combo";

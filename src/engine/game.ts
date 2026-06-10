@@ -95,7 +95,6 @@ interface UndoSnap {
   scoring: { b2b: number; combo: number; surge: number };
   stats: Stats;
   garbageQueue: GarbageChunk[];
-  pendingGarbageDump: boolean;
 }
 
 const EMPTY_CMD: InputCommands = {
@@ -146,9 +145,8 @@ export class Game {
 
   // 대전(versus) — garbageEnabled일 때만 동작
   attackMultiplier = 1; // 플레이어별 보낼 공격 배수(상쇄 이후 적용)
-  private garbageQueue: GarbageChunk[] = []; // 받았지만 아직 투하 안 된 가비지
+  private garbageQueue: GarbageChunk[] = []; // 받았지만 아직 투하 안 된 가비지(각자 delay 보유)
   private garbageGen: GarbageGen;
-  private pendingGarbageDump = false; // 클리어 후 잔여 가비지를 다음 스폰 직전에 투하
 
   constructor(rule: RuleSet, handling: Handling, seed: number) {
     this.rule = rule;
@@ -189,7 +187,6 @@ export class Game {
     this.handling.reset();
     this.undoStack.length = 0;
     this.garbageQueue.length = 0;
-    this.pendingGarbageDump = false;
     this.garbageGen.reset((this.seed ^ 0x9e3779b9) >>> 0);
     this.stats = this.freshStats();
     this.cur = Piece.None;
@@ -276,8 +273,7 @@ export class Game {
       queue: this.queue.snapshot(),
       scoring: this.scoring.snapshot(),
       stats: { ...this.stats },
-      garbageQueue: this.garbageQueue.map((c) => ({ holes: c.holes.slice() })),
-      pendingGarbageDump: this.pendingGarbageDump,
+      garbageQueue: this.garbageQueue.map((c) => ({ holes: c.holes.slice(), delay: c.delay })),
     });
     if (this.undoStack.length > 300) this.undoStack.shift();
   }
@@ -297,8 +293,7 @@ export class Game {
     this.queue.restore(s.queue);
     this.scoring.restoreFrom(s.scoring);
     this.stats = { ...s.stats };
-    this.garbageQueue = s.garbageQueue.map((c) => ({ holes: c.holes.slice() }));
-    this.pendingGarbageDump = s.pendingGarbageDump;
+    this.garbageQueue = s.garbageQueue.map((c) => ({ holes: c.holes.slice(), delay: c.delay }));
     // 피스 진행 상태 초기화
     this.gravityAccum = 0;
     this.lockTimer = 0;
@@ -313,10 +308,10 @@ export class Game {
 
   // ---- 대전(versus) 가비지 -------------------------------------------------
 
-  /** 상대가 보낸 가비지를 받아 큐에 적재(다음 비-클리어 락에 투하). */
+  /** 상대가 보낸 가비지를 받아 큐에 적재. garbageSpeed 프레임 대기 후 투하 가능해진다. */
   receiveGarbage(chunk: GarbageChunk): void {
     if (!this.rule.garbageEnabled || chunk.holes.length === 0) return;
-    this.garbageQueue.push({ holes: chunk.holes.slice() });
+    this.garbageQueue.push({ holes: chunk.holes.slice(), delay: this.rule.garbageSpeed ?? 0 });
   }
 
   /** 현재 큐에 쌓여 투하 대기 중인 가비지 줄 수(메터/디버그용). */
@@ -324,21 +319,36 @@ export class Game {
     return queuedLines(this.garbageQueue);
   }
 
-  /** 큐에 쌓인 가비지를 보드에 투하한다. garbageCap 초과분은 버린다. */
-  private dumpGarbage(): void {
-    if (this.garbageQueue.length === 0) return;
+  /** 가비지 대기 타이머 진행 — 매 시뮬 틱 호출. delay를 dt만큼 줄인다. */
+  private tickGarbage(dtFrames: number): void {
+    for (let i = 0; i < this.garbageQueue.length; i++) {
+      const c = this.garbageQueue[i];
+      if (c.delay && c.delay > 0) c.delay -= dtFrames;
+    }
+  }
+
+  /** 대기가 끝난(delay<=0) 가비지를 보드에 투하한다. garbageCap 초과분은 버린다.
+   *  @returns 투하 후에도 아직 대기 중인 가비지가 남아있으면 true */
+  private dumpGarbage(): boolean {
+    if (this.garbageQueue.length === 0) return false;
     const cap = this.rule.garbageCap ?? 20;
     let dumped = 0;
+    const remaining: GarbageChunk[] = [];
     for (const chunk of this.garbageQueue) {
+      // 아직 대기 중이거나 cap을 넘긴 묶음은 남긴다
+      if ((chunk.delay ?? 0) > 0 || dumped >= cap) {
+        remaining.push(chunk);
+        continue;
+      }
       for (const hole of chunk.holes) {
         if (dumped >= cap) break;
         this.board.addGarbage(1, hole);
         dumped++;
       }
-      if (dumped >= cap) break;
     }
-    this.garbageQueue.length = 0;
+    this.garbageQueue = remaining;
     if (dumped > 0) this.push(EventType.GarbageIn, { a: dumped });
+    return this.garbageQueue.length > 0;
   }
 
   /** 전체 상태 직렬화 (Zen 이어하기 등). 보드+현재피스+큐+홀드+B2B+통계 */
@@ -377,7 +387,6 @@ export class Game {
     this.grounded = false;
     this.lastAction = LastAction.None;
     this.undoStack.length = 0;
-    this.pendingGarbageDump = false;
     this.phase = Phase.Playing; // 즉시 재개
   }
 
@@ -546,15 +555,13 @@ export class Game {
     if (result.combo > this.stats.maxCombo) this.stats.maxCombo = result.combo;
     if (isPC) this.stats.perfectClears++;
 
-    // 대전: 클리어 턴엔 들어온 가비지를 상쇄하고 남은 공격을 방출.
-    // 상쇄 후 큐에 잔여가 있으면 LineClear ARE 종료 시 투하 예약(pendingGarbageDump).
-    // 클리어 없는 락엔 쌓인 가비지를 즉시 투하한다.
+    // 대전: 클리어 턴엔 들어온 가비지를 상쇄하고 남은 공격을 방출(투하는 안 함).
+    // 클리어 없는 락에서만 대기가 끝난(garbage speed 경과) 가비지를 보드에 투하한다.
     if (this.rule.garbageEnabled) {
       if (cleared > 0) {
         const remaining = cancelGarbage(this.garbageQueue, result.attack);
         const out = Math.floor(remaining * this.attackMultiplier + 1e-9);
         if (out > 0) this.push(EventType.Attack, { a: out, cells: this.garbageGen.holes(out) });
-        if (this.garbageQueue.length > 0) this.pendingGarbageDump = true;
       } else {
         this.dumpGarbage();
       }
@@ -592,6 +599,8 @@ export class Game {
     // 실제 플레이 중에만 프레임 카운트 (Ready/GameOver/Paused 제외 → 타이머 정확)
     if (this.phase === Phase.Playing || this.phase === Phase.LineClear || this.phase === Phase.Are) {
       this.stats.frame += dtFrames;
+      // 받은 가비지 대기 타이머 진행(garbage speed) — 게이지 표시·상쇄 윈도우
+      if (this.rule.garbageEnabled) this.tickGarbage(dtFrames);
     }
 
     switch (this.phase) {
@@ -607,10 +616,6 @@ export class Game {
       case Phase.Are:
         this.phaseTimer -= dtFrames;
         if (this.phaseTimer <= 0) {
-          if (this.pendingGarbageDump) {
-            this.pendingGarbageDump = false;
-            this.dumpGarbage();
-          }
           this.phase = Phase.Playing;
           this.spawn();
         }

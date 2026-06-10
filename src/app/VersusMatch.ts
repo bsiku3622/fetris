@@ -2,7 +2,7 @@ import { Game, EventType } from "../engine/game";
 import type { GameEvent, InputCommands } from "../engine/game";
 import type { Handling, RuleSet } from "../engine/types";
 import type { MultiTransport } from "../net/transport";
-import { Side } from "../net/protocol";
+import { Side, FALLBACK_PEER_ID } from "../net/protocol";
 import type { GameMessage } from "../net/protocol";
 
 // ============================================================================
@@ -106,10 +106,10 @@ export class VersusMatch {
       if (e.type === EventType.Attack && e.cells && e.cells.length > 0) {
         const targetId = this.resolveTarget();
         const msg: GameMessage = { t: "attack", holes: e.cells.slice(), targetId: targetId ?? undefined };
-        if (targetId) {
+        // 새 서버(myId 있음)에선 타겟 지정 전송, 구버전 서버(myId 없음)에선 브로드캐스트
+        if (targetId && this.transport.myId) {
           this.transport.sendTo(targetId, msg);
         } else {
-          // 상대가 없으면 브로드캐스트(2인 호환)
           this.transport.send(msg);
         }
       }
@@ -132,16 +132,16 @@ export class VersusMatch {
   private onMessage(m: GameMessage, from?: string): void {
     switch (m.t) {
       case "attack": {
-        // 나를 타겟으로 하거나 targetId가 없는 공격만 수신
+        // 나를 타겟으로 하거나, targetId가 없거나, 내 id를 모르는(구버전) 경우 수신
         const myId = this.transport.myId;
-        if (!m.targetId || m.targetId === myId) {
+        if (!m.targetId || !myId || m.targetId === myId) {
           this.local.receiveGarbage({ holes: m.holes });
         }
         break;
       }
       case "board": {
-        const senderId = from;
-        if (!senderId) break;
+        // 구버전 서버는 from을 안 보냄 → 단일 상대(FALLBACK_PEER_ID)로 취급
+        const senderId = from ?? FALLBACK_PEER_ID;
         // 새 발신자면 remote Game 등록
         if (!this.remotes.has(senderId)) {
           const remote = new Game(this.local.rule, this.local.handling.h, this.local.seed);
@@ -154,11 +154,12 @@ export class VersusMatch {
         break;
       }
       case "dead": {
-        // 발신자 제거
-        if (from) {
-          this.remotes.delete(from);
-          this.remoteOrder = this.remoteOrder.filter((id) => id !== from);
-          this.onPlayerRemoved?.(from);
+        // 발신자 제거(구버전은 from 없음 → 첫 상대 제거)
+        const deadId = from ?? this.remoteOrder[0];
+        if (deadId) {
+          this.remotes.delete(deadId);
+          this.remoteOrder = this.remoteOrder.filter((id) => id !== deadId);
+          this.onPlayerRemoved?.(deadId);
         }
         this.checkWinCondition();
         break;

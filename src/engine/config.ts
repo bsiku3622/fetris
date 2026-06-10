@@ -43,6 +43,7 @@ export const STANDARD_RULESET: RuleSet = {
   garbageEnabled: false, // 솔로 기본 비활성; 1대1 방에서만 켠다
   garbageMessiness: 0.4,
   garbageCap: 20,
+  garbageSpeed: 20, // 받은 가비지가 올라오기까지 ~0.33s(20프레임). 그 사이 상쇄 가능
 };
 
 function clone(base: RuleSet, over: Partial<RuleSet>): RuleSet {

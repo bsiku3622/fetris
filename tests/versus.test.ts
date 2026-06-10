@@ -82,6 +82,20 @@ describe("VersusMatch 공격 라우팅", () => {
     expect(b.local.pendingGarbage).toBeLessThan(5);
   });
 
+  it("garbage speed 윈도우 안에서 들어온 가비지를 클리어로 상쇄한다", () => {
+    const [a, b] = makePair();
+    bothToPlaying(a, b);
+    // b에게 2줄 가비지 적재 — garbage speed 동안 대기(아직 투하 안 됨)
+    b.local.receiveGarbage({ holes: [0, 0] });
+    expect(b.local.pendingGarbage).toBe(2);
+    b.tick(1, CMD()); // delay 진행(여전히 윈도우 안)
+    // b가 quad(공격 ≥4)로 클리어 → 2줄 완전 상쇄
+    setupQuad(b, 4);
+    b.tick(1, CMD({ hardDrop: true }));
+    expect(b.local.pendingGarbage).toBe(0); // 상쇄되어 투하될 가비지가 없음
+    void a;
+  });
+
   it("상대 보드 스냅샷이 미러에 반영된다", () => {
     const [a, b] = makePair();
     bothToPlaying(a, b);

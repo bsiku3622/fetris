@@ -4,7 +4,7 @@ import type { Settings } from "../app/store";
 import type { RuleSet, KicksetName, SpinBonusName } from "../engine/types";
 import { NetClient } from "../net/client";
 import type { GameMessage, PlayerInfo } from "../net/protocol";
-import { Side } from "../net/protocol";
+import { Side, FALLBACK_PEER_ID } from "../net/protocol";
 import { VersusSession } from "../app/VersusSession";
 import type { MatchResult } from "../app/VersusMatch";
 import { FUNKY } from "../render/theme";
@@ -109,6 +109,7 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
 
   const matchKeyRef = useRef(0);
   const [matchKey, setMatchKey] = useState(0);
+  const nextRoundTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const netRef = useRef<NetClient | null>(null);
   const sessionRef = useRef<VersusSession | null>(null);
@@ -127,6 +128,7 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     return () => {
       netRef.current?.disconnect();
       netRef.current = null;
+      if (nextRoundTimerRef.current) clearTimeout(nextRoundTimerRef.current);
     };
   }, []);
 
@@ -149,6 +151,10 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
   });
 
   const beginPlaying = (p: PlayParams) => {
+    if (nextRoundTimerRef.current) {
+      clearTimeout(nextRoundTimerRef.current);
+      nextRoundTimerRef.current = null;
+    }
     matchKeyRef.current += 1;
     playParamsRef.current = p;
     activeRoundsRef.current = p.rounds;
@@ -156,6 +162,16 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     setResult(null);
     setMatchKey(matchKeyRef.current);
     setPhase("playing");
+  };
+
+  // 호스트: 다음 라운드를 새 시드로 시작(라운드 스코어 유지). 게스트는 start 메시지로 자동 전환.
+  const startNextRound = () => {
+    const net = netRef.current;
+    if (!net || !isHostRef.current) return;
+    const c = cfgRef.current;
+    const seed = rnd();
+    net.sendGame({ t: "start", seed });
+    beginPlaying({ rule: ruleFromCfg(c), seed, side: Side.P1, myAttackMul: c.mulP1, undo: c.undo, rounds: c.rounds, opponents: [...rosterRef.current] });
   };
 
   const sendSettings = (net: NetClient) => {
@@ -201,8 +217,9 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
       setPhase("room");
     };
     net.onPeerJoinedFull = (player) => {
-      if (!player || typeof player.id !== "string") return;
-      setRosterBoth([...rosterRef.current.filter((p) => p.id !== player.id), player]);
+      // 구버전 서버는 player를 안 보냄 → placeholder로 단일 상대 인식(1대1만 가능)
+      const p: PlayerInfo = player && typeof player.id === "string" ? player : { id: FALLBACK_PEER_ID, isHost: false };
+      setRosterBoth([...rosterRef.current.filter((x) => x.id !== p.id), p]);
       sendSettings(net); // 입장자에게 현재 설정 동기화
     };
     net.onPeerLeftById = (playerId) => {
@@ -236,6 +253,8 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
       setRosterBoth(players); // 입장 시점의 기존 플레이어들(나 제외)
     };
     net.onJoined = () => {
+      // 구버전 서버는 players를 안 보냄 → 호스트 placeholder로 단일 상대 인식
+      if (rosterRef.current.length === 0) setRosterBoth([{ id: FALLBACK_PEER_ID, isHost: true }]);
       setPhase("room");
     };
     net.onPeerJoinedFull = (player) => {
@@ -306,11 +325,6 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     });
   };
 
-  const returnToRoom = () => {
-    setResult(null);
-    setPhase("room");
-  };
-
   const resetAndReturnToRoom = () => {
     resetRound();
     setResult(null);
@@ -320,6 +334,10 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
   const leaveRoom = () => {
     netRef.current?.disconnect();
     netRef.current = null;
+    if (nextRoundTimerRef.current) {
+      clearTimeout(nextRoundTimerRef.current);
+      nextRoundTimerRef.current = null;
+    }
     setResult(null);
     resetRound();
     setRosterBoth([]);
@@ -367,6 +385,12 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
           roundStateRef.current = next;
           setRoundState({ ...next });
           setResult(r);
+          // FT 미달이면 호스트가 잠시 후 다음 라운드를 자동 시작(게스트는 start 메시지로 따라감)
+          const ftN = activeRoundsRef.current;
+          const matchOver = next.myWins >= ftN || next.oppWins >= ftN;
+          if (!matchOver && isHostRef.current) {
+            nextRoundTimerRef.current = setTimeout(() => startNextRound(), 2500);
+          }
         },
       },
     );
@@ -451,8 +475,8 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
         )}
 
         {!isFFA ? (
-          // 2인: 나 | 상대 좌우 분할
-          <div style={{ display: "flex", width: "100%", height: "100%", gap: 8, padding: 8, boxSizing: "border-box" }}>
+          // 2인: 나 | 상대 좌우 분할. 상단 스코어보드와 안 겹치게 보드를 아래로.
+          <div style={{ display: "flex", width: "100%", height: "100%", gap: 8, padding: 8, paddingTop: 48, boxSizing: "border-box" }}>
             <div style={{ flex: "1 1 50%", display: "flex" }}>
               <BoardPane canvasRef={localCanvasRef} label={`YOU (${isHost ? "P1" : "P2"})`} color={myColor} />
             </div>
@@ -508,9 +532,9 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
                   <div style={{ fontWeight: 800, opacity: 0.7, marginBottom: 8 }}>
                     {roundState.myWins} — {roundState.oppWins} / FT{ft}
                   </div>
-                  <Button variant="primary" size="lg" onClick={returnToRoom}>
-                    대기실로
-                  </Button>
+                  <div style={{ fontWeight: 800, opacity: 0.6, marginBottom: 8 }}>
+                    {isHost ? "다음 라운드 시작 중…" : "호스트가 다음 라운드를 시작합니다…"}
+                  </div>
                 </>
               )}
               <Button variant="neutral" size="md" onClick={leaveRoom}>

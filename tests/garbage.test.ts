@@ -67,7 +67,7 @@ function toPlaying(game: Game): void {
 describe("Game 가비지 통합", () => {
   const rule = { ...STANDARD_RULESET, garbageEnabled: true, garbageMessiness: 0 };
 
-  it("받은 가비지는 클리어 없는 락에서 보드 바닥에 투하된다", () => {
+  it("받은 가비지는 garbage speed 경과 후 클리어 없는 락에서 투하된다", () => {
     const game = new Game(rule, DEFAULT_HANDLING, 12345);
     toPlaying(game);
     expect(game.cur).not.toBe(Piece.None);
@@ -75,7 +75,9 @@ describe("Game 가비지 통합", () => {
     game.receiveGarbage({ holes: [3, 3] }); // 2줄, 구멍 col 3
     expect(game.pendingGarbage).toBe(2);
 
-    game.update(1, CMD({ hardDrop: true })); // 단일 피스 → 클리어 0 → 투하
+    // garbage speed(대기) 만큼 타이머 진행 → 투하 준비
+    for (let i = 0; i < (rule.garbageSpeed ?? 20) + 1; i++) game.update(1, CMD());
+    game.update(1, CMD({ hardDrop: true })); // 비클리어 락 → 준비된 가비지 투하
 
     const b = game.board;
     const bottom = b.totalRows - 1;
@@ -86,6 +88,26 @@ describe("Game 가비지 통합", () => {
       }
     }
     expect(game.pendingGarbage).toBe(0);
+  });
+
+  it("garbage speed 동안은 투하되지 않고 큐에 남아 상쇄할 시간이 생긴다", () => {
+    const game = new Game(rule, DEFAULT_HANDLING, 12345);
+    toPlaying(game);
+    game.receiveGarbage({ holes: [3, 3] });
+    expect(game.pendingGarbage).toBe(2);
+
+    // 대기가 끝나기 전 비클리어 락 → delay가 남아 투하되지 않음
+    game.update(1, CMD({ hardDrop: true }));
+    expect(game.pendingGarbage).toBe(2); // 여전히 큐에 대기 중
+    // 바닥 줄에 가비지가 올라오지 않았는지 확인
+    const b = game.board;
+    let garbageRows = 0;
+    for (let y = 0; y < b.totalRows; y++) {
+      let isGarbageRow = false;
+      for (let x = 0; x < b.cols; x++) if (b.cell(x, y) === Piece.Garbage) isGarbageRow = true;
+      if (isGarbageRow) garbageRows++;
+    }
+    expect(garbageRows).toBe(0);
   });
 
   it("garbageEnabled=false면 receiveGarbage 무시(솔로 안전)", () => {
