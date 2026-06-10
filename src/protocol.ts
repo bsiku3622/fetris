@@ -10,12 +10,13 @@ export type GameMessage = { t: string; [k: string]: unknown };
 export interface PlayerInfo {
   id: string;
   isHost: boolean;
+  nick: string;
 }
 
 /** 클라이언트 → 서버 */
 export type ClientControl =
-  | { t: "create"; maxPlayers?: number }
-  | { t: "join"; code: string }
+  | { t: "create"; maxPlayers?: number; nick?: string }
+  | { t: "join"; code: string; nick?: string }
   | { t: "leave" }
   | { t: "relay"; msg: GameMessage }
   | { t: "relay-to"; targetId: string; msg: GameMessage };

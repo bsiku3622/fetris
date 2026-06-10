@@ -21,6 +21,7 @@ interface Player {
   ws: WebSocket;
   id: string;
   isHost: boolean;
+  nick: string;
 }
 
 interface Room {
@@ -78,7 +79,12 @@ export function startServer(port: number): RelayServer {
     }
   };
 
-  const playerInfoOf = (p: Player): PlayerInfo => ({ id: p.id, isHost: p.isHost });
+  const playerInfoOf = (p: Player): PlayerInfo => ({ id: p.id, isHost: p.isHost, nick: p.nick });
+
+  const sanitizeNick = (n: unknown): string => {
+    const s = typeof n === "string" ? n.trim().slice(0, 16) : "";
+    return s.length > 0 ? s : "Player";
+  };
 
   const teardownPlayer = (ws: WebSocket): void => {
     const entry = sockToPlayer.get(ws);
@@ -108,7 +114,7 @@ export function startServer(port: number): RelayServer {
         const code = genCode(rooms);
         const maxPlayers = Math.min(8, Math.max(2, (raw.maxPlayers ?? 4)));
         const playerId = genPlayerId();
-        const player: Player = { ws, id: playerId, isHost: true };
+        const player: Player = { ws, id: playerId, isHost: true, nick: sanitizeNick(raw.nick) };
         const room: Room = { code, players: [player], maxPlayers };
         rooms.set(code, room);
         sockToPlayer.set(ws, { room, player });
@@ -128,7 +134,7 @@ export function startServer(port: number): RelayServer {
         }
         if (sockToPlayer.has(ws)) teardownPlayer(ws);
         const playerId = genPlayerId();
-        const player: Player = { ws, id: playerId, isHost: false };
+        const player: Player = { ws, id: playerId, isHost: false, nick: sanitizeNick(raw.nick) };
         room.players.push(player);
         sockToPlayer.set(ws, { room, player });
         const currentPlayers = room.players.filter((p) => p !== player).map(playerInfoOf);
