@@ -22,6 +22,11 @@ export interface KeyMap {
   pause: string[];
 }
 
+/** 게임 플레이 키 — 프리셋이 다루는 대상. */
+export const GAME_ACTIONS: (keyof KeyMap)[] = ["moveLeft", "moveRight", "softDrop", "hardDrop", "rotateCW", "rotateCCW", "rotate180", "hold"];
+/** 시스템 키 — 프리셋과 무관(다시하기·일시정지). */
+export const SYSTEM_ACTIONS: (keyof KeyMap)[] = ["retry", "pause"];
+
 export const DEFAULT_KEYMAP: KeyMap = {
   moveLeft: ["ArrowLeft"],
   moveRight: ["ArrowRight"],
@@ -49,16 +54,16 @@ const CLASSIC_KEYMAP: KeyMap = {
   pause: ["Escape", "F1"],
 };
 
-/** WASD — 왼손 이동(A/D/S/W), 오른손 화살표 회전, Space 홀드. */
+/** WASD — 왼손 이동(A/D)·드랍(W/S), 오른손 화살표 회전, Shift 홀드. */
 const WASD_KEYMAP: KeyMap = {
   moveLeft: ["KeyA"],
   moveRight: ["KeyD"],
-  softDrop: ["KeyS"],
-  hardDrop: ["KeyW"],
-  rotateCW: ["ArrowUp"],
+  softDrop: ["KeyW"],
+  hardDrop: ["KeyS"],
+  rotateCW: ["ArrowRight"],
   rotateCCW: ["ArrowLeft"],
-  rotate180: ["ArrowDown"],
-  hold: ["Space"],
+  rotate180: ["ArrowUp"],
+  hold: ["ShiftLeft"],
   retry: ["KeyR"],
   pause: ["Escape", "F1"],
 };
@@ -72,7 +77,7 @@ const IOP_KEYMAP: KeyMap = {
   rotateCW: ["BracketLeft"],
   rotateCCW: ["KeyO"],
   rotate180: ["Slash"],
-  hold: ["KeyC", "ShiftLeft"],
+  hold: ["ShiftLeft"],
   retry: ["KeyR"],
   pause: ["Escape", "F1"],
 };
@@ -91,6 +96,39 @@ export function mergeKeymaps(maps: KeyMap[]): KeyMap {
     const codes: string[] = [];
     for (const m of maps) for (const c of m[a] ?? []) if (!codes.includes(c)) codes.push(c);
     out[a] = codes.slice(0, 3);
+  }
+  return out;
+}
+
+/** 현재 키맵이 프리셋의 게임 키를 (동작별로) 모두 포함하면 true — 프리셋 활성 표시 판정. 게임 키가 하나도 없으면 false. 시스템 키는 무시. */
+export function keymapHasPreset(keymap: KeyMap, preset: KeyMap): boolean {
+  let any = false;
+  for (const a of GAME_ACTIONS) {
+    for (const c of preset[a] ?? []) {
+      any = true;
+      if (!(keymap[a] ?? []).includes(c)) return false;
+    }
+  }
+  return any;
+}
+
+/** 프리셋의 게임 키를 현재 키맵에 합쳐 적용(union, 동작당 최대 3개, 기존 키 우선). 시스템 키는 그대로 둠. */
+export function addPresetToKeymap(keymap: KeyMap, preset: KeyMap): KeyMap {
+  const out = structuredClone(keymap);
+  for (const a of GAME_ACTIONS) {
+    const codes = [...(keymap[a] ?? [])];
+    for (const c of preset[a] ?? []) if (!codes.includes(c)) codes.push(c);
+    out[a] = codes.slice(0, 3);
+  }
+  return out;
+}
+
+/** 프리셋의 게임 키를 현재 키맵에서 동작별로 제거. 시스템 키는 그대로 둠. */
+export function removePresetFromKeymap(keymap: KeyMap, preset: KeyMap): KeyMap {
+  const out = structuredClone(keymap);
+  for (const a of GAME_ACTIONS) {
+    const drop = new Set(preset[a] ?? []);
+    out[a] = (keymap[a] ?? []).filter((c) => !drop.has(c));
   }
   return out;
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Text } from "@studio-baeks/funky-ui";
+import { Button, Text, Badge, Tabs } from "@studio-baeks/funky-ui";
 import type { Settings } from "../app/store";
 import type { RuleSet, KicksetName, SpinBonusName, GarbageHoleMode, RandomizerName } from "../engine/types";
 import { NetClient } from "../net/client";
@@ -612,24 +612,24 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     );
   }
 
-  // ---- 로비 / 대기실 ----
+  // ---- 로비 (방 만들기 / 입장) ----
   const totalPlayers = roster.length + 1;
-  return (
-    <div className="fx-menu">
-      <div className="fx-logo" style={{ fontSize: "2.5rem" }}>
-        <span style={{ color: P1_COLOR }}>CUSTOM</span> <span style={{ color: P2_COLOR }}>ROOM</span>
-      </div>
-      <Text variant="chrome" muted>
-        커스텀 룸 대전 (최대 8인)
-      </Text>
-
-      {error && (
-        <div style={{ color: FUNKY.danger, fontWeight: 900, padding: "0.5rem 1rem", border: `3px solid ${FUNKY.danger}`, borderRadius: 8 }}>
-          {error}
+  if (phase === "lobby") {
+    return (
+      <div className="fx-menu">
+        <div className="fx-logo" style={{ fontSize: "2.5rem" }}>
+          <span style={{ color: P1_COLOR }}>CUSTOM</span> <span style={{ color: P2_COLOR }}>ROOM</span>
         </div>
-      )}
+        <Text variant="chrome" muted>
+          커스텀 룸 대전 (최대 8인)
+        </Text>
 
-      {phase === "lobby" && (
+        {error && (
+          <div style={{ color: FUNKY.danger, fontWeight: 900, padding: "0.5rem 1rem", border: `3px solid ${FUNKY.danger}` }}>
+            {error}
+          </div>
+        )}
+
         <div className="fx-panel" style={{ gap: "1rem", minWidth: 360 }}>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontWeight: 800, fontSize: "0.85rem" }}>
             <span>서버 주소</span>
@@ -660,141 +660,48 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
             메뉴로
           </Button>
         </div>
-      )}
+      </div>
+    );
+  }
 
-      {phase === "room" && (
-        <div className="fx-panel" style={{ gap: "0.8rem", minWidth: 440, maxHeight: "90vh", overflowY: "auto" }}>
-          <div style={{ textAlign: "center" }}>
-            <Text variant="chrome" muted>방 코드</Text>
-            <div style={{ fontSize: "2.6rem", fontWeight: 900, letterSpacing: "0.3em", color: P1_COLOR }}>{code || joinCode}</div>
-            <Text variant="chrome" muted style={{ fontSize: "0.72rem" }}>{totalPlayers}명 접속 중</Text>
+  // ---- 대기실 (3단 풀스크린: 플레이어 1 · 설정 2 · 채팅 1) ----
+  const hasScore = roundState.myWins > 0 || roundState.oppWins > 0;
+  return (
+    <div className="fx-room">
+      {error && <div className="fx-room-error">{error}</div>}
+
+      <header className="fx-room-bar">
+        <div className="fx-room-bar__title">CUSTOM ROOM</div>
+        <button className="fx-room-exit" onClick={leaveRoom}>
+          EXIT
+        </button>
+      </header>
+
+      <div className="fx-room-body">
+        {/* 왼쪽 — 플레이어 / 방 코드 / 시작 */}
+        <section className="fx-room-col fx-room-col--players">
+          <div className="fx-room-col__body">
+          <div className="fx-room-code">
+            <span className="fx-room-code__label">Room Code</span>
+            <span className="fx-room-code__value">{code || joinCode}</span>
+            <span className="fx-room-code__count">{totalPlayers}명 접속 중</span>
           </div>
-
-          {/* 로스터 */}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <RosterChip label={`${myNick} (나)`} color={myColor} present />
+          <div className="fx-roster">
+            <PlayerBox name={myNick} color={myColor} me host={isHost} />
             {roster.map((p, i) => (
-              <RosterChip key={p.id} label={p.isHost ? `${p.nick} (호스트)` : p.nick} color={oppColorOf(i)} present />
+              <PlayerBox key={p.id} name={p.nick} color={oppColorOf(i)} host={p.isHost} />
             ))}
           </div>
-
-          {(roundState.myWins > 0 || roundState.oppWins > 0) && (
-            <div style={{ textAlign: "center", fontWeight: 900, fontSize: "0.9rem" }}>
+        </div>
+        <footer className="fx-room-col__foot">
+          {hasScore && (
+            <div className="fx-room-score">
               <span style={{ color: myColor }}>{roundState.myWins}</span>
-              <span style={{ opacity: 0.5 }}> — </span>
+              <span style={{ opacity: 0.4 }}>—</span>
               <span style={{ color: P2_COLOR }}>{roundState.oppWins}</span>
-              <span style={{ opacity: 0.5, fontSize: "0.75rem" }}> / FT{cfg.rounds}</span>
+              <span style={{ opacity: 0.5, fontSize: "0.75rem" }}>/ FT{cfg.rounds}</span>
             </div>
           )}
-
-          {/* 설정 */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", opacity: isHost ? 1 : 0.8 }}>
-            <SectionLabel>매치 설정</SectionLabel>
-            <SelectField
-              label="라운드 (FT)"
-              value={String(cfg.rounds)}
-              disabled={!isHost}
-              options={[
-                { value: "1", label: "FT-1 (단판)" },
-                { value: "3", label: "FT-3" },
-                { value: "5", label: "FT-5" },
-                { value: "7", label: "FT-7" },
-              ]}
-              onChange={(v) => applyEdit({ rounds: Number(v) })}
-            />
-            <NumField label="호스트 공격 배수" value={cfg.mulP1} min={0} step={0.1} disabled={!isHost} onChange={(v) => applyEdit({ mulP1: v })} />
-            <NumField label="게스트 공격 배수" value={cfg.mulP2} min={0} step={0.1} disabled={!isHost} onChange={(v) => applyEdit({ mulP2: v })} />
-
-            <SectionLabel>가비지 설정</SectionLabel>
-            <ToggleField label="가비지(공격) 사용" value={cfg.garbage} disabled={!isHost} onChange={(v) => applyEdit({ garbage: v })} />
-            <NumField label="가비지 배수" value={cfg.garbageMultiplier} min={0} max={5} step={0.1} disabled={!isHost} onChange={(v) => applyEdit({ garbageMultiplier: v })} />
-            <NumField label="가비지 혼잡도" value={cfg.garbageMessiness} min={0} max={1} step={0.05} disabled={!isHost} onChange={(v) => applyEdit({ garbageMessiness: v })} />
-            <NumField label="가비지 캡 (한 번에, 줄)" value={cfg.garbageCap} min={1} max={40} step={1} disabled={!isHost} onChange={(v) => applyEdit({ garbageCap: Math.round(v) })} />
-            <NumField label="가비지 속도 (프레임)" value={cfg.garbageSpeed} min={0} max={120} step={1} disabled={!isHost} onChange={(v) => applyEdit({ garbageSpeed: Math.round(v) })} />
-            <SelectField
-              label="방해줄 모양"
-              value={cfg.garbageHoleMode}
-              disabled={!isHost}
-              options={[
-                { value: "clean", label: "깔끔 (한 공격=한 줄)" },
-                { value: "cheese", label: "치즈 (줄마다 랜덤)" },
-              ]}
-              onChange={(v) => applyEdit({ garbageHoleMode: v as GarbageHoleMode })}
-            />
-            <NumField label="퍼펙트 클리어 데미지" value={cfg.perfectClearDamage} min={0} max={20} step={1} disabled={!isHost} onChange={(v) => applyEdit({ perfectClearDamage: Math.round(v) })} />
-
-            <SectionLabel>게임 규칙</SectionLabel>
-            <SelectField
-              label="킥 테이블"
-              value={cfg.kickset}
-              disabled={!isHost}
-              options={[
-                { value: "SRS+", label: "SRS+" },
-                { value: "SRS-X", label: "SRS-X" },
-                { value: "SRS", label: "SRS" },
-                { value: "none", label: "없음" },
-              ]}
-              onChange={(v) => applyEdit({ kickset: v as KicksetName })}
-            />
-            <SelectField
-              label="스핀 보너스"
-              value={cfg.spinBonus}
-              disabled={!isHost}
-              options={[
-                { value: "all-mini+", label: "올스핀 (all-mini+)" },
-                { value: "all-mini", label: "올스핀 (all-mini)" },
-                { value: "all", label: "올스핀 (all)" },
-                { value: "t-spins", label: "T-스핀만" },
-                { value: "none", label: "없음" },
-              ]}
-              onChange={(v) => applyEdit({ spinBonus: v as SpinBonusName })}
-            />
-            <SelectField
-              label="B2B 모드"
-              value={cfg.b2bMode}
-              disabled={!isHost}
-              options={[
-                { value: "surge", label: "Surge (시즌2)" },
-                { value: "chaining", label: "Chaining (시즌1)" },
-                { value: "none", label: "없음" },
-              ]}
-              onChange={(v) => applyEdit({ b2bMode: v as "surge" | "chaining" | "none" })}
-            />
-            <SelectField
-              label="조각 가방"
-              value={cfg.randomizer}
-              disabled={!isHost}
-              options={[
-                { value: "7-bag", label: "7-bag (표준)" },
-                { value: "14-bag", label: "14-bag" },
-                { value: "classic", label: "Classic (NES)" },
-                { value: "pairs", label: "Pairs" },
-                { value: "random", label: "Total Mayhem" },
-              ]}
-              onChange={(v) => applyEdit({ randomizer: v as RandomizerName })}
-            />
-            <NumField label="NEXT 개수" value={cfg.nextCount} min={1} max={7} step={1} disabled={!isHost} onChange={(v) => applyEdit({ nextCount: Math.round(v) })} />
-            <ToggleField label="180° 회전 허용" value={cfg.allow180} disabled={!isHost} onChange={(v) => applyEdit({ allow180: v })} />
-
-            <SectionLabel>타이밍</SectionLabel>
-            <NumField label="중력 (G)" value={cfg.gravity} min={0} max={20} step={0.01} disabled={!isHost} onChange={(v) => applyEdit({ gravity: v })} />
-            <NumField label="락 딜레이 (프레임)" value={cfg.lockDelay} min={0} max={120} step={1} disabled={!isHost} onChange={(v) => applyEdit({ lockDelay: Math.round(v) })} />
-            <NumField label="ARE / 스폰 딜레이 (프레임)" value={cfg.are} min={0} max={60} step={1} disabled={!isHost} onChange={(v) => applyEdit({ are: Math.round(v) })} />
-
-            <SectionLabel>기타</SectionLabel>
-            <ToggleField label="같은 조각 순서 공유" value={cfg.sharePieces} disabled={!isHost} onChange={(v) => applyEdit({ sharePieces: v })} />
-            <ToggleField label="교육 모드 (Ctrl+Z)" value={cfg.undo} disabled={!isHost} onChange={(v) => applyEdit({ undo: v })} />
-          </div>
-
-          {!isHost && (
-            <Text variant="chrome" muted style={{ fontSize: "0.72rem" }}>
-              설정은 호스트가 조정합니다.
-            </Text>
-          )}
-
-          {/* 채팅 */}
-          <ChatBox chat={chat} value={chatInput} onChange={setChatInput} onSend={sendChat} myNick={myNick} />
-
           {isHost ? (
             <Button variant="primary" size="lg" onClick={startMatch} disabled={roster.length === 0}>
               {roster.length > 0 ? "대결 시작" : "상대 대기 중…"}
@@ -804,11 +711,138 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
               호스트가 시작하길 기다리는 중…
             </Text>
           )}
-          <Button variant="neutral" size="md" onClick={leaveRoom}>
-            방 나가기
-          </Button>
+        </footer>
+      </section>
+
+      {/* 가운데 — 설정 (호스트만 편집) */}
+      <section className="fx-room-col fx-room-col--settings">
+        <div className="fx-room-col__body" style={isHost ? undefined : { opacity: 0.85 }}>
+          {!isHost && (
+            <Text variant="chrome" muted>읽기 전용 · 호스트가 설정합니다</Text>
+          )}
+          <Tabs defaultValue="match">
+            <Tabs.List>
+              <Tabs.Trigger value="match">매치</Tabs.Trigger>
+              <Tabs.Trigger value="garbage">가비지</Tabs.Trigger>
+              <Tabs.Trigger value="rule">규칙</Tabs.Trigger>
+              <Tabs.Trigger value="timing">타이밍</Tabs.Trigger>
+            </Tabs.List>
+
+            <Tabs.Panel value="match">
+              <div className="fx-settings-group">
+                <SelectField
+                  label="라운드 (FT)"
+                  value={String(cfg.rounds)}
+                  disabled={!isHost}
+                  options={[
+                    { value: "1", label: "FT-1 (단판)" },
+                    { value: "3", label: "FT-3" },
+                    { value: "5", label: "FT-5" },
+                    { value: "7", label: "FT-7" },
+                  ]}
+                  onChange={(v) => applyEdit({ rounds: Number(v) })}
+                />
+                <NumField label="호스트 공격 배수" value={cfg.mulP1} min={0} step={0.1} disabled={!isHost} onChange={(v) => applyEdit({ mulP1: v })} />
+                <NumField label="게스트 공격 배수" value={cfg.mulP2} min={0} step={0.1} disabled={!isHost} onChange={(v) => applyEdit({ mulP2: v })} />
+              </div>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="garbage">
+              <div className="fx-settings-group">
+                <ToggleField label="가비지(공격) 사용" value={cfg.garbage} disabled={!isHost} onChange={(v) => applyEdit({ garbage: v })} />
+                <NumField label="가비지 배수" value={cfg.garbageMultiplier} min={0} max={5} step={0.1} disabled={!isHost} onChange={(v) => applyEdit({ garbageMultiplier: v })} />
+                <NumField label="가비지 혼잡도" value={cfg.garbageMessiness} min={0} max={1} step={0.05} disabled={!isHost} onChange={(v) => applyEdit({ garbageMessiness: v })} />
+                <NumField label="가비지 캡 (한 번에, 줄)" value={cfg.garbageCap} min={1} max={40} step={1} disabled={!isHost} onChange={(v) => applyEdit({ garbageCap: Math.round(v) })} />
+                <NumField label="가비지 속도 (프레임)" value={cfg.garbageSpeed} min={0} max={120} step={1} disabled={!isHost} onChange={(v) => applyEdit({ garbageSpeed: Math.round(v) })} />
+                <SelectField
+                  label="방해줄 모양"
+                  value={cfg.garbageHoleMode}
+                  disabled={!isHost}
+                  options={[
+                    { value: "clean", label: "깔끔 (한 공격=한 줄)" },
+                    { value: "cheese", label: "치즈 (줄마다 랜덤)" },
+                  ]}
+                  onChange={(v) => applyEdit({ garbageHoleMode: v as GarbageHoleMode })}
+                />
+                <NumField label="퍼펙트 클리어 데미지" value={cfg.perfectClearDamage} min={0} max={20} step={1} disabled={!isHost} onChange={(v) => applyEdit({ perfectClearDamage: Math.round(v) })} />
+              </div>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="rule">
+              <div className="fx-settings-group">
+                <SelectField
+                  label="킥 테이블"
+                  value={cfg.kickset}
+                  disabled={!isHost}
+                  options={[
+                    { value: "SRS+", label: "SRS+" },
+                    { value: "SRS-X", label: "SRS-X" },
+                    { value: "SRS", label: "SRS" },
+                    { value: "none", label: "없음" },
+                  ]}
+                  onChange={(v) => applyEdit({ kickset: v as KicksetName })}
+                />
+                <SelectField
+                  label="스핀 보너스"
+                  value={cfg.spinBonus}
+                  disabled={!isHost}
+                  options={[
+                    { value: "all-mini+", label: "올스핀 (all-mini+)" },
+                    { value: "all-mini", label: "올스핀 (all-mini)" },
+                    { value: "all", label: "올스핀 (all)" },
+                    { value: "t-spins", label: "T-스핀만" },
+                    { value: "none", label: "없음" },
+                  ]}
+                  onChange={(v) => applyEdit({ spinBonus: v as SpinBonusName })}
+                />
+                <SelectField
+                  label="B2B 모드"
+                  value={cfg.b2bMode}
+                  disabled={!isHost}
+                  options={[
+                    { value: "surge", label: "Surge (시즌2)" },
+                    { value: "chaining", label: "Chaining (시즌1)" },
+                    { value: "none", label: "없음" },
+                  ]}
+                  onChange={(v) => applyEdit({ b2bMode: v as "surge" | "chaining" | "none" })}
+                />
+                <SelectField
+                  label="조각 가방"
+                  value={cfg.randomizer}
+                  disabled={!isHost}
+                  options={[
+                    { value: "7-bag", label: "7-bag (표준)" },
+                    { value: "14-bag", label: "14-bag" },
+                    { value: "classic", label: "Classic (NES)" },
+                    { value: "pairs", label: "Pairs" },
+                    { value: "random", label: "Total Mayhem" },
+                  ]}
+                  onChange={(v) => applyEdit({ randomizer: v as RandomizerName })}
+                />
+                <NumField label="NEXT 개수" value={cfg.nextCount} min={1} max={7} step={1} disabled={!isHost} onChange={(v) => applyEdit({ nextCount: Math.round(v) })} />
+                <ToggleField label="180° 회전 허용" value={cfg.allow180} disabled={!isHost} onChange={(v) => applyEdit({ allow180: v })} />
+              </div>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="timing">
+              <div className="fx-settings-group">
+                <NumField label="중력 (G)" value={cfg.gravity} min={0} max={20} step={0.01} disabled={!isHost} onChange={(v) => applyEdit({ gravity: v })} />
+                <NumField label="락 딜레이 (프레임)" value={cfg.lockDelay} min={0} max={120} step={1} disabled={!isHost} onChange={(v) => applyEdit({ lockDelay: Math.round(v) })} />
+                <NumField label="ARE / 스폰 딜레이 (프레임)" value={cfg.are} min={0} max={60} step={1} disabled={!isHost} onChange={(v) => applyEdit({ are: Math.round(v) })} />
+                <SectionLabel>기타</SectionLabel>
+                <ToggleField label="같은 조각 순서 공유" value={cfg.sharePieces} disabled={!isHost} onChange={(v) => applyEdit({ sharePieces: v })} />
+                <ToggleField label="교육 모드 (Ctrl+Z)" value={cfg.undo} disabled={!isHost} onChange={(v) => applyEdit({ undo: v })} />
+              </div>
+            </Tabs.Panel>
+          </Tabs>
         </div>
-      )}
+      </section>
+
+        {/* 오른쪽 — 채팅 */}
+        <section className="fx-room-col fx-room-col--chat">
+          <ChatBox chat={chat} value={chatInput} onChange={setChatInput} onSend={sendChat} myNick={myNick} />
+        </section>
+      </div>
     </div>
   );
 }
@@ -825,44 +859,29 @@ function ChatBox({ chat, value, onChange, onSend, myNick }: {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [chat]);
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <SectionLabel>채팅</SectionLabel>
-      <div
-        ref={listRef}
-        style={{
-          height: 110,
-          overflowY: "auto",
-          border: "3px solid #000",
-          borderRadius: 8,
-          padding: "0.4rem 0.6rem",
-          background: "rgba(0,0,0,0.04)",
-          fontSize: "0.82rem",
-          display: "flex",
-          flexDirection: "column",
-          gap: 2,
-        }}
-      >
-        {chat.length === 0 && <span style={{ opacity: 0.4, fontWeight: 700 }}>아직 메시지가 없어요</span>}
+    <div className="fx-chat">
+      <div className="fx-chat__list" ref={listRef}>
+        {chat.length === 0 && <span className="fx-chat__empty">아직 메시지가 없어요</span>}
         {chat.map((m, i) =>
           m.nick === "" ? (
-            <div key={i} style={{ opacity: 0.55, fontWeight: 800, fontStyle: "italic" }}>{m.text}</div>
+            <div key={i} className="fx-chat__sys">{m.text}</div>
           ) : (
-            <div key={i} style={{ fontWeight: 700 }}>
-              <span style={{ fontWeight: 900, color: m.nick === myNick ? FUNKY.sky : FUNKY.pink }}>{m.nick}</span>
+            <div key={i} className="fx-chat__msg">
+              <span className="fx-chat__nick" style={{ color: m.nick === myNick ? FUNKY.sky : FUNKY.pink }}>{m.nick}</span>
               <span style={{ opacity: 0.5 }}>: </span>
               <span>{m.text}</span>
             </div>
           ),
         )}
       </div>
-      <div style={{ display: "flex", gap: 6 }}>
+      <div className="fx-chat__compose">
         <input
           value={value}
           maxLength={120}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onSend(); } }}
           placeholder="메시지 입력 후 Enter"
-          style={{ ...inputStyle, flex: 1, fontSize: "0.85rem", padding: "0.45rem 0.6rem" }}
+          style={{ ...inputStyle, flex: 1, minWidth: 0, fontSize: "0.85rem", padding: "0.45rem 0.6rem" }}
         />
         <Button variant="secondary" size="md" onClick={onSend}>전송</Button>
       </div>
@@ -923,23 +942,13 @@ function OppBoardPane({ canvasRef, label, color }: { canvasRef: (el: HTMLCanvasE
   );
 }
 
-function RosterChip({ label, color, present }: { label: string; color: string; present: boolean }) {
+function PlayerBox({ name, color, me, host }: { name: string; color: string; me?: boolean; host?: boolean }) {
   return (
-    <div
-      style={{
-        flex: "1 1 auto",
-        minWidth: 80,
-        textAlign: "center",
-        fontWeight: 900,
-        padding: "0.5rem",
-        border: `3px solid ${present ? color : "#bbb"}`,
-        borderRadius: 8,
-        color: present ? color : "#bbb",
-        background: present ? "rgba(0,0,0,0.03)" : "transparent",
-      }}
-    >
-      {label}
-      <div style={{ fontSize: "0.7rem", fontWeight: 800, opacity: 0.8 }}>{present ? "접속" : "대기"}</div>
+    <div className="fx-player-box">
+      <span className="fx-player-box__swatch" style={{ background: color }} />
+      <span className="fx-player-box__name">{name}</span>
+      {host && <Badge color="yellow">호스트</Badge>}
+      {me && <Badge color="sky">나</Badge>}
     </div>
   );
 }
@@ -953,7 +962,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 const fieldRow: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: 800, fontSize: "0.85rem" };
-const inputStyle: React.CSSProperties = { padding: "0.6rem 0.8rem", border: "3px solid #000", borderRadius: 8, fontWeight: 800, fontSize: "1rem" };
+const inputStyle: React.CSSProperties = { padding: "0.6rem 0.8rem", border: "3px solid #000", borderRadius: 0, background: "var(--funky-surface)", fontWeight: 800, fontSize: "1rem" };
 
 function NumField({
   label, value, onChange, disabled, min = 0, max, step = 0.1,

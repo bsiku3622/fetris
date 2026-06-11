@@ -17,10 +17,18 @@ export interface Profile {
   nickname: string;
 }
 
+/** 유저가 현재 키맵을 이름 붙여 저장한 커스텀 키 프리셋. */
+export interface KeymapPreset {
+  id: string;
+  label: string;
+  keymap: KeyMap;
+}
+
 export interface Settings {
   profile: Profile;
   handling: Handling;
   keymap: KeyMap;
+  customPresets: KeymapPreset[];
   gfx: GfxOptions;
   audio: AudioOptions;
   perf: LoopPerfOptions;
@@ -46,6 +54,7 @@ export function defaultSettings(): Settings {
     profile: { nickname: randomNickname() },
     handling: { ...DEFAULT_HANDLING },
     keymap: structuredClone(DEFAULT_KEYMAP),
+    customPresets: [],
     gfx: { ...DEFAULT_GFX },
     audio: { ...DEFAULT_AUDIO },
     perf: { ...DEFAULT_PERF },

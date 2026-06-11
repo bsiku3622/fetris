@@ -1,13 +1,26 @@
 import { useState } from "react";
 import { Button, Tabs, Text } from "@studio-baeks/funky-ui";
-import type { Settings } from "../app/store";
+import type { Settings, KeymapPreset } from "../app/store";
 import type { Handling, GameModeName, RuleSet } from "../engine/types";
 import type { KeyMap } from "../engine/input";
-import { KEYMAP_PRESETS, mergeKeymaps } from "../engine/input";
+import { KEYMAP_PRESETS, keymapHasPreset, addPresetToKeymap, removePresetFromKeymap, GAME_ACTIONS, SYSTEM_ACTIONS } from "../engine/input";
 import { GFX_PRESETS } from "../render/renderer";
 import { Row, Slider, Toggle, Segmented, KeySlot } from "./controls";
 
 const fmtFrameMs = (f: number) => `${f}f / ${Math.round((f * 1000) / 60)}ms`;
+
+const ACTION_LABELS: Record<keyof KeyMap, string> = {
+  moveLeft: "왼쪽 이동",
+  moveRight: "오른쪽 이동",
+  softDrop: "소프트 드롭",
+  hardDrop: "하드 드롭",
+  rotateCW: "시계 회전",
+  rotateCCW: "반시계 회전",
+  rotate180: "180° 회전",
+  hold: "홀드",
+  retry: "다시하기",
+  pause: "일시정지",
+};
 
 export function SettingsScreen({
   settings,
@@ -48,16 +61,32 @@ export function SettingsScreen({
       arr.splice(i, 1);
       return { ...s, keymap: { ...s.keymap, [action]: arr } };
     });
-  // 프리셋 다중 선택 — 선택된 프리셋들을 합쳐 키맵 적용(WASD+IOP 등 동시 사용)
-  const [selectedPresets, setSelectedPresets] = useState<Set<string>>(new Set());
-  const togglePreset = (id: string) => {
-    const next = new Set(selectedPresets);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelectedPresets(next);
-    const maps = KEYMAP_PRESETS.filter((p) => next.has(p.id)).map((p) => p.keymap);
-    if (maps.length) updateSettings((s) => ({ ...s, keymap: mergeKeymaps(maps) }));
+  // 프리셋 = 기본 + 유저 커스텀. 활성 여부는 현재 키맵에서 역산(프리셋 키를 모두 포함하면 활성).
+  const allPresets: (KeymapPreset & { custom: boolean })[] = [
+    ...KEYMAP_PRESETS.map((p) => ({ id: p.id, label: p.label, keymap: p.keymap, custom: false })),
+    ...settings.customPresets.map((p) => ({ ...p, custom: true })),
+  ];
+  // 프리셋 토글 — 비활성이면 현재 키맵에 합치고, 활성이면 그 프리셋 키를 전부 제거.
+  const togglePreset = (preset: KeyMap) =>
+    updateSettings((s) => ({
+      ...s,
+      keymap: keymapHasPreset(s.keymap, preset) ? removePresetFromKeymap(s.keymap, preset) : addPresetToKeymap(s.keymap, preset),
+    }));
+  // 커스텀 프리셋 — 현재 키맵을 이름 붙여 저장 / 삭제.
+  const [naming, setNaming] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const saveCustomPreset = () => {
+    const label = draftName.trim();
+    if (label) {
+      updateSettings((s) => ({
+        ...s,
+        customPresets: [...s.customPresets, { id: "custom-" + Date.now(), label, keymap: structuredClone(s.keymap) }],
+      }));
+    }
+    setNaming(false);
+    setDraftName("");
   };
+  const deleteCustomPreset = (id: string) => updateSettings((s) => ({ ...s, customPresets: s.customPresets.filter((p) => p.id !== id) }));
 
   const h = settings.handling;
 
@@ -135,28 +164,54 @@ export function SettingsScreen({
             <div className="fx-section">
               <div className="fx-preset-bar">
                 <span className="fx-preset-label">프리셋</span>
-                {KEYMAP_PRESETS.map((p) => (
-                  <Button key={p.id} variant={selectedPresets.has(p.id) ? "primary" : "secondary"} onClick={() => togglePreset(p.id)}>
-                    {p.label}
-                  </Button>
+                {allPresets.map((p) => (
+                  <span key={p.id} className="fx-preset-chip">
+                    <Button variant={keymapHasPreset(settings.keymap, p.keymap) ? "primary" : "secondary"} onClick={() => togglePreset(p.keymap)}>
+                      {p.label}
+                    </Button>
+                    {p.custom && (
+                      <button className="fx-preset-del" title="프리셋 삭제" onClick={() => deleteCustomPreset(p.id)}>
+                        ×
+                      </button>
+                    )}
+                  </span>
                 ))}
+                {naming ? (
+                  <input
+                    className="fx-preset-name"
+                    autoFocus
+                    value={draftName}
+                    placeholder="프리셋 이름"
+                    onChange={(e) => setDraftName(e.target.value)}
+                    onBlur={saveCustomPreset}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveCustomPreset();
+                      else if (e.key === "Escape") {
+                        setNaming(false);
+                        setDraftName("");
+                      }
+                    }}
+                  />
+                ) : (
+                  <Button variant="secondary" onClick={() => setNaming(true)}>
+                    + 현재 키맵 저장
+                  </Button>
+                )}
                 <span className="fx-preset-hint">여러 개 선택 시 합쳐서 적용</span>
               </div>
-              {(
-                [
-                  ["moveLeft", "왼쪽 이동"],
-                  ["moveRight", "오른쪽 이동"],
-                  ["softDrop", "소프트 드롭"],
-                  ["hardDrop", "하드 드롭"],
-                  ["rotateCW", "시계 회전"],
-                  ["rotateCCW", "반시계 회전"],
-                  ["rotate180", "180° 회전"],
-                  ["hold", "홀드"],
-                  ["retry", "다시하기"],
-                  ["pause", "일시정지"],
-                ] as [keyof KeyMap, string][]
-              ).map(([action, label]) => (
-                <Row key={action} label={label}>
+              <div className="fx-keygroup-label">게임 키</div>
+              {GAME_ACTIONS.map((action) => (
+                <Row key={action} label={ACTION_LABELS[action]}>
+                  <div className="fx-keyslots">
+                    {[0, 1, 2].map((i) => (
+                      <KeySlot key={i} code={settings.keymap[action][i] ?? null} onSet={(c) => setKeyAt(action, i, c)} onClear={() => clearKeyAt(action, i)} />
+                    ))}
+                  </div>
+                </Row>
+              ))}
+              <div className="fx-keygroup-label">시스템 키</div>
+              {SYSTEM_ACTIONS.map((action) => (
+                <Row key={action} label={ACTION_LABELS[action]}>
                   <div className="fx-keyslots">
                     {[0, 1, 2].map((i) => (
                       <KeySlot key={i} code={settings.keymap[action][i] ?? null} onSet={(c) => setKeyAt(action, i, c)} onClear={() => clearKeyAt(action, i)} />
@@ -165,7 +220,7 @@ export function SettingsScreen({
                 </Row>
               ))}
               <Text variant="body" muted style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}>
-                슬롯을 누르고 새 키를 입력하세요. 한 동작에 최대 3개. Backspace/Delete로 해제, Esc로 취소.
+                슬롯을 누르고 새 키를 입력하세요. 한 동작에 최대 3개. 활성화된 슬롯을 다시 누르면 해제, Esc로 취소. 프리셋은 게임 키만 바꿉니다.
               </Text>
             </div>
           </Tabs.Panel>

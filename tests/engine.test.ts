@@ -162,6 +162,51 @@ describe("Game 통합", () => {
   });
 });
 
+describe("소프트드랍 중 ARR=0 DAS — 미끄러지다 구멍에 빠짐", () => {
+  // 바닥까지 막힌 양옆 기둥(0~3, 6~9) 사이에 2칸 우물(4,5)을 만들고,
+  // 우물 오른쪽 평지 위에 O를 올린 뒤 소프트드랍 + 좌측 ARR=0 DAS를 준다.
+  // 버그(텔레포트)면 윗면을 미끄러져 좌벽까지 가버리고, 수정본이면 우물에 빠진다.
+  function setup() {
+    const g = new Game(
+      { ...STANDARD_RULESET },
+      { ...DEFAULT_HANDLING, das: 0, arr: 0, sdf: 41, preferSoftDrop: false },
+      1,
+    );
+    for (let i = 0; i < 61; i++) g.update(1, undefined, 0);
+    // 보드 구성: y=30..39 에서 cols {0,1,2,3,6,7,8,9} 솔리드, cols {4,5} 우물
+    g.board.clearGrid();
+    for (let y = 30; y < 40; y++) {
+      for (const x of [0, 1, 2, 3, 6, 7, 8, 9]) g.board.grid[g.board.idx(x, y)] = Piece.I;
+    }
+    // O를 우물 오른쪽(cols 7,8) 평지 위 높은 곳에 배치
+    g.cur = Piece.O;
+    g.rot = Rot.Spawn;
+    g.px = 7;
+    g.py = 20;
+    return g;
+  }
+
+  it("우물 위를 미끄러져 지나가다 우물에 빠진다", () => {
+    const g = setup();
+    g.pressDir(-1); // 좌측 홀드
+    const cmd = { rotateCW: false, rotateCCW: false, rotate180: false, hardDrop: false, hold: false, softDropHeld: true };
+    g.update(1, cmd, 0);
+    // O 좌상단이 우물(col 4) 안, 바닥(py=38: rows 38,39)에 안착해야 한다
+    expect(g.px).toBe(4);
+    expect(g.py).toBe(38);
+  });
+
+  it("소프트드랍 없이 DAS만이면 윗면을 미끄러져 좌벽까지 간다(회귀 방지)", () => {
+    const g = setup();
+    g.pressDir(-1);
+    const cmd = { rotateCW: false, rotateCCW: false, rotate180: false, hardDrop: false, hold: false, softDropHeld: false };
+    g.update(1, cmd, 0);
+    // 중력 느림 → 그 틱엔 낙하 없이 좌벽까지만. 우물엔 안 빠짐.
+    expect(g.px).toBe(0);
+    expect(g.py).toBe(20);
+  });
+});
+
 describe("결정론", () => {
   it("같은 시드+입력은 같은 보드 상태", () => {
     function run(): string {

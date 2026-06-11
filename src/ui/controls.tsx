@@ -158,7 +158,7 @@ export function keyLabel(code: string): string {
   return code;
 }
 
-/** 단일 키 슬롯 — 한 버튼에 키 1개. 클릭 후 키 입력으로 지정, Backspace/Delete로 해제, Esc로 취소. */
+/** 단일 키 슬롯 — 한 버튼에 키 1개. 클릭 후 키 입력으로 지정, 활성화 상태에서 다시 클릭하면 해제, Esc로 취소. */
 export function KeySlot({ code, onSet, onClear }: { code: string | null; onSet: (code: string) => void; onClear: () => void }) {
   const [listening, setListening] = useState(false);
 
@@ -171,11 +171,6 @@ export function KeySlot({ code, onSet, onClear }: { code: string | null; onSet: 
         setListening(false);
         return;
       }
-      if (e.code === "Backspace" || e.code === "Delete") {
-        onClear();
-        setListening(false);
-        return;
-      }
       onSet(e.code);
       setListening(false);
     };
@@ -183,8 +178,17 @@ export function KeySlot({ code, onSet, onClear }: { code: string | null; onSet: 
     return () => window.removeEventListener("keydown", handler, { capture: true } as EventListenerOptions);
   }, [listening, onSet, onClear]);
 
+  const onClick = () => {
+    if (listening) {
+      onClear();
+      setListening(false);
+    } else {
+      setListening(true);
+    }
+  };
+
   return (
-    <button className={`fx-key fx-key--slot ${listening ? "listening" : ""} ${code ? "" : "fx-key--empty"}`} onClick={() => setListening(true)}>
+    <button className={`fx-key fx-key--slot ${listening ? "listening" : ""} ${code ? "" : "fx-key--empty"}`} onClick={onClick}>
       {listening ? "..." : code ? keyLabel(code) : "+"}
     </button>
   );

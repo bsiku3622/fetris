@@ -410,26 +410,6 @@ export class Game {
     return true;
   }
 
-  /** 수평 이동 명령(handling이 만든 셀 수). 충돌 전까지 이동, 실제 이동량 반환. */
-  private moveHorizontal(cells: number): void {
-    if (cells === 0) return;
-    const dir = cells > 0 ? 1 : -1;
-    let moved = 0;
-    const n = Math.abs(cells);
-    for (let i = 0; i < n; i++) {
-      if (this.board.collides(this.currentShape(), this.px + dir, this.py)) break;
-      this.px += dir;
-      moved++;
-    }
-    if (moved > 0) {
-      this.lastAction = LastAction.Move;
-      this.onMoveReset();
-      this.push(EventType.Move, { a: dir });
-    } else if (n > 0) {
-      this.push(EventType.Hit, { a: dir });
-    }
-  }
-
   private rotate(dir: 1 | -1 | 2): void {
     if (this.cur === Piece.O) return;
     if (dir === 2 && !this.rule.allow180) return;
@@ -659,46 +639,80 @@ export class Game {
       return;
     }
 
-    // 2/3) 수평 이동 + 중력 — preferSoftDrop이면 소프트드롭을 이동보다 먼저
+    // 2/3) 수평 이동 + 중력
     const baseG = this.gravityOverride ?? this.rule.gravity;
     let g = baseG * dtFrames;
     if (cmd.softDropHeld) {
       const sg = softDropGravity(baseG, this.handling.h.sdf);
       g = isFinite(sg) ? Math.max(g, sg * dtFrames) : 9999;
     }
-    const doMove = () => {
-      const hmove = this.handling.update(dtFrames);
-      if (hmove !== 0) this.moveHorizontal(hmove);
-    };
-    const doGravity = () => this.applyGravity(g, cmd.softDropHeld);
-
-    if (this.handling.h.preferSoftDrop && cmd.softDropHeld) {
-      doGravity();
-      doMove();
-    } else {
-      doMove();
-      doGravity();
-    }
+    const hmove = this.handling.update(dtFrames);
+    const softFirst = this.handling.h.preferSoftDrop && cmd.softDropHeld;
+    this.moveAndFall(hmove, g, cmd.softDropHeld, softFirst);
 
     // 4) lock delay
     this.updateLock(dtFrames);
   }
 
-  private applyGravity(g: number, soft: boolean): void {
-    if (g <= 0) return;
+  /**
+   * 수평 이동과 중력을 셀 단위로 인터리브 처리.
+   *
+   * ARR=0이면 handling이 한 틱에 "벽까지(±999)"를 반환하는데, 이를 한 번에
+   * 텔레포트하면 소프트드롭 중 미끄러지는 도중 구멍 위를 그냥 지나쳐 벽까지
+   * 가버린다. 그래서 "한 칸 이동 → 중력 적용"을 반복해, 미끄러지다 빠질 수
+   * 있는 칸을 만나면 그 자리에서 떨어지도록 한다.
+   *
+   * @param hcells 이번 틱 수평 이동량(부호 포함, ±999 가능)
+   * @param g 이번 틱 중력 셀 수(소프트드롭 시 무한대는 9999)
+   * @param soft 소프트드롭 중 여부(점수 가산용)
+   * @param softFirst preferSoftDrop — 첫 수평 이동 전에 먼저 떨어뜨림
+   */
+  private moveAndFall(hcells: number, g: number, soft: boolean, softFirst: boolean): void {
+    const dir = hcells > 0 ? 1 : hcells < 0 ? -1 : 0;
+    let hRemaining = Math.abs(hcells);
+    const attemptedH = hRemaining > 0;
+
     this.gravityAccum += g;
+    let movedH = 0;
     let dropped = 0;
-    while (this.gravityAccum >= 1) {
-      if (this.board.collides(this.currentShape(), this.px, this.py + 1)) {
-        this.gravityAccum = 0;
-        break;
+
+    // 누적 중력이 허용하는 만큼 현재 칸에서 낙하. 막히면 accum을 버리지 않고
+    // 보존해(원본 applyGravity와 달리) 다음 칸으로 미끄러졌을 때 빠질 수 있게 한다.
+    const flushGravity = (): void => {
+      while (this.gravityAccum >= 1) {
+        if (this.board.collides(this.currentShape(), this.px, this.py + 1)) break;
+        this.py++;
+        dropped++;
+        this.gravityAccum -= 1;
+        this.lockResetCount = 0; // 공중에 떴으므로 lock reset 카운트 초기화
       }
-      this.py++;
-      dropped++;
-      this.gravityAccum -= 1;
-      // 떨어지면 lock reset 카운트 초기화(공중에 떴으므로)
-      this.lockResetCount = 0;
+    };
+
+    if (softFirst) flushGravity();
+
+    if (hRemaining === 0) {
+      if (!softFirst) flushGravity();
+    } else {
+      while (hRemaining > 0) {
+        if (this.board.collides(this.currentShape(), this.px + dir, this.py)) break;
+        this.px += dir;
+        movedH++;
+        hRemaining--;
+        flushGravity();
+      }
     }
+
+    // 틱 종료 정리: 바닥에 닿아있으면 잔여 accum 폐기(원본 동작 유지 — 떠 있을 땐 remainder<1 보존)
+    if (this.board.collides(this.currentShape(), this.px, this.py + 1)) this.gravityAccum = 0;
+
+    if (movedH > 0) {
+      this.lastAction = LastAction.Move;
+      this.onMoveReset();
+      this.push(EventType.Move, { a: dir });
+    } else if (attemptedH) {
+      this.push(EventType.Hit, { a: dir });
+    }
+
     if (soft && dropped > 0) this.stats.score += dropped; // 소프트드롭 1점/칸
   }
 

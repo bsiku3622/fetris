@@ -378,6 +378,51 @@ body,
   color: #6f6a52;
   margin-left: 0.25rem;
 }
+/* 커스텀 프리셋 칩 — 버튼 + 모서리 삭제(×) */
+.fx-preset-chip {
+  position: relative;
+  display: inline-flex;
+}
+.fx-preset-del {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 2px solid #000;
+  border-radius: 50%;
+  background: #ff5a5a;
+  color: #fff;
+  font-weight: 900;
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fx-preset-name {
+  border: 2px solid #000;
+  background: #fff;
+  padding: 0.3rem 0.6rem;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 0.8rem;
+  width: 120px;
+}
+/* 키 그룹 소제목(게임 키 / 시스템 키) */
+.fx-keygroup-label {
+  font-weight: 900;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6f6a52;
+  margin: 0.9rem 0 0.2rem;
+}
+.fx-keygroup-label:first-of-type {
+  margin-top: 0.25rem;
+}
 
 .fx-mode-grid {
   display: grid;
@@ -469,4 +514,243 @@ body,
 }
 .fx-versus-quit:hover {
   background: rgba(255, 78, 186, 0.6);
+}
+
+/* ---- 대기실 (3단 풀스크린: 플레이어 1 · 설정 2 · 채팅 1) ---- */
+.fx-room {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--fx-bg);
+  overflow: hidden;
+}
+/* 상단 CUSTOM ROOM 바 — funky AppShell navbar 룩 (보라 fill + 흰 이탤릭 브랜드) */
+.fx-room-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 1.75rem;
+  border-bottom: var(--funky-border-bold);
+  background: var(--funky-purple);
+  color: var(--funky-ink-inverse);
+}
+.fx-room-bar__title {
+  font-weight: 900;
+  font-style: italic;
+  font-size: 1.25rem;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+/* EXIT — navbar 항목 (보라 위 흰 테두리 박스) */
+.fx-room-exit {
+  font-family: inherit;
+  font-weight: 900;
+  font-size: 0.85rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--funky-ink-inverse);
+  background: transparent;
+  border: 2px solid var(--funky-ink-inverse);
+  border-radius: var(--funky-radius);
+  padding: 0.5rem 1.1rem;
+  cursor: pointer;
+  transition: background var(--funky-motion-duration) var(--funky-motion-easing);
+}
+.fx-room-exit:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+/* 3단 본문 (1:2:1) */
+.fx-room-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.fx-room-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--funky-bg);
+  overflow: hidden;
+}
+/* 컬럼 사이는 떠있는 박스가 아니라 3px 검정 파티션으로 분리 */
+.fx-room-col:not(:last-child) {
+  border-right: var(--funky-border-bold);
+}
+.fx-room-col--players {
+  flex: 1 1 0;
+}
+.fx-room-col--settings {
+  flex: 2 1 0;
+}
+.fx-room-col--chat {
+  flex: 1 1 0;
+}
+
+.fx-room-col__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--funky-space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.fx-room-col__foot {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: var(--funky-space-lg);
+  border-top: var(--funky-border-bold);
+  background: var(--funky-sunken);
+}
+.fx-room-col__foot .funky-button {
+  width: 100%;
+  justify-content: center;
+}
+
+/* 방 코드 블록 */
+.fx-room-code {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.9rem 0.5rem;
+  background: var(--funky-sunken);
+  border: var(--funky-border-bold);
+  box-shadow: var(--funky-shadow-sm);
+}
+.fx-room-code__label {
+  font-weight: 900;
+  font-size: 0.65rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--funky-ink-muted);
+}
+.fx-room-code__value {
+  font-weight: 900;
+  font-size: 2.2rem;
+  letter-spacing: 0.26em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+.fx-room-code__count {
+  font-weight: 800;
+  font-size: 0.72rem;
+  color: var(--funky-ink-muted);
+}
+
+/* 로스터 (플레이어 박스 리스트) */
+.fx-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.fx-player-box {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  border: var(--funky-border-bold);
+  background: var(--funky-bg);
+  box-shadow: var(--funky-shadow-sm);
+}
+.fx-player-box__swatch {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 2px solid var(--funky-ink);
+}
+.fx-player-box__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 900;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 라운드 스코어 */
+.fx-room-score {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  font-weight: 900;
+  font-size: 1.1rem;
+}
+
+/* 설정 그룹 (탭 패널 내부) */
+.fx-settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+/* 비활성 탭 트리거 배경을 크림으로 (라이브러리 기본은 흰색) */
+.fx-room-col .funky-tabs__trigger:not(.funky-tabs__trigger--active) {
+  background: var(--funky-bg);
+}
+
+/* 채팅 */
+.fx-chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.fx-chat__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--funky-space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+.fx-chat__empty {
+  opacity: 0.4;
+  font-weight: 700;
+}
+.fx-chat__sys {
+  opacity: 0.55;
+  font-weight: 800;
+  font-style: italic;
+}
+.fx-chat__msg {
+  font-weight: 700;
+  word-break: break-word;
+}
+.fx-chat__nick {
+  font-weight: 900;
+}
+.fx-chat__compose {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 0.4rem;
+  padding: var(--funky-space-md);
+  border-top: var(--funky-border-bold);
+  background: var(--funky-sunken);
+}
+
+/* 에러 배너 (대기실 상단 고정) */
+.fx-room-error {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  font-weight: 900;
+  padding: 0.55rem 1.2rem;
+  color: var(--funky-ink-inverse);
+  background: var(--funky-danger);
+  border: var(--funky-border-bold);
+  box-shadow: var(--funky-shadow-md);
 }

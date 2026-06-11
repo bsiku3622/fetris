@@ -17,6 +17,20 @@
 Move Left/Right, Soft Drop, Hard Drop, Rotate CW/CCW/180, Hold, Retry, Pause/Exit.
 복수 키 매핑 허용. 기본: ←→ ↓ Space, Z(CCW) ↑/X(CW) A(180) C/Shift(Hold) R(retry) Esc.
 
+UI는 두 그룹으로 분리:
+- **게임 키**(`GAME_ACTIONS`) — Move L/R, Soft/Hard Drop, Rotate CW/CCW/180, Hold. 프리셋이 다루는 대상.
+- **시스템 키**(`SYSTEM_ACTIONS`) — Retry, Pause/Exit. 프리셋과 무관(토글해도 보존).
+
+프리셋(KEYMAP_PRESETS):
+- **클래식** — ←→ 이동, ↓ Soft, Space Hard, Z/Ctrl(CCW) ↑·X(CW) A(180), C/Shift(Hold)
+- **WASD** — A/D 이동, W Soft, S Hard, ←(CCW) →(CW) ↑(180), Shift(Hold)
+- **IOP** — L/' 이동, P Soft, ; Hard, O(CCW) [(CW) /(180), Shift(Hold)
+
+프리셋 동작(게임 키에만 적용):
+- 활성 표시는 현재 키맵에서 역산 — 프리셋의 게임 키를 모두 포함하면 그 버튼이 활성(여러 프리셋 합치기 가능).
+- 비활성 프리셋 클릭 → 게임 키를 현재 키맵에 합침. 활성 프리셋 다시 클릭 → 그 프리셋의 게임 키를 전부 제거(단독 선택이던 프리셋을 끄면 게임 키가 비워짐). 시스템 키는 어느 쪽이든 그대로 유지.
+- **커스텀 프리셋** — "현재 키맵 저장"으로 지금 키맵을 이름 붙여 저장(`settings.customPresets`에 영속). 칩 모서리 ×로 삭제.
+
 ## 3. Graphics
 - Ghost(shadow) opacity 0~1 + Colored Shadow toggle
 - Grid opacity, Board opacity, Background opacity
