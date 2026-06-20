@@ -3,6 +3,8 @@ import { Button, Text, Badge, Tabs } from "@studio-baeks/funky-ui";
 import type { Settings } from "../app/store";
 import type { RuleSet, KicksetName, SpinBonusName, GarbageHoleMode, RandomizerName } from "../engine/types";
 import { NetClient } from "../net/client";
+import { isTauri, lanStart, lanStop, lanDiscover } from "../net/lan";
+import type { LanInfo } from "../net/lan";
 import type { GameMessage, PlayerInfo } from "../net/protocol";
 import { Side, FALLBACK_PEER_ID } from "../net/protocol";
 import { VersusSession } from "../app/VersusSession";
@@ -88,7 +90,7 @@ const DEFAULT_CFG: Cfg = {
   spinBonus: "all-mini+",
   b2bMode: "surge",
   garbageMultiplier: 1,
-  garbageMessiness: 0.4,
+  garbageMessiness: 0,
   garbageCap: 8,
   garbageHoleMode: "clean",
   garbageSpeed: 20,
@@ -126,6 +128,9 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     const env = (import.meta as unknown as { env?: Record<string, string> }).env;
     return env?.VITE_FETRIS_WS_URL || "ws://localhost:8787";
   });
+  const [lanInfo, setLanInfo] = useState<LanInfo | null>(null);
+  const [hostIp, setHostIp] = useState("");
+  const [discovering, setDiscovering] = useState(false);
 
   const [cfg, setCfg] = useState<Cfg>(DEFAULT_CFG);
 
@@ -151,6 +156,7 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
       netRef.current?.disconnect();
       netRef.current = null;
       if (nextRoundTimerRef.current) clearTimeout(nextRoundTimerRef.current);
+      if (isTauri()) lanStop().catch(() => {}); // LAN 호스트였으면 내장 서버 종료
     };
   }, []);
 
@@ -243,13 +249,13 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     setChatInput("");
   };
 
-  const host = async () => {
+  const host = async (urlOverride?: string) => {
     setError("");
     setIsHost(true);
     isHostRef.current = true;
     resetRound();
     setRosterBoth([]);
-    const net = new NetClient(serverUrl);
+    const net = new NetClient(urlOverride ?? serverUrl);
     netRef.current = net;
     net.onError = (r) => setError(humanError(r));
     net.onDisconnect = () => {
@@ -283,7 +289,7 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     }
   };
 
-  const join = async () => {
+  const join = async (urlOverride?: string) => {
     setError("");
     if (!joinCode.trim()) {
       setError("방 코드를 입력해주세요.");
@@ -293,7 +299,7 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     isHostRef.current = false;
     resetRound();
     setRosterBoth([]);
-    const net = new NetClient(serverUrl);
+    const net = new NetClient(urlOverride ?? serverUrl);
     netRef.current = net;
     net.onError = (r) => setError(humanError(r));
     net.onDisconnect = () => {
@@ -371,6 +377,50 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     }
   };
 
+  // LAN 호스트: 내장 릴레이 서버를 띄우고 로컬로 접속해 방 생성. 게스트는 호스트 IP로 붙는다.
+  const hostLan = async () => {
+    setError("");
+    try {
+      const info = await lanStart(47474); // 점유 시 Rust가 임의 포트로 폴백
+      setLanInfo(info);
+      await host(`ws://127.0.0.1:${info.port}`);
+    } catch (e) {
+      setError("LAN 서버를 시작할 수 없습니다: " + String(e));
+    }
+  };
+  // LAN 게스트: 호스트 IP(:포트)로 접속해 방 코드로 입장.
+  const joinLan = async () => {
+    setError("");
+    const ip = hostIp.trim();
+    if (!ip) {
+      setError("호스트 IP를 입력해주세요.");
+      return;
+    }
+    if (!joinCode.trim()) {
+      setError("방 코드를 입력해주세요.");
+      return;
+    }
+    const url = ip.includes(":") ? `ws://${ip}` : `ws://${ip}:47474`;
+    await join(url);
+  };
+  // LAN 게스트: UDP 비콘으로 주변 호스트를 자동 탐색해 IP 입력칸을 채운다.
+  const findHost = async () => {
+    setError("");
+    setDiscovering(true);
+    try {
+      const hosts = await lanDiscover();
+      if (hosts.length === 0) {
+        setError("주변에서 호스트를 찾지 못했어요. 호스트가 LAN 방을 먼저 만들었는지 확인해주세요.");
+      } else {
+        setHostIp(`${hosts[0].ip}:${hosts[0].port}`);
+      }
+    } catch (e) {
+      setError("탐색 실패: " + String(e));
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
   const startMatch = () => {
     const net = netRef.current;
     if (!net || !isHost || rosterRef.current.length === 0) return;
@@ -407,6 +457,10 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
     setRosterBoth([]);
     setChat([]);
     setCode("");
+    if (lanInfo) {
+      lanStop().catch(() => {});
+      setLanInfo(null);
+    }
     setPhase("lobby");
   };
 
@@ -641,7 +695,7 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
             options={[2, 3, 4, 5, 6, 7, 8].map((n) => ({ value: String(n), label: `${n}인` }))}
             onChange={(v) => setMaxPlayers(Number(v))}
           />
-          <Button variant="primary" size="lg" onClick={host}>
+          <Button variant="primary" size="lg" onClick={() => host()}>
             방 만들기
           </Button>
           <div style={{ display: "flex", gap: 8 }}>
@@ -652,10 +706,37 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
               placeholder="방 코드"
               style={{ ...inputStyle, flex: 1, textTransform: "uppercase", letterSpacing: "0.2em", textAlign: "center" }}
             />
-            <Button variant="secondary" size="lg" onClick={join}>
+            <Button variant="secondary" size="lg" onClick={() => join()}>
               입장
             </Button>
           </div>
+
+          {isTauri() && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: "2px dashed rgba(0,0,0,0.2)", paddingTop: 12 }}>
+              <Text variant="chrome" muted>LAN 직결 — 인터넷 없이 (비행기 · USB/Thunderbolt)</Text>
+              <Button variant="success" size="lg" onClick={hostLan}>
+                LAN 방 만들기 (호스트)
+              </Button>
+              <Button variant="neutral" size="md" onClick={findHost} disabled={discovering}>
+                {discovering ? "찾는 중…" : "주변 호스트 찾기"}
+              </Button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  value={hostIp}
+                  onChange={(e) => setHostIp(e.target.value)}
+                  placeholder="호스트 IP (예: 192.168.0.5)"
+                  style={{ ...inputStyle, flex: 1 }}
+                />
+                <Button variant="success" size="lg" onClick={joinLan}>
+                  LAN 참가
+                </Button>
+              </div>
+              <Text variant="chrome" muted style={{ fontSize: "0.7rem" }}>
+                ※ 위 "방 코드"도 함께 입력하세요 — 호스트가 IP와 코드를 알려줍니다.
+              </Text>
+            </div>
+          )}
+
           <Button variant="neutral" size="md" onClick={onExit}>
             메뉴로
           </Button>
@@ -680,12 +761,26 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
       <div className="fx-room-body">
         {/* 왼쪽 — 플레이어 / 방 코드 / 시작 */}
         <section className="fx-room-col fx-room-col--players">
+          <div className="fx-room-col__head">
+            Players<span className="fx-room-col__head-count">{totalPlayers}</span>
+          </div>
           <div className="fx-room-col__body">
           <div className="fx-room-code">
             <span className="fx-room-code__label">Room Code</span>
             <span className="fx-room-code__value">{code || joinCode}</span>
             <span className="fx-room-code__count">{totalPlayers}명 접속 중</span>
           </div>
+          {lanInfo && isHost && (
+            <div style={{ marginTop: 8, padding: "8px 10px", border: `2px solid ${FUNKY.green}`, fontWeight: 800, fontSize: "0.8rem" }}>
+              <div style={{ opacity: 0.6, fontSize: "0.65rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>LAN 주소 (게스트에게 알려주세요)</div>
+              {lanInfo.addrs.length === 0 && <div style={{ opacity: 0.7 }}>네트워크 인터페이스를 찾을 수 없어요</div>}
+              {lanInfo.addrs.map((a) => (
+                <div key={a} style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {a}:{lanInfo.port}
+                </div>
+              ))}
+            </div>
+          )}
           <div className="fx-roster">
             <PlayerBox name={myNick} color={myColor} me host={isHost} />
             {roster.map((p, i) => (
@@ -716,6 +811,7 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
 
       {/* 가운데 — 설정 (호스트만 편집) */}
       <section className="fx-room-col fx-room-col--settings">
+        <div className="fx-room-col__head">Match Settings</div>
         <div className="fx-room-col__body" style={isHost ? undefined : { opacity: 0.85 }}>
           {!isHost && (
             <Text variant="chrome" muted>읽기 전용 · 호스트가 설정합니다</Text>
@@ -840,6 +936,7 @@ export function VersusScreen({ settings, onExit }: { settings: Settings; onExit:
 
         {/* 오른쪽 — 채팅 */}
         <section className="fx-room-col fx-room-col--chat">
+          <div className="fx-room-col__head">Chat</div>
           <ChatBox chat={chat} value={chatInput} onChange={setChatInput} onSend={sendChat} myNick={myNick} />
         </section>
       </div>
@@ -961,8 +1058,8 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-const fieldRow: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: 800, fontSize: "0.85rem" };
-const inputStyle: React.CSSProperties = { padding: "0.6rem 0.8rem", border: "3px solid #000", borderRadius: 0, background: "var(--funky-surface)", fontWeight: 800, fontSize: "1rem" };
+const fieldRow: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr", alignItems: "center", gap: "1rem", fontWeight: 800, fontSize: "0.9rem" };
+const inputStyle: React.CSSProperties = { width: "100%", padding: "0.55rem 0.75rem", border: "2px solid var(--funky-line)", borderRadius: 0, background: "var(--funky-surface)", fontWeight: 800, fontSize: "1rem" };
 
 function NumField({
   label, value, onChange, disabled, min = 0, max, step = 0.1,
@@ -984,7 +1081,7 @@ function NumField({
           const clamped = max !== undefined ? Math.min(max, Math.max(min, v)) : Math.max(min, v);
           onChange(isNaN(clamped) ? min : clamped);
         }}
-        style={{ ...inputStyle, width: 90, textAlign: "right", opacity: disabled ? 0.6 : 1 }}
+        style={{ ...inputStyle, textAlign: "right", opacity: disabled ? 0.6 : 1 }}
       />
     </label>
   );
@@ -1015,7 +1112,7 @@ function SelectField({
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        style={{ ...inputStyle, width: 160, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.6 : 1, appearance: "auto" }}
+        style={{ ...inputStyle, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.6 : 1, appearance: "auto" }}
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>{o.label}</option>
