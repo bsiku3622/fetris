@@ -61,5 +61,24 @@ UI는 두 그룹으로 분리:
 ## 6. Custom/모드 룰 (모드별 RuleSet)
 gravity, gravity increase/margin, lock delay, kickset(SRS+/SRS/SRS-X/none),
 spin bonus(none/t-spins/all-mini/all-mini+/all), bag type(7/14/classic/pairs/random),
-board width/height, allow hard drop, infinite movement/hold, b2b mode(surge/chaining/none),
-garbage multiplier/cap/speed.
+board width/height, allow hard drop, infinite movement/hold, b2b mode(surge/chaining/none).
+
+### 가비지(대전) 관련
+- **garbageMultiplier** — 보낼 공격 배수(상쇄 후 적용). 기본 1.
+- **garbageCap** — 한 번의 락에서 보드에 올라오는 최대 줄 수. 기본 8(Tetr.io). 초과분은 버리지 않고 다음 락에 이어 투하.
+- **garbageSpeed** — 받은 가비지가 올라오기까지 대기 프레임(예고+상쇄 시간). 기본 20.
+- **garbageHoleMode** — `clean`(기본): 한 공격 안은 한 컬럼으로 깔끔하되 **공격마다 구멍 컬럼이 바뀜**(Tetr.io "change on attack"). `cheese`: 줄마다 랜덤(최대 치즈).
+- **garbageMessiness** `0~1` — 한 공격 **안에서** 줄별로 구멍이 흔들릴 확률(within-attack). 기본 0(한 공격은 깔끔). 공격 간 컬럼 변화는 항상 일어남.
+- **perfectClearDamage** — 퍼펙트 클리어 추가 공격. 기본 5(Tetr.io 시즌2).
+- **clutch** — 톱아웃 직전 라인 클리어로 생존(스폰을 버퍼 위로 밀어 올림). 기본 on(Tetr.io 시즌2). 끄면 즉시 게임오버.
+
+**시즌2 기본 동작(설정 없이 항상 적용):**
+- 받은 가비지 도달 시간이 공격 크기에 비례(1-2줄 20f / 3-5줄 30f / 6+줄 40f).
+- **Surge 방출은 3개의 공격으로 쪼개** 발사(부분 상쇄 가능).
+- **오프너 더블 상쇄** — 첫 14피스 동안 들어온 가비지가 내 공격보다 많으면 2배로 상쇄.
+- **clean-clear +1** — 들어온 가비지를 상쇄한 퀘드/스핀은 +1 추가 공격(곱 안 함).
+- 퍼펙트 클리어는 B2B로 카운트.
+
+## 7. 오프라인 / LAN 직결 (데스크탑)
+- 단일플레이는 서버 없이 100% 오프라인 동작(폰트도 로컬 번들 — `src/styles/fonts.css`).
+- 대전은 데스크탑 앱에서 **LAN 직결**(USB/Thunderbolt/이더넷)로 인터넷 없이 가능. 설정·문제 해결은 `docs/lan-play.md` 참고.
