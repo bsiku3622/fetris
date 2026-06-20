@@ -108,6 +108,22 @@ export class Board {
     return cleared;
   }
 
+  /** 가비지 셀이 하나라도 있는 행의 수(downstack 통계용). */
+  countGarbageRows(): number {
+    const { cols, totalRows, grid } = this;
+    let n = 0;
+    for (let y = 0; y < totalRows; y++) {
+      const base = y * cols;
+      for (let x = 0; x < cols; x++) {
+        if (grid[base + x] === Piece.Garbage) {
+          n++;
+          break;
+        }
+      }
+    }
+    return n;
+  }
+
   /** 보드가 완전히 비었는지(퍼펙트 클리어 판정) */
   isEmpty(): boolean {
     const { grid } = this;

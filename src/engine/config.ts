@@ -39,9 +39,11 @@ export const STANDARD_RULESET: RuleSet = {
   allowHardDrop: true,
   ghost: true,
   topOutEnabled: true,
+  clutch: true, // Tetr.io 시즌2: 톱아웃 직전 클리어 시 생존 기회
   garbageMultiplier: 1,
   garbageEnabled: false, // 솔로 기본 비활성; 1대1 방에서만 켠다
-  garbageMessiness: 0.4,
+  garbageMessiness: 0, // 한 공격 안의 줄별 구멍 흔들림(within-attack). 0=한 공격은 깔끔(Tetr.io 기본). 공격 간엔 항상 새 컬럼
+
   garbageCap: 8, // Tetr.io 시즌2 기본 — 초과분은 다음 락에 나눠 투하
   garbageSpeed: 20, // 받은 가비지가 올라오기까지 ~0.33s(20프레임). 그 사이 상쇄 가능
   garbageHoleMode: "clean", // 한 공격은 한 컬럼으로 깔끔하게(테트리스/스핀)

@@ -104,7 +104,7 @@ export class Renderer {
     }
   }
 
-  render(game: Game, _alpha: number, gfx: GfxOptions, particles?: ParticleSystem, action?: ActionTextManager, damage?: DamageNumberManager, hud?: HudInfo, pendingGarbage = 0): void {
+  render(game: Game, _alpha: number, gfx: GfxOptions, particles?: ParticleSystem, action?: ActionTextManager, damage?: DamageNumberManager, hud?: HudInfo, pendingGarbage = 0, readyGarbage = 0): void {
     const ctx = this.ctx;
     const { cols, rows } = game.board;
     const W = this.cssW;
@@ -160,7 +160,7 @@ export class Renderer {
       if (pendingGarbage > prev + 0.01) this.garbagePulse = 1;
       this.garbagePulse *= 0.9;
       if (this.garbagePulse < 0.02) this.garbagePulse = 0;
-      this.drawGarbageMeter(bx, fieldTop, fieldH, cell, this.garbageMeterValue, pendingGarbage, gcap);
+      this.drawGarbageMeter(bx, fieldTop, fieldH, cell, this.garbageMeterValue, pendingGarbage, gcap, readyGarbage);
     }
 
     // 스택
@@ -192,6 +192,9 @@ export class Renderer {
         ctx.strokeRect(bx + 1.5, fieldTop + 1.5, boardW - 3, fieldH - 3);
       }
     }
+
+    // 스폰 위치 X — 블록아웃(게임오버) 또는 스택이 스폰존 근처일 때 다음 피스 스폰 칸 표시
+    this.drawSpawnIndicator(game, bx, by, cell, renderTop);
 
     // 라인클리어 플래시 (필드 영역)
     if (gfx.flashOnClear && this.flash > 0) {
@@ -292,13 +295,12 @@ export class Renderer {
    * @param animated 표시용 보간값(부드러운 채움)
    * @param actual 실제 대기 줄 수(숫자/색 기준)
    */
-  private drawGarbageMeter(fieldX: number, fieldY: number, fieldH: number, cell: number, animated: number, actual: number, cap: number): void {
+  private drawGarbageMeter(fieldX: number, fieldY: number, fieldH: number, cell: number, animated: number, actual: number, cap: number, ready: number): void {
     const ctx = this.ctx;
     const meterW = Math.max(8, Math.round(cell * 0.55));
     const gap = Math.max(3, Math.round(cell * 0.16));
     const mx = fieldX - meterW - gap;
     const animRatio = Math.min(1, animated / Math.max(1, cap));
-    const actualRatio = Math.min(1, actual / Math.max(1, cap));
     const barH = fieldH * animRatio;
     const danger = actual >= cap; // cap 도달(이번에 다 들어옴)
 
@@ -310,18 +312,22 @@ export class Renderer {
     ctx.strokeStyle = "rgba(255,255,255,0.16)";
     ctx.strokeRect(mx, fieldY, meterW, fieldH);
 
-    // 채움(아래→위)
+    // 채움(아래→위): 충전 중(대기) = 호박색, 투하 준비(활성) = 불투명 빨강 (Tetr.io식 단계 표시)
     if (barH > 0.5) {
-      const g = Math.round(150 * (1 - actualRatio));
-      const fill = danger ? "rgba(255,45,45,0.96)" : `rgba(255,${g},25,0.92)`;
-      // 증가 펄스 또는 cap 도달 시 글로우
       const glow = Math.max(this.garbagePulse, danger ? 0.7 : 0);
       if (glow > 0.02) {
         ctx.shadowColor = danger ? "rgba(255,45,45,0.9)" : "rgba(255,170,30,0.8)";
         ctx.shadowBlur = cell * 0.7 * glow;
       }
-      ctx.fillStyle = fill;
+      ctx.fillStyle = danger ? "rgba(255,70,45,0.55)" : "rgba(255,180,40,0.85)";
       ctx.fillRect(mx, fieldY + fieldH - barH, meterW, barH);
+      ctx.shadowBlur = 0;
+      // 투하 준비된 줄(활성) — 바닥부터 불투명 빨강으로 덮어 단계 구분
+      const readyH = Math.min(barH, fieldH * Math.min(1, ready / Math.max(1, cap)));
+      if (readyH > 0.5) {
+        ctx.fillStyle = "rgba(255,45,45,0.96)";
+        ctx.fillRect(mx, fieldY + fieldH - readyH, meterW, readyH);
+      }
     }
 
     // 숫자(실제값)
@@ -396,6 +402,47 @@ export class Renderer {
         ctx.fillStyle = "#ffffff";
         ctx.fillText(it.value, x, valueY);
       }
+    }
+    ctx.restore();
+  }
+
+  /** 스폰 위치 인디케이터 — 게임오버(블록아웃)면 실패한 스폰 칸에 강한 빨간 X,
+   *  아니면 스택이 스폰존 근처일 때 다음 피스 스폰 칸에 옅은 X(테트리오식 위험 경고). */
+  private drawSpawnIndicator(game: Game, bx: number, by: number, cell: number, renderTop: number): void {
+    const dead = game.isGameOver() && game.blockOutCells.length > 0;
+    let cells: number[];
+    let intensity: number;
+    if (dead) {
+      cells = game.blockOutCells;
+      intensity = 1;
+    } else {
+      const topRow = game.board.highestRow();
+      const warnFrom = game.board.bufferRows + 1; // 가시 상단 1칸 위부터 경고
+      const span = 3;
+      if (topRow > warnFrom + span) return; // 충분히 낮으면 표시 안 함
+      intensity = Math.min(1, (warnFrom + span - topRow) / span);
+      cells = game.peekSpawnCells();
+    }
+    if (!cells.length) return;
+    const ctx = this.ctx;
+    ctx.save();
+    const pulse = dead ? 1 : 0.5 + 0.5 * Math.sin(this.bgPhase * 6);
+    ctx.globalAlpha = dead ? 0.95 : Math.min(0.9, (0.2 + 0.6 * intensity) * pulse);
+    ctx.strokeStyle = dead ? "rgba(255,55,55,1)" : "rgba(255,90,90,1)";
+    ctx.lineWidth = Math.max(2, cell * 0.12);
+    ctx.lineCap = "round";
+    for (let i = 0; i < cells.length; i += 2) {
+      const boardRow = cells[i + 1];
+      if (boardRow < renderTop) continue; // 천장 위(스폰존보다 위)는 못 그림
+      const sx = bx + cells[i] * cell;
+      const sy = by + (boardRow - renderTop) * cell;
+      const m = cell * 0.24;
+      ctx.beginPath();
+      ctx.moveTo(sx + m, sy + m);
+      ctx.lineTo(sx + cell - m, sy + cell - m);
+      ctx.moveTo(sx + cell - m, sy + m);
+      ctx.lineTo(sx + m, sy + cell - m);
+      ctx.stroke();
     }
     ctx.restore();
   }

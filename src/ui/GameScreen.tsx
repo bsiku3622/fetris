@@ -132,6 +132,9 @@ export function GameScreen({
                 <ResultRow label={result.metricLabel} value={result.metricValue} big />
                 <ResultRow label="LINES" value={String(result.lines)} />
                 <ResultRow label="PPS" value={result.pps.toFixed(2)} />
+                <ResultRow label="APM" value={result.apm.toFixed(1)} />
+                <ResultRow label="VS" value={result.vs.toFixed(1)} />
+                <ResultRow label="APP" value={result.app.toFixed(3)} />
               </div>
               <Button variant="primary" size="lg" onClick={retry}>
                 다시하기

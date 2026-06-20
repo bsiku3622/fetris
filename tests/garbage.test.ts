@@ -90,6 +90,23 @@ describe("Game 가비지 통합", () => {
     expect(game.pendingGarbage).toBe(0);
   });
 
+  it("cap을 넘는 가비지는 버리지 않고 다음 락으로 이어서 투하된다 (게이지 소실 회귀)", () => {
+    const capRule = { ...rule, garbageCap: 8 };
+    const game = new Game(capRule, DEFAULT_HANDLING, 999);
+    toPlaying(game);
+    game.receiveGarbage({ holes: new Array(10).fill(3) }); // 10줄(cap=8 초과), 구멍 col 3
+    expect(game.pendingGarbage).toBe(10);
+
+    // 10줄(큰 공격)이라 travel delay = garbageSpeed+20 프레임. 넉넉히 대기 후 투하.
+    for (let i = 0; i < (capRule.garbageSpeed ?? 20) + 25; i++) game.update(1, CMD());
+    game.update(1, CMD({ hardDrop: true })); // 1차 비클리어 락 → cap만큼(8줄)만 투하
+    expect(game.pendingGarbage).toBe(2); // 나머지 2줄은 소실되지 않고 큐에 남아야 한다
+
+    toPlaying(game);
+    game.update(1, CMD({ hardDrop: true })); // 2차 비클리어 락 → 남은 2줄 마저 투하
+    expect(game.pendingGarbage).toBe(0);
+  });
+
   it("garbage speed 동안은 투하되지 않고 큐에 남아 상쇄할 시간이 생긴다", () => {
     const game = new Game(rule, DEFAULT_HANDLING, 12345);
     toPlaying(game);

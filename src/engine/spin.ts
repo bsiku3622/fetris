@@ -4,11 +4,11 @@ import type { Board } from "./board";
 import { BOX_SIZE } from "./pieces";
 
 // ============================================================================
-// 스핀 판정 — TETR.IO 시즌2 기준.
-//  - T-spin: 3-corner 룰 (full/mini)
-//  - All-Mini / All-Mini+: immobile 판정
-//  - All-Mini+ (시즌2 기본): T도 immobile 경로 허용
-// 마지막 동작이 회전(rotate)일 때만 스핀 가능.
+// 스핀 판정 — TETR.IO 시즌2 기준. 마지막 동작이 회전(rotate)일 때만 스핀 가능.
+//  - T: 항상 3-corner 룰(full/mini)이 우선. all-mini+/all에선 3-corner가 안 맞아도
+//       immobile이면 인정(시즌2 완화: immobile T = Mini, all 모드는 Full).
+//  - 비-T(올스핀): t-spins=없음 · all-mini/all-mini+=immobile→Mini · all=immobile→Full.
+//  - full vs mini: 앞 두 코너가 모두 차거나 5번째 킥(TST) 사용 시 full, 아니면 mini.
 // ============================================================================
 
 /** T 피스 회전 상태별 "앞쪽" 두 코너의 박스-상대 좌표 (3x3 박스 기준). */
@@ -46,25 +46,24 @@ export function detectSpin(
   if (!lastWasRotate || bonus === "none") return SpinType.None;
   if (piece === Piece.O) return SpinType.None;
 
-  // T-spin 3-corner (bonus가 t-spins 이상이면 항상 T는 이 경로)
-  if (piece === Piece.T && bonus !== "all-mini") {
-    return detectTSpin(board, rot, px, py, usedKickIndex);
-  }
-  // all-mini 에서의 T: immobile 경로 사용 안 함(미니 미인정) → None 처리되지만,
-  // all-mini+ 이상이면 아래 immobile 경로로 떨어진다.
-  if (piece === Piece.T && bonus === "all-mini") {
+  const allFull = bonus === "all";
+
+  if (piece === Piece.T) {
+    // T는 항상 3-corner 룰 우선(full/mini)
+    const t = detectTSpin(board, rot, px, py, usedKickIndex);
+    if (t !== SpinType.None) return t;
+    // 3-corner 미성립: all-mini+/all에서만 immobile T 인정(시즌2 완화 — immobile T = Mini)
+    if ((bonus === "all-mini+" || allFull) && isImmobile(board, piece, rot, px, py)) {
+      return allFull ? SpinType.Full : SpinType.Mini;
+    }
     return SpinType.None;
   }
 
   // 비-T 피스: t-spins 모드에선 스핀 없음
   if (bonus === "t-spins") return SpinType.None;
-
-  // all-mini / all-mini+ / all : immobile 판정
-  if (bonus === "all-mini" || bonus === "all-mini+" || bonus === "all") {
-    if (isImmobile(board, piece, rot, px, py)) {
-      // 시즌2: 비-T 올스핀은 전부 Mini 취급(B2B는 유지, 공격은 안 보냄)
-      return bonus === "all" ? SpinType.Full : SpinType.Mini;
-    }
+  // all-mini / all-mini+ / all : immobile 판정 (all이면 Full, 그 외 Mini)
+  if (isImmobile(board, piece, rot, px, py)) {
+    return allFull ? SpinType.Full : SpinType.Mini;
   }
   return SpinType.None;
 }

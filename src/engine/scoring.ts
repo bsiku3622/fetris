@@ -20,10 +20,10 @@ function baseAttack(lines: number, spin: SpinType, piece: Piece): number {
     return lines === 1 ? 2 : lines === 2 ? 4 : lines === 3 ? 6 : 0;
   }
   if (spin === SpinType.Mini) {
-    // 미니: 시즌2에서 비-T 올스핀은 공격 0 (B2B만 유지)
+    // 미니: 시즌2에서 비-T 올스핀은 공격 0 (B2B만 유지) — 공식 패치노트 "do not send, but keep B2B"
     if (piece !== Piece.T) return 0;
-    // 미니 T-spin
-    return lines === 1 ? 0 : lines === 2 ? 1 : 0;
+    // 미니 T-spin: single 0, double 1, triple 2(시즌2)
+    return lines === 2 ? 1 : lines === 3 ? 2 : 0;
   }
   // 일반 라인 클리어
   switch (lines) {
@@ -121,7 +121,8 @@ export class B2BSurge {
    * 라인 0(스핀만, 클리어 없음)도 호출되면 콤보/B2B 갱신 처리.
    */
   process(lines: number, spin: SpinType, piece: Piece, board_isEmpty: boolean, rule: RuleSet): ClearResult {
-    const eligible = isB2bEligible(lines, spin);
+    // 시즌2: 퍼펙트 클리어는 항상 B2B로 친다(All Clear counts as Back-to-Back)
+    const eligible = isB2bEligible(lines, spin) || (lines > 0 && board_isEmpty);
 
     // 콤보 갱신
     if (lines > 0) {
@@ -131,18 +132,19 @@ export class B2BSurge {
     }
     const combo = this.combo - 1; // 첫 클리어 combo=0
 
-    // B2B / Surge 갱신
+    // B2B / Surge 갱신 (시즌2 Charging+Surge)
     let releasedSurge = 0;
     if (lines > 0) {
       if (eligible) {
         this.b2b++;
-        if (this.mode === "surge" && this.b2b >= 4) {
-          this.surge += 1; // 레벨당 +1 충전
+        // B2Bx4(surgeStart)부터 충전 — 메터 = 현재 B2B 레벨 (b2bx4→4 … b2bx8→8)
+        if (this.mode === "surge" && this.b2b >= this.surgeStart) {
+          this.surge = this.b2b;
         }
       } else {
-        // B2B 끊김 → Surge 방출
+        // B2B 끊김 → 충전된 서지를 한 번에 방출
         if (this.mode === "surge" && this.surge > 0) {
-          releasedSurge = this.surgeStart + this.surge;
+          releasedSurge = this.surge;
         }
         this.b2b = 0;
         this.surge = 0;
@@ -157,8 +159,8 @@ export class B2BSurge {
       if (eligible && this.b2b >= 1) {
         if (this.mode === "chaining") {
           base += chainBonus(this.b2b);
-        } else if (this.mode === "surge") {
-          base += 1; // 평시 +1
+        } else if (this.mode === "surge" && this.b2b < this.surgeStart) {
+          base += 1; // 충전 시작 전(B2Bx1~3)엔 +1 송신, 이후엔 서지로 적립(미송신)
         }
       }
       attack = applyCombo(base, combo, rule.comboTable);

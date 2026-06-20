@@ -1,5 +1,5 @@
 import { Game, Phase } from "./game";
-import type { GameModeName, RuleSet } from "./types";
+import type { GameModeName, RuleSet, Stats } from "./types";
 import { BlitzScore } from "./scoring";
 import { defaultRuleset } from "./config";
 
@@ -26,8 +26,31 @@ export interface ModeResult {
   lines: number;
   score: number;
   pps: number;
+  apm: number;
+  vs: number;
+  app: number;
+  attack: number;
   metricLabel: string;
   metricValue: string;
+}
+
+export interface LiveStats {
+  pps: number;
+  apm: number;
+  vs: number;
+  app: number;
+}
+
+/** TETR.IO식 실시간 지표. VS = ((보낸 줄 + 클리어한 가비지) / 피스) · PPS · 100. */
+export function liveStats(s: Stats): LiveStats {
+  const sec = s.frame / 60;
+  const pps = sec > 0 ? s.piecesPlaced / sec : 0;
+  const minutes = sec / 60;
+  const apm = minutes > 0 ? s.attack / minutes : 0;
+  const app = s.piecesPlaced > 0 ? s.attack / s.piecesPlaced : 0;
+  const down = s.garbageCleared ?? 0;
+  const vs = s.piecesPlaced > 0 ? ((s.attack + down) / s.piecesPlaced) * pps * 100 : 0;
+  return { pps, apm, vs, app };
 }
 
 export class Mode {
@@ -111,20 +134,19 @@ export class Mode {
 
   hud(game: Game, now: number): HudInfo {
     const s = game.stats;
-    const sec = s.frame / 60;
-    const pps = sec > 0 ? s.piecesPlaced / sec : 0;
-    const apm = sec > 0 ? s.attack / (sec / 60) : 0;
+    const { pps, apm, vs } = liveStats(s);
     const elapsed = this.elapsedMs(game, now);
 
-    // 큰 수치 + 작은 보조(테트리오식): 피스수+PPS, 보낸줄+APM
+    // 큰 수치 + 작은 보조(테트리오식): 피스수+PPS, 보낸줄+APM, VS
     const pieces: StatItem = { label: "PIECES", value: String(s.piecesPlaced), sub: `, ${pps.toFixed(2)}/S` };
     const attackItem: StatItem = { label: "ATTACK", value: String(s.attack), sub: `, ${apm.toFixed(0)}/M` };
+    const vsItem: StatItem = { label: "VS", value: vs.toFixed(1) };
     const t = splitTime(elapsed);
     const timeItem: StatItem = { label: "TIME", value: t.value, sub: t.sub };
 
     if (this.name === "sprint") {
       return {
-        left: [{ label: "LINES", value: String(s.lines), sub: `/${this.goalLines}` }, pieces, attackItem, timeItem],
+        left: [{ label: "LINES", value: String(s.lines), sub: `/${this.goalLines}` }, pieces, attackItem, vsItem, timeItem],
         right: [{ label: "FINESSE", value: String(s.finesseFaults) }],
       };
     }
@@ -132,27 +154,27 @@ export class Mode {
       const remain = Math.max(0, this.timeLimitFrames - s.frame) / 60;
       const rt = splitTime(remain * 1000);
       return {
-        left: [{ label: "LEVEL", value: String(this.blitz?.level ?? 1) }, pieces, attackItem, { label: "TIME", value: rt.value, sub: rt.sub }],
+        left: [{ label: "LEVEL", value: String(this.blitz?.level ?? 1) }, pieces, attackItem, vsItem, { label: "TIME", value: rt.value, sub: rt.sub }],
         right: [{ label: "SCORE", value: s.score.toLocaleString() }],
       };
     }
     if (this.name === "marathon" || this.name === "custom") {
       const level = Math.floor(s.lines / 10) + 1;
       return {
-        left: [{ label: "LEVEL", value: String(level) }, pieces, attackItem, timeItem],
+        left: [{ label: "LEVEL", value: String(level) }, pieces, attackItem, vsItem, timeItem],
         right: [{ label: "SCORE", value: s.score.toLocaleString() }],
       };
     }
     // zen / fourwide / combo — 우측 없음
     return {
-      left: [{ label: "LINES", value: String(s.lines) }, pieces, attackItem, timeItem],
+      left: [{ label: "LINES", value: String(s.lines) }, pieces, attackItem, vsItem, timeItem],
       right: [],
     };
   }
 
   result(game: Game, now: number): ModeResult {
     const timeMs = this.elapsedMs(game, now);
-    const pps = game.stats.frame > 0 ? game.stats.piecesPlaced / (game.stats.frame / 60) : 0;
+    const ls = liveStats(game.stats);
     let metricLabel = "SCORE";
     let metricValue = game.stats.score.toLocaleString();
     if (this.name === "sprint") {
@@ -164,7 +186,11 @@ export class Mode {
       timeMs,
       lines: game.stats.lines,
       score: game.stats.score,
-      pps,
+      pps: ls.pps,
+      apm: ls.apm,
+      vs: ls.vs,
+      app: ls.app,
+      attack: game.stats.attack,
       metricLabel,
       metricValue,
     };

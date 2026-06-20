@@ -342,6 +342,16 @@ export class GameSession {
           this.actionText.push("PERFECT CLEAR", FUNKY.pink, 1.35, 2.0);
           break;
         }
+        case EventType.Clutch: {
+          // 톱아웃 직전 라인 클리어로 생존 — 극적인 빨강 팝업 + 흔들림
+          const n = e.a ?? 1;
+          const label = n === 1 ? "CLUTCH!" : n === 2 ? "DOUBLE CLUTCH!" : n === 3 ? "TRIPLE CLUTCH!" : `CLUTCH ×${n}`;
+          this.actionText.push(label, FUNKY.danger, 1.3, 1.8);
+          this.renderer.flash = Math.max(this.renderer.flash, 0.6);
+          this.shakeMag = Math.max(this.shakeMag, 1.0);
+          this.sound.play("b2b");
+          break;
+        }
         case EventType.TopOut:
           this.sound.death(); // 사망/리셋 — 큰 폭발음
           this.renderer.flash = 1;

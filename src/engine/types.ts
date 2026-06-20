@@ -103,6 +103,7 @@ export interface RuleSet {
   allowHardDrop: boolean;
   ghost: boolean;
   topOutEnabled: boolean; // Zen은 false
+  clutch: boolean; // 톱아웃 직전 라인 클리어로 생존(스폰을 버퍼 위로 밀어올림). Tetr.io 시즌2 기본 on
   garbageMultiplier: number;
   // 대전(versus) — 솔로 모드는 garbageEnabled=false라 영향 없음
   garbageEnabled: boolean; // 받은 가비지 큐/상쇄/투하 활성(1대1 방에서만 true)
@@ -131,6 +132,7 @@ export interface Stats {
   lines: number;
   piecesPlaced: number;
   attack: number; // 누적 보낸 가비지
+  garbageCleared: number; // 누적 클리어한 가비지 줄(downstack — VS 계산용)
   startTime: number; // performance.now() 기준 시작 ms (-1 = 미시작)
   frame: number; // 누적 시뮬레이션 프레임
   maxB2b: number;

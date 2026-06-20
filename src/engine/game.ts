@@ -43,6 +43,7 @@ export const enum EventType {
   B2B,
   Attack, // 대전: 상쇄 후 상대에게 보낼 순수 공격(a=줄수, cells=구멍 배열)
   GarbageIn, // 대전: 쌓인 가비지가 보드에 투하됨(a=줄수)
+  Clutch, // 톱아웃 직전 라인 클리어로 생존(a=연속 클러치 수)
 }
 
 export interface GameEvent {
@@ -136,6 +137,9 @@ export class Game {
   private pieceInputs = 0; // 현재 피스에 쓴 이동/회전 입력 수(finesse용)
   private phaseTimer = 0; // ARE/LineClear/Ready 카운트다운(프레임)
   private clearedRows: number[] = [];
+  private lastCleared = 0; // 직전 락이 지운 라인 수(클러치 판정용)
+  clutchStreak = 0; // 연속 클러치(톱아웃 직전 생존) 수
+  blockOutCells: number[] = []; // 블록아웃 시 스폰 실패한 칸 [col,row,...] (스폰 X 인디케이터)
 
   events: GameEvent[] = [];
   seed: number;
@@ -170,6 +174,7 @@ export class Game {
       lines: 0,
       piecesPlaced: 0,
       attack: 0,
+      garbageCleared: 0,
       startTime: -1,
       frame: 0,
       maxB2b: 0,
@@ -200,6 +205,9 @@ export class Game {
     this.lockResetCount = 0;
     this.grounded = false;
     this.events.length = 0;
+    this.clutchStreak = 0;
+    this.blockOutCells.length = 0;
+    this.lastCleared = 0;
   }
 
   setHandling(h: Handling): void {
@@ -240,25 +248,67 @@ export class Game {
     this.handling.onRotateOrSpawn();
 
     const shape = shapeOf(p, this.rot);
-    // 스폰 위치 충돌 → 한 칸 위로 시도, 그래도 충돌이면 톱아웃
+    this.blockOutCells.length = 0;
     if (this.board.collides(shape, this.px, this.py)) {
       if (!this.board.collides(shape, this.px, this.py - 1)) {
+        // 한 칸 위로 일반 보정(클러치 아님)
         this.py -= 1;
-      } else if (this.rule.topOutEnabled || this.topOutResets) {
-        if (this.topOutResets) {
+        this.clutchStreak = 0;
+      } else {
+        // py-1도 막힘 → 원래 톱아웃. 클러치(직전 락이 클리어)면 버퍼 위로 더 밀어 생존 시도.
+        let fit = false;
+        if (this.rule.clutch !== false && this.lastCleared > 0) {
+          const minPy = this.minSpawnPy(shape);
+          for (let cand = this.py - 2; cand >= minPy; cand--) {
+            if (!this.board.collides(shape, this.px, cand)) {
+              this.py = cand;
+              fit = true;
+              break;
+            }
+          }
+        }
+        if (fit) {
+          this.clutchStreak++;
+          this.push(EventType.Clutch, { a: this.clutchStreak });
+        } else if (this.topOutResets) {
           // Zen: 게임오버 대신 필드 리셋 후 계속(홀드·가방까지 초기화)
           this.resetField();
           this.py = this.rule.bufferRows - 2;
+          this.clutchStreak = 0;
           this.push(EventType.TopOut); // 이펙트/사운드용(리셋 신호)
-        } else {
+        } else if (this.rule.topOutEnabled) {
+          // 진짜 블록아웃 — 실패한 스폰 칸 기록(스폰 X 인디케이터용)
+          for (let i = 0; i < 8; i += 2) this.blockOutCells.push(this.px + shape[i], this.py + shape[i + 1]);
           this.phase = Phase.GameOver;
           this.push(EventType.TopOut);
           return;
         }
       }
+    } else {
+      this.clutchStreak = 0;
     }
     this.push(EventType.Spawn, { piece: p });
     this.pushUndo();
+  }
+
+  /** 클러치 푸시업 하한 — 피스가 최소 한 칸은 천장 아래(y>=0)에 남는 가장 높은 위치. */
+  private minSpawnPy(shape: readonly number[]): number {
+    let maxRel = 0;
+    for (let i = 1; i < 8; i += 2) if (shape[i] > maxRel) maxRel = shape[i];
+    return -maxRel;
+  }
+
+  /** 다음에 스폰될 피스가 차지할 보드 칸 [col,row,...] — 스폰 위치 인디케이터용. */
+  peekSpawnCells(): number[] {
+    const nx = this.nextPieces(1);
+    const p = nx.length ? nx[0] : Piece.None;
+    if (p === Piece.None) return [];
+    const px = spawnX(p, this.rule.cols);
+    const py = this.rule.bufferRows - 2;
+    const shape = shapeOf(p, Rot.Spawn);
+    const out: number[] = [];
+    for (let i = 0; i < 8; i += 2) out.push(px + shape[i], py + shape[i + 1]);
+    return out;
   }
 
   private pushUndo(): void {
@@ -312,12 +362,26 @@ export class Game {
   /** 상대가 보낸 가비지를 받아 큐에 적재. garbageSpeed 프레임 대기 후 투하 가능해진다. */
   receiveGarbage(chunk: GarbageChunk): void {
     if (!this.rule.garbageEnabled || chunk.holes.length === 0) return;
-    this.garbageQueue.push({ holes: chunk.holes.slice(), delay: this.rule.garbageSpeed ?? 0 });
+    // Tetr.io: 공격이 클수록 올라오기까지 더 오래 — 작은(1-2줄) base, 중간(3-5줄) +10f, 큰(6+줄) +20f
+    const base = this.rule.garbageSpeed ?? 0;
+    const n = chunk.holes.length;
+    const delay = base > 0 ? (n <= 2 ? base : n <= 5 ? base + 10 : base + 20) : 0;
+    this.garbageQueue.push({ holes: chunk.holes.slice(), delay });
   }
 
   /** 현재 큐에 쌓여 투하 대기 중인 가비지 줄 수(메터/디버그용). */
   get pendingGarbage(): number {
     return queuedLines(this.garbageQueue);
+  }
+
+  /** 대기(delay)가 끝나 이번 락에 투하될 준비가 된 가비지 줄 수(미터의 '활성' 단계 표시용). */
+  get readyGarbage(): number {
+    let n = 0;
+    for (let i = 0; i < this.garbageQueue.length; i++) {
+      const c = this.garbageQueue[i];
+      if ((c.delay ?? 0) <= 0) n += c.holes.length;
+    }
+    return n;
   }
 
   /** 가비지 대기 타이머 진행 — 매 시뮬 틱 호출. delay를 dt만큼 줄인다. */
@@ -328,7 +392,8 @@ export class Game {
     }
   }
 
-  /** 대기가 끝난(delay<=0) 가비지를 보드에 투하한다. garbageCap 초과분은 버린다.
+  /** 대기가 끝난(delay<=0) 가비지를 보드에 투하한다. 이번 락의 garbageCap 초과분은
+   *  버리지 않고 큐에 남겨 다음 비클리어 락에서 이어서 투하한다(Tetr.io 동작).
    *  @returns 투하 후에도 아직 대기 중인 가비지가 남아있으면 true */
   private dumpGarbage(): boolean {
     if (this.garbageQueue.length === 0) return false;
@@ -336,16 +401,18 @@ export class Game {
     let dumped = 0;
     const remaining: GarbageChunk[] = [];
     for (const chunk of this.garbageQueue) {
-      // 아직 대기 중이거나 cap을 넘긴 묶음은 남긴다
+      // 아직 대기 중이거나 이번 락의 cap을 이미 다 쓴 묶음은 통째로 남긴다
       if ((chunk.delay ?? 0) > 0 || dumped >= cap) {
         remaining.push(chunk);
         continue;
       }
-      for (const hole of chunk.holes) {
-        if (dumped >= cap) break;
-        this.board.addGarbage(1, hole);
+      let i = 0;
+      for (; i < chunk.holes.length && dumped < cap; i++) {
+        this.board.addGarbage(1, chunk.holes[i]);
         dumped++;
       }
+      // cap에 걸려 못 투하한 나머지 줄은 버리지 않고 큐에 남겨 다음 락에 이어 투하
+      if (i < chunk.holes.length) remaining.push({ holes: chunk.holes.slice(i), delay: 0 });
     }
     this.garbageQueue = remaining;
     if (dumped > 0) this.push(EventType.GarbageIn, { a: dumped });
@@ -514,7 +581,13 @@ export class Game {
     this.board.place(shape, this.px, this.py, this.cur);
     this.stats.piecesPlaced++;
 
+    // downstack(클리어한 가비지 줄) 집계 — VS 통계용. 대전에서만 의미 있음.
+    const garbageBefore = this.rule.garbageEnabled ? this.board.countGarbageRows() : 0;
     const cleared = this.board.clearLines(this.clearedRows);
+    this.lastCleared = cleared;
+    if (this.rule.garbageEnabled && cleared > 0) {
+      this.stats.garbageCleared += Math.max(0, garbageBefore - this.board.countGarbageRows());
+    }
 
     // 락아웃 처리 (클리어 0 + 전부 위 + topOut 활성 또는 Zen 리셋)
     if (cleared === 0 && lockedAllAbove && (this.rule.topOutEnabled || this.topOutResets)) {
@@ -544,9 +617,28 @@ export class Game {
     // 클리어 없는 락에서만 대기가 끝난(garbage speed 경과) 가비지를 보드에 투하한다.
     if (this.rule.garbageEnabled) {
       if (cleared > 0) {
-        const remaining = cancelGarbage(this.garbageQueue, result.attack);
-        const out = Math.floor(remaining * this.attackMultiplier + 1e-9);
-        if (out > 0) this.push(EventType.Attack, { a: out, cells: this.garbageGen.holes(out, this.rule.garbageHoleMode) });
+        const pendingBefore = queuedLines(this.garbageQueue);
+        // 오프너(첫 14피스): 들어온 가비지가 내 공격보다 많으면 2배로 상쇄(시즌2 방어 보너스)
+        const opener = this.stats.piecesPlaced <= 14 && pendingBefore > result.attack;
+        cancelGarbage(this.garbageQueue, opener ? result.attack * 2 : result.attack);
+        // 보낼 surplus = 평소 공격 - 들어온 가비지(공세는 오프너 보너스와 무관)
+        let out = Math.floor(Math.max(0, result.attack - pendingBefore) * this.attackMultiplier + 1e-9);
+        // clean-clear 보너스(시즌2): 들어온 가비지를 실제로 상쇄한 퀘드/스핀이면 +1(곱 안 함)
+        if (pendingBefore > 0 && result.attack > 0 && (cleared >= 4 || spin !== SpinType.None)) out += 1;
+        if (out > 0) {
+          const mode = this.rule.garbageHoleMode;
+          if (result.surge > 0) {
+            // Surge 방출: 한 번에 안 보내고 3개로 쪼개 발사(나머지는 앞 세그먼트부터) — 시즌2
+            const b = Math.floor(out / 3);
+            const r = out % 3;
+            const segs = [b + (r >= 1 ? 1 : 0), b + (r >= 2 ? 1 : 0), b];
+            for (const seg of segs) {
+              if (seg > 0) this.push(EventType.Attack, { a: seg, cells: this.garbageGen.holes(seg, mode) });
+            }
+          } else {
+            this.push(EventType.Attack, { a: out, cells: this.garbageGen.holes(out, mode) });
+          }
+        }
       } else {
         this.dumpGarbage();
       }

@@ -12,6 +12,8 @@ import { InputManager } from "../engine/input";
 import type { KeyMap } from "../engine/input";
 import { VersusMatch } from "./VersusMatch";
 import type { MatchResult } from "./VersusMatch";
+import { liveStats } from "../engine/modes";
+import type { HudInfo } from "../engine/modes";
 import type { MultiTransport } from "../net/transport";
 import { Side } from "../net/protocol";
 import type { Handling, RuleSet } from "../engine/types";
@@ -64,6 +66,8 @@ export class VersusSession {
   private lastB2b = 0;
   private spinThisPiece = false;
   private dangerBeepAccum = 0.6; // 위험 경고음 누적(진입 시 즉시 울리도록 초기값 충전)
+  private hudAccum = 0;
+  private lastHud: HudInfo = { left: [], right: [] };
 
   constructor(
     localCanvas: HTMLCanvasElement,
@@ -171,12 +175,19 @@ export class VersusSession {
     this.actionText.update(1 / 60);
     this.damage.update(1 / 60);
 
-    // 로컬: 풀 렌더(이펙트 + 가비지 게이지 포함)
-    this.localRenderer.render(localGame, alpha, this.gfx, this.particles, this.actionText, this.damage, undefined, localGame.pendingGarbage);
+    // HUD(APM/PPS/VS) — 매 프레임 문자열 할당 방지 위해 ~20Hz로 throttle
+    this.hudAccum++;
+    if (this.hudAccum >= 3) {
+      this.hudAccum = 0;
+      this.lastHud = versusHud(localGame);
+    }
+
+    // 로컬: 풀 렌더(이펙트 + 가비지 게이지 + HUD 포함)
+    this.localRenderer.render(localGame, alpha, this.gfx, this.particles, this.actionText, this.damage, this.lastHud, localGame.pendingGarbage, localGame.readyGarbage);
     // 원격: 각 상대 미러 단순 렌더(이펙트 없음, 게이지는 표시)
     for (const [playerId, renderer] of this.remoteRenderers) {
       const remoteGame = this.match.remotes.get(playerId);
-      if (remoteGame) renderer.render(remoteGame, 0, this.gfx, undefined, undefined, undefined, undefined, remoteGame.pendingGarbage);
+      if (remoteGame) renderer.render(remoteGame, 0, this.gfx, undefined, undefined, undefined, undefined, remoteGame.pendingGarbage, remoteGame.readyGarbage);
     }
 
     // 위험 경고음 — 스택이 천장 근처면 주기적으로 삐
@@ -297,6 +308,15 @@ export class VersusSession {
           this.shakeMag = Math.max(this.shakeMag, Math.min(1.4, 0.3 + (e.a ?? 0) * 0.15));
           break;
         }
+        case EventType.Clutch: {
+          const n = e.a ?? 1;
+          const label = n === 1 ? "CLUTCH!" : n === 2 ? "DOUBLE CLUTCH!" : n === 3 ? "TRIPLE CLUTCH!" : `CLUTCH ×${n}`;
+          this.actionText.push(label, FUNKY.danger, 1.3, 1.8);
+          this.localRenderer.flash = Math.max(this.localRenderer.flash, 0.6);
+          this.shakeMag = Math.max(this.shakeMag, 1.0);
+          this.sound.play("b2b");
+          break;
+        }
         case EventType.TopOut:
           this.sound.death();
           this.localRenderer.flash = 1;
@@ -305,6 +325,20 @@ export class VersusSession {
       }
     }
   }
+}
+
+/** 대전 HUD — 로컬 보드에 APM/PPS/VS 표시(테트리오식 경쟁 지표). */
+function versusHud(game: Game): HudInfo {
+  const s = game.stats;
+  const ls = liveStats(s);
+  return {
+    left: [
+      { label: "PIECES", value: String(s.piecesPlaced), sub: `, ${ls.pps.toFixed(2)}/S` },
+      { label: "ATTACK", value: String(s.attack), sub: `, ${ls.apm.toFixed(0)}/M` },
+      { label: "VS", value: ls.vs.toFixed(1) },
+    ],
+    right: [],
+  };
 }
 
 // ---- 액션 텍스트 헬퍼(GameSession과 동일) ----
