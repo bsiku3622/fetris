@@ -1,0 +1,18 @@
+/* 로컬 번들 Pretendard Variable — 오프라인(비행기) 동작용.
+ * funky-ui tokens.css의 jsdelivr CDN @import를 대체한다(patch-package로 CDN 줄 제거).
+ * 단일 variable woff2 하나로 "Pretendard"(캔버스 렌더러가 쓰는 이름)와
+ * "Pretendard Variable"(funky-ui --funky-font-family) 두 패밀리를 모두 커버한다. */
+@font-face {
+  font-family: "Pretendard Variable";
+  src: url("../assets/fonts/PretendardVariable.woff2") format("woff2");
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Pretendard";
+  src: url("../assets/fonts/PretendardVariable.woff2") format("woff2");
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+}
