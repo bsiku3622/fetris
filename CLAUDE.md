@@ -70,10 +70,22 @@ cd packages/engine && npx vitest run -t "<이름>"
 
 ### 대전 네트워킹
 
-- 클라 `net/transport.ts`의 `Transport` 추상화에만 `VersusMatch`가 의존합니다 → 실제 WebSocket이든 로컬 루프백이든 동일 동작(서버 없이 테스트·로컬 대전 가능). 새 대전 로직은 `Transport`/`MultiTransport` 인터페이스 뒤에서 작성하세요.
-- 공격은 **sender-authoritative**: 내 `Attack` 이벤트를 현재 타깃에게 송신하고, 수신 공격은 내 로컬 보드에 가비지로 적재합니다. 보드 스냅샷은 `SNAPSHOT_EVERY_FRAMES` 주기로 브로드캐스트해 상대 화면(시뮬 안 하는 미러)을 갱신합니다.
-- backend는 `relay` 메시지의 게임 페이로드를 **해석하지 않고** 그대로 중계만 합니다. 프로토콜 변경 시 클라 `net/protocol.ts`와 backend `src/protocol.ts`를 함께 맞춰야 합니다.
-- 봇은 서버가 실행하지 않습니다. 외부 봇 러너가 `/bot` 경로로 붙어 대기하고, 호스트의 `add-bot` 요청에 서버가 티켓을 발급해 초대하면 착석합니다 — 전체 프로토콜은 `apps/backend/README.md`의 "봇 엔드포인트" 절에 있습니다.
+**매치 진행은 서버가 소유하고, 게임 내용물은 클라이언트가 소유합니다.** 서버는 방 상태(`lobby → countdown → playing → results`), 참가자 명단·역할·준비, 라스트맨 스탠딩 순위, 누적 승수를 관리합니다. 보드·가비지·시드로 무엇이 나오는지는 모릅니다. 클라이언트가 매치 흐름을 스스로 판단하게 만들지 마세요 — 이전 구조가 그래서 3인 이상에서 무너졌습니다.
+
+- 클라 `net/transport.ts`의 `Transport` 추상화에만 `VersusMatch`가 의존합니다 → 실제 WebSocket이든 로컬 루프백이든 동일 동작(서버 없이 테스트·로컬 대전 가능).
+- 공격은 **sender-authoritative**: 타깃을 TETR.IO식 4전략(random/even/elims/payback)으로 골라 `relay-to`로 보냅니다. 수동 타깃은 없습니다.
+- 보드 스냅샷은 **두 단계**로 나갑니다 — 방 전체에 저빈도(`SNAP_AMBIENT_FRAMES`, 썸네일용), 나를 크게 보고 있는 사람에게만 고빈도(`SNAP_FOCUS_FRAMES`). 인원의 제곱으로 불어나는 트래픽을 막기 위한 구조이니, 전체 브로드캐스트 주기를 올리지 마세요.
+- KO돼도 세션은 살아 있습니다. 로컬 보드만 잠기고 관전으로 넘어가며, 승패 판정은 서버가 합니다.
+- 프로토콜 변경 시 클라 `net/protocol.ts`와 backend `src/protocol.ts`를 함께 맞춰야 합니다.
+- 봇은 서버가 실행하지 않습니다. 외부 봇 러너가 `/bot` 경로로 붙어 대기하고, 호스트의 `add-bot` 요청에 서버가 티켓을 발급해 초대하면 참가자 슬롯에 착석합니다.
+
+### 리플레이 검증
+
+매치가 끝나면 클라이언트가 프레임 단위 원시 입력 로그와 최종 상태 지문을 제출하고, 서버가 `@fetris/engine`으로 재현해 대조합니다(`packages/engine/src/replay.ts`).
+
+이 구조가 성립하려면 **엔진이 완전히 결정론적**이어야 합니다. `Math.random`·시간 API·엔진 구현 재량 함수(`Math.pow`/`Math.log` 등)를 엔진에 들이지 마세요 — `determinism.test.ts`가 소스를 스캔해 막고 있습니다.
+
+또 하나, **simRate가 결과를 바꿉니다.** `update(1)` 한 번과 `update(0.5)` 두 번은 조각 잠금 타이밍이 달라 다른 상태로 끝납니다. 그래서 `MatchConfig`에 simRate와 핸들링을 함께 싣고 검증에서 그대로 씁니다. 자세한 내용은 `apps/backend/README.md`의 "리플레이 검증" 절에 있습니다.
 
 ## 작업 시 주의
 

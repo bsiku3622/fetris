@@ -1,6 +1,8 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer, type Server } from "node:http";
 import { randomUUID } from "node:crypto";
+import { verifyReplay } from "@fetris/engine/replay";
+import type { Handling, RuleSet } from "@fetris/engine/types";
 import type {
   ClientControl,
   ServerControl,
@@ -67,6 +69,8 @@ interface Room {
   matchId: number;
   /** 이번 매치에 참가한 플레이어 id (시작 시점에 확정) */
   participants: string[];
+  /** 이번 매치 시드 — 리플레이 검증에 쓴다 */
+  seed: number;
   countdownTimer: ReturnType<typeof setTimeout> | null;
   resultsTimer: ReturnType<typeof setTimeout> | null;
 }
@@ -103,6 +107,9 @@ const COUNTDOWN_SECONDS = 3;
 /** 순위표를 보여주고 대기실로 돌아가기까지 */
 const RESULTS_MS = 6000;
 const MIN_PARTICIPANTS = 2;
+/** 리플레이 재현 상한 — 악의적으로 거대한 로그를 보내 서버를 묶는 걸 막는다 */
+const MAX_REPLAY_FRAMES = 60 * 60 * 30; // 30분(60Hz 기준)
+const MAX_REPLAY_KEYS = 3 * 200_000;
 
 function genCode(rooms: Map<string, Room>): string {
   for (let attempt = 0; attempt < 1000; attempt++) {
@@ -322,11 +329,11 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       return;
     }
     room.phase = "playing";
-    const seed = (Math.random() * 0xffffffff) >>> 0;
+    room.seed = (Math.random() * 0xffffffff) >>> 0;
     broadcast(room, {
       t: "match-start",
       matchId: room.matchId,
-      seed,
+      seed: room.seed,
       config: room.config as MatchConfig,
       players: room.participants.slice(),
     });
@@ -353,6 +360,58 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     broadcastState(room);
     room.countdownTimer = setTimeout(() => startMatch(room), countdownSeconds * 1000);
     room.countdownTimer.unref?.();
+  };
+
+  // ---- 리플레이 검증 --------------------------------------------------------
+
+  /**
+   * 제출된 입력 로그를 서버가 직접 재현해 최종 상태 지문을 대조한다.
+   * 어긋나면 제출자에게 알리고 로그를 남긴다(자동 제재는 하지 않는다 —
+   * 오탐이 정상 플레이어를 쫓아내는 쪽이 더 나쁘다).
+   *
+   * 재현은 CPU를 쓰므로 이벤트 루프 밖으로 미룬다. sharePieces가 꺼져 있으면
+   * 각자 다른 시드로 돌았기 때문에 서버가 재현할 근거가 없어 건너뛴다.
+   */
+  const verifySubmittedReplay = (
+    room: Room,
+    player: Player,
+    raw: Extract<ClientControl, { t: "replay" }>,
+  ): void => {
+    const config = room.config;
+    if (!config || !config.sharePieces) return;
+    if (raw.matchId !== room.matchId) return;
+    if (!Array.isArray(raw.keys) || typeof raw.fingerprint !== "string") return;
+    const frames = Math.floor(Number(raw.frames));
+    if (!Number.isFinite(frames) || frames <= 0 || frames > MAX_REPLAY_FRAMES) return;
+    if (raw.keys.length > MAX_REPLAY_KEYS) return;
+
+    const seed = room.seed;
+    const nick = player.nick;
+    const ws = player.ws;
+    setImmediate(() => {
+      try {
+        const { ok, actual } = verifyReplay(
+          {
+            rule: config.rule as RuleSet,
+            handling: config.handling as Handling,
+            seed,
+            keys: raw.keys,
+            frames,
+            simRate: config.simRate,
+          },
+          raw.fingerprint,
+        );
+        if (!ok) {
+          console.warn(
+            `[fetris-be] 리플레이 불일치 — room=${room.code} player=${nick} ` +
+              `expected=${raw.fingerprint} actual=${actual}`,
+          );
+          send(ws, { t: "error", reason: "replay-mismatch" });
+        }
+      } catch (err) {
+        console.warn(`[fetris-be] 리플레이 재현 실패 — room=${room.code} player=${nick}:`, err);
+      }
+    });
   };
 
   // ---- 방 수명 -------------------------------------------------------------
@@ -476,6 +535,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           config: null,
           matchId: 0,
           participants: [],
+          seed: 0,
           countdownTimer: null,
           resultsTimer: null,
         };
@@ -627,7 +687,9 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
         break;
       }
       case "replay": {
-        // 리플레이 검증은 아직 붙지 않았다. 형식만 받아두고 조용히 버린다.
+        const entry = sockToPlayer.get(ws);
+        if (!entry) return;
+        verifySubmittedReplay(entry.room, entry.player, raw);
         break;
       }
       case "add-bot": {

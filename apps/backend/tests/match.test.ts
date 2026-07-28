@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { runReplay, fingerprint } from "@fetris/engine/replay";
 import type { RelayServer } from "../src/server.js";
 import { Client, startTestServer, createRoom, joinRoom, playerIn, TEST_CONFIG } from "./helpers.js";
 
@@ -228,6 +229,54 @@ describe("매치 진행", () => {
     host.close();
     guests[0].close();
     guests[1].close();
+  });
+
+  it("조작된 리플레이는 서버가 잡아낸다", async () => {
+    const { host, guests } = await readyRoom(1);
+    const start = await startMatch(host, guests);
+
+    // 입력이 하나도 없는데 "이런 결과가 나왔다"고 주장한다
+    host.send({
+      t: "replay",
+      matchId: start.matchId,
+      frames: 120,
+      keys: [],
+      fingerprint: "deadbeef",
+    });
+    const err = await host.waitFor("error");
+    expect(err.reason).toBe("replay-mismatch");
+
+    host.close();
+    guests[0].close();
+  });
+
+  it("정직한 리플레이는 조용히 통과한다", async () => {
+    const { host, guests } = await readyRoom(1);
+    const start = await startMatch(host, guests);
+
+    // 서버가 재현할 것과 똑같이 우리도 재현해 지문을 만든다
+    const frames = 120;
+    const game = runReplay({
+      rule: TEST_CONFIG.rule as never,
+      handling: TEST_CONFIG.handling as never,
+      seed: start.seed,
+      keys: [],
+      frames,
+      simRate: TEST_CONFIG.simRate,
+    });
+    host.send({
+      t: "replay",
+      matchId: start.matchId,
+      frames,
+      keys: [],
+      fingerprint: fingerprint(game),
+    });
+
+    // 검증을 통과하면 아무 응답도 오지 않는다
+    await expect(host.waitFor("error", 400)).rejects.toThrow();
+
+    host.close();
+    guests[0].close();
   });
 
   it("lobby가 아니면 봇을 추가할 수 없다", async () => {

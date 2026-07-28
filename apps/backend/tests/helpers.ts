@@ -1,5 +1,6 @@
 import { WebSocket } from "ws";
 import type { AddressInfo } from "node:net";
+import { STANDARD_RULESET, DEFAULT_HANDLING } from "@fetris/engine/config";
 import { startServer, type RelayServer, type RelayServerOptions } from "../src/server.js";
 import type { ServerControl, RoomState, MatchConfig } from "../src/protocol.js";
 
@@ -114,10 +115,13 @@ export class Client {
   }
 }
 
-/** 테스트용 매치 설정 — 서버는 내용을 해석하지 않는다 */
+/**
+ * 테스트용 매치 설정. 서버는 rule/handling을 해석하지 않지만, 리플레이 검증에서는
+ * 실제로 엔진에 넘겨 재현하므로 진짜 룰셋을 쓴다.
+ */
 export const TEST_CONFIG: MatchConfig = {
-  rule: { gravity: 0.02 },
-  handling: { das: 8, arr: 1 },
+  rule: STANDARD_RULESET,
+  handling: DEFAULT_HANDLING,
   simRate: 60,
   sharePieces: true,
   undo: false,

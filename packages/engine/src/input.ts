@@ -133,7 +133,8 @@ export function removePresetFromKeymap(keymap: KeyMap, preset: KeyMap): KeyMap {
   return out;
 }
 
-type Action = keyof KeyMap;
+/** 키맵에 정의된 동작 이름 — 리플레이 기록에서도 쓴다 */
+export type Action = keyof KeyMap;
 
 export class InputManager {
   private game: Game;
@@ -151,6 +152,11 @@ export class InputManager {
   onRetry?: () => void;
   onPause?: () => void;
   onUndo?: () => void;
+  /**
+   * 리플레이 기록용 — 액션이 눌리거나 떼어질 때 통지한다.
+   * 게임 로직에는 관여하지 않는다(관찰만).
+   */
+  onAction?: (action: Action, down: boolean) => void;
 
   constructor(game: Game, keymap: KeyMap = DEFAULT_KEYMAP) {
     this.game = game;
@@ -214,9 +220,11 @@ export class InputManager {
     if (action === "hardDrop") {
       if (e.repeat && this.game.handling.h.safelock) return;
       this.qHard = true;
+      this.onAction?.(action, true);
       return;
     }
     if (e.repeat) return; // 그 외 액션은 OS 오토리피트 무시
+    this.onAction?.(action, true);
 
     switch (action) {
       case "moveLeft":
@@ -256,6 +264,7 @@ export class InputManager {
     const action = this.lookup.get(e.code);
     if (!action) return;
     e.preventDefault();
+    this.onAction?.(action, false);
     switch (action) {
       case "moveLeft":
         this.leftHeld = false;

@@ -79,7 +79,7 @@ export type ClientControl =
   /** 내가 탈락했다는 자기 신고 */
   | { t: "ko" }
   /** 매치 종료 후 리플레이 제출(검증용) */
-  | { t: "replay"; matchId: number; frames: number; keys: number[] }
+  | { t: "replay"; matchId: number; frames: number; keys: number[]; fingerprint: string }
   | { t: "add-bot"; nick?: string }
   | { t: "kick-bot"; playerId: string };
 

@@ -97,8 +97,12 @@ export type ClientControl =
   | { t: "start-match" }
   /** 내가 탈락했다는 자기 신고(playing 전용) */
   | { t: "ko" }
-  /** 매치 종료 후 리플레이 제출(검증용) */
-  | { t: "replay"; matchId: number; frames: number; keys: number[] }
+  /**
+   * 매치 종료 후 리플레이 제출(검증용).
+   * keys는 [frame, action, down] 평탄 배열, fingerprint는 최종 상태 지문.
+   * 서버가 같은 시드·핸들링·simRate로 재현해 지문을 대조한다.
+   */
+  | { t: "replay"; matchId: number; frames: number; keys: number[]; fingerprint: string }
   /** 호스트 전용: 대기 중인 러너에게 봇 한 명을 이 방으로 초대 요청 */
   | { t: "add-bot"; nick?: string }
   /** 호스트 전용: 방에 있는 봇 퇴장 */

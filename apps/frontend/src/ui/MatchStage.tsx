@@ -123,6 +123,18 @@ export function MatchStage({
     sessionRef.current?.setFocus(focusId);
   }, [focusId]);
 
+  // 매치가 끝나면 입력 로그를 제출한다 — 서버가 같은 조건으로 재현해 대조한다
+  const submittedRef = useRef(-1);
+  useEffect(() => {
+    const end = room.matchEnd;
+    const session = sessionRef.current;
+    if (!end || !session || !room.net) return;
+    if (submittedRef.current === end.matchId) return;
+    submittedRef.current = end.matchId;
+    const payload = session.replayPayload();
+    room.net.submitReplay(end.matchId, payload.frames, payload.keys, payload.fingerprint);
+  }, [room.matchEnd, room.net]);
+
   // ---- 카운트다운 ----------------------------------------------------------
   useEffect(() => {
     if (!room.countdown) {

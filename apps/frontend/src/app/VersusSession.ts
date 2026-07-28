@@ -9,7 +9,8 @@ import { FUNKY, PIECE_COLORS } from "../render/theme";
 import { SoundEngine, bgmForMode } from "../audio/sound";
 import type { AudioOptions } from "../audio/sound";
 import { InputManager } from "@fetris/engine/input";
-import type { KeyMap } from "@fetris/engine/input";
+import type { KeyMap, Action } from "@fetris/engine/input";
+import { ReplayRecorder, ReplayAction, fingerprint } from "@fetris/engine/replay";
 import { VersusMatch } from "./VersusMatch";
 import { liveStats } from "@fetris/engine/modes";
 import type { HudInfo } from "@fetris/engine/modes";
@@ -78,6 +79,8 @@ export class VersusSession {
   private hudAccum = 0;
   private lastHud: HudInfo = { left: [], right: [] };
   private localCanvas: HTMLCanvasElement;
+  /** 서버 검증용 입력 기록 — 매치가 끝나면 통째로 제출한다 */
+  private recorder = new ReplayRecorder();
 
   constructor(
     localCanvas: HTMLCanvasElement,
@@ -133,10 +136,20 @@ export class VersusSession {
     };
     this.attachStrategyKeys();
 
+    // 입력을 프레임 경계에 맞춰 기록한다 — pressDir의 효과가 어차피 다음
+    // update부터 나타나므로, 이 기록만으로 서버가 같은 전개를 재현할 수 있다.
+    this.input.onAction = (action, down) => {
+      const mapped = REPLAY_ACTION[action];
+      if (mapped !== undefined) this.recorder.push(mapped, down);
+    };
+
     this.loop = new GameLoop(this.match.local, opts.perf, {
       pollInput: () => this.input.poll(),
       render: (g, alpha, fps) => this.onRender(g, alpha, fps),
-      stepGame: (dt, cmd, t) => this.match.tick(dt, cmd, t),
+      stepGame: (dt, cmd, t) => {
+        this.recorder.commitFrame();
+        this.match.tick(dt, cmd, t);
+      },
     });
   }
 
@@ -198,6 +211,18 @@ export class VersusSession {
   /** 크게 보고 있는 상대 — 이 사람에게서만 고빈도 스냅샷을 받는다 */
   setFocus(playerId: string | null): void {
     this.match.setFocus(playerId);
+  }
+
+  /**
+   * 서버 검증에 제출할 리플레이. 입력 로그와 최종 상태 지문을 함께 넘긴다 —
+   * 서버가 같은 시드·핸들링·simRate로 재현해 지문을 대조한다.
+   */
+  replayPayload(): { frames: number; keys: number[]; fingerprint: string } {
+    return {
+      frames: this.recorder.frame,
+      keys: this.recorder.keys.slice(),
+      fingerprint: fingerprint(this.match.local),
+    };
   }
 
   setStrategy(s: TargetStrategy): void {
@@ -393,6 +418,18 @@ export class VersusSession {
     }
   }
 }
+
+/** InputManager의 액션명 → 리플레이 로그 코드 */
+const REPLAY_ACTION: Partial<Record<Action, ReplayAction>> = {
+  moveLeft: ReplayAction.MoveLeft,
+  moveRight: ReplayAction.MoveRight,
+  softDrop: ReplayAction.SoftDrop,
+  rotateCW: ReplayAction.RotateCW,
+  rotateCCW: ReplayAction.RotateCCW,
+  rotate180: ReplayAction.Rotate180,
+  hold: ReplayAction.Hold,
+  hardDrop: ReplayAction.HardDrop,
+};
 
 /** 대전 HUD — APM/PPS/VS + 현재 타깃 전략(숫자키 1~4로 전환). */
 function versusHud(game: Game, strategy: TargetStrategy): HudInfo {
