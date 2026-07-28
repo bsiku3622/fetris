@@ -1,0 +1,7 @@
+# 워크스페이스 공통 — 각 패키지별 규칙은 해당 디렉토리의 .gitignore에 있습니다.
+node_modules/
+.DS_Store
+*.log
+
+# Claude Code 세션 상태
+.claude/

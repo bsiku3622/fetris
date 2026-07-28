@@ -1,0 +1,72 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## 저장소 구성
+
+모노레포가 아니라 **독립된 두 하위 프로젝트**입니다. 각자 자체 `package.json`·`.git`·`tsconfig`를 가집니다. 루트에는 빌드 설정이 없으니 명령은 항상 해당 하위 디렉토리에서 실행합니다.
+
+- `frontend/` — 게임 클라이언트. TypeScript + Canvas2D 엔진 + React 18 셸, Vite 6 번들, Tauri v2 데스크탑 패키징.
+- `backend/` (`fetris-be`) — 1대1 대전용 WebSocket 릴레이 서버. `ws` 단독 의존, sender-authoritative 메시지 중계만 담당(게임 로직 없음).
+
+## 명령
+
+### frontend/
+
+```bash
+npm run dev          # Vite dev 서버 (http://localhost:1420)
+npm test             # Vitest — 엔진 단위 테스트 (tests/*.test.ts)
+npx vitest run tests/engine.test.ts   # 단일 테스트 파일
+npx vitest run -t "<이름>"            # 이름으로 단일 테스트
+npm run typecheck    # tsc -b --noEmit
+npm run build        # tsc -b && vite build → dist/
+npm run tauri:dev    # Tauri 데스크탑 dev (Rust 필요)
+npm run tauri:build  # 네이티브 번들 (현재 OS 대상만 — 크로스 컴파일 불가)
+```
+
+### backend/
+
+```bash
+npm run dev          # tsx watch, 기본 :8787 (PORT 환경변수로 변경)
+npm test             # Vitest — 방 생성/입장/중계/이탈 검증
+npm run build        # tsc → dist/, npm start로 실행
+```
+
+데스크탑 3-OS 빌드와 웹 배포(GitHub Pages)는 `frontend/.github/workflows/`의 Actions가 처리합니다(로컬에서 재현 불필요).
+
+## 아키텍처 핵심
+
+### 엔진과 React의 엄격한 분리 (가장 중요한 설계 제약)
+
+게임 플레이 중에는 **React가 전혀 관여하지 않습니다.** React는 메뉴/설정 화면만 그리고, 게임이 시작되면 `GameSession`/`VersusSession`이 React 밖에서 루프·렌더·사운드·입력을 직접 구동합니다. HUD 갱신은 state가 아니라 **콜백**(`onHud`)으로 전달해 게임 중 리렌더를 0으로 유지합니다.
+
+이 분리는 성능 목표(60fps, hot loop 할당 0)의 근간이므로 깨지 않도록 주의합니다. 게임 루프 안에서 React state·setState를 끌어들이거나, hot path(`Board`, `Game.update`)에서 객체를 새로 할당하지 마세요. `Board`는 `Int8Array` 그리드, 이펙트는 object pool을 씁니다.
+
+### 결정론적 코어 ↔ 렌더 분리
+
+`engine/game.ts`의 `Game`은 **그리기를 모릅니다.** `update(dtFrames, input)`로 한 시뮬 스텝만 진행하고, 일어난 일을 `GameEvent` 버퍼(`EventType`)에 쌓습니다. 렌더러·사운드·이펙트는 이 이벤트 버퍼를 드레인해 반응합니다. 새 게임 동작을 추가할 때는 이 패턴(Game이 이벤트 emit → 세션이 소비)을 따릅니다.
+
+`engine/loop.ts`의 `GameLoop`는 **고정 timestep 시뮬 ↔ rAF 렌더**를 분리합니다. 엔진 시간 단위는 항상 60Hz 프레임(`dtFrames`)이라 `simRate`(60/120/240)나 디스플레이 주사율과 무관하게 메커니즘 수치가 일관됩니다. 메커니즘 상수를 다룰 때 이 "60Hz 프레임 기준" 가정을 항상 유지하세요.
+
+### engine/ 레이어 (순수 TS, DOM 비의존)
+
+`board`(그리드/충돌/라인클리어) · `srs`(SRS+/SRS-X/180° 킥테이블) · `spin`(T-spin 3-corner + immobile 판정) · `scoring`(B2B Surge, 곱셈 콤보) · `handling`(DAS/ARR/DCD/SDF) · `randomizer`(7-bag) · `garbage`(대전 가비지/상쇄) · `pieces` · `finesse` · `modes` · `input` · `config`(기본값/룰셋) · `types`.
+
+### 화면 흐름 (frontend/src/app/)
+
+`App.tsx`가 `Screen` 유니온(`menu`/`game`/`settings`/`versus`)으로 단일 화면을 전환합니다. 설정은 `store.ts`에서 localStorage(`fetris.settings.v1`)에 깊은 병합으로 영속화됩니다 — 신규 설정 필드를 추가할 땐 깊은 병합 호환을 깨지 않도록 기본값을 `config.ts`/각 모듈 DEFAULT에 함께 넣습니다.
+
+- `GameSession.ts` — 싱글플레이 1판 컨트롤러(루프+렌더+사운드+입력+모드 통합).
+- `VersusSession.ts` / `VersusMatch.ts` — 대전판. `VersusMatch`는 렌더/입력 비의존 헤드리스 코어이고, `VersusSession`이 UI를 붙입니다.
+
+### 대전 네트워킹
+
+- 클라 `net/transport.ts`의 `Transport` 추상화에만 `VersusMatch`가 의존합니다 → 실제 WebSocket이든 로컬 루프백이든 동일 동작(서버 없이 테스트·로컬 대전 가능). 새 대전 로직은 `Transport`/`MultiTransport` 인터페이스 뒤에서 작성하세요.
+- 공격은 **sender-authoritative**: 내 `Attack` 이벤트를 현재 타깃에게 송신하고, 수신 공격은 내 로컬 보드에 가비지로 적재합니다. 보드 스냅샷은 `SNAPSHOT_EVERY_FRAMES` 주기로 브로드캐스트해 상대 화면(시뮬 안 하는 미러)을 갱신합니다.
+- backend는 `relay` 메시지의 게임 페이로드를 **해석하지 않고** 그대로 중계만 합니다. 프로토콜 변경 시 클라 `net/protocol.ts`와 backend `src/protocol.ts`를 함께 맞춰야 합니다.
+
+## 작업 시 주의
+
+- 사운드는 **100% Web Audio 코드 합성**입니다(`audio/sound.ts`). 외부 오디오 에셋을 추가하지 마세요 — CC0 자유 배포가 프로젝트 전제입니다.
+- 설정 항목을 추가/변경할 땐 `frontend/docs/settings-reference.md`도 함께 갱신합니다.
+- `frontend/.claude/.mode`는 `/discuss`·`/discuss-done` 스킬로만 변경합니다(직접 수정 금지).
