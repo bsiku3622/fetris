@@ -11,23 +11,29 @@ import type { AudioOptions } from "../audio/sound";
 import { InputManager } from "@fetris/engine/input";
 import type { KeyMap } from "@fetris/engine/input";
 import { VersusMatch } from "./VersusMatch";
-import type { MatchResult } from "./VersusMatch";
 import { liveStats } from "@fetris/engine/modes";
 import type { HudInfo } from "@fetris/engine/modes";
 import type { MultiTransport } from "../net/transport";
-import { Side } from "../net/protocol";
+import { TARGET_STRATEGIES } from "../net/protocol";
+import type { TargetStrategy } from "../net/protocol";
 import type { Handling, RuleSet } from "@fetris/engine/types";
 import { SpinType, Piece } from "@fetris/engine/types";
 
 // ============================================================================
-// VersusSession — 1대1 대전을 구동하는 UI 컨트롤러(GameSession의 대전판).
+// VersusSession — 라스트맨 스탠딩 대전을 구동하는 UI 컨트롤러.
 //  - 로컬 보드: 입력/이펙트/사운드 포함 풀 렌더.
 //  - 원격 보드: 네트워크 스냅샷 미러를 별도 캔버스에 단순 렌더(이펙트 없음).
 //  - 시뮬 스텝은 VersusMatch.tick으로 위임(공격 송수신·스냅샷 동기화 포함).
+//
+// 내가 KO돼도 세션은 살아 있다 — 로컬 보드만 잠기고 남은 사람들의 경기를
+// 계속 렌더한다(관전). 승패 판정은 서버가 하며 여기서는 하지 않는다.
 // ============================================================================
 
 export interface VersusCallbacks {
-  onResult?: (result: MatchResult) => void;
+  /** 내가 톱아웃 — 상위에서 서버에 ko를 보고한다 */
+  onSelfKO?: () => void;
+  /** 타깃 전략이 키로 바뀌었다(HUD 갱신용) */
+  onStrategyChange?: (s: TargetStrategy) => void;
   onFps?: (fps: number) => void;
 }
 
@@ -40,8 +46,11 @@ export interface VersusSessionOptions {
   perf: LoopPerfOptions;
   seed: number;
   myAttackMul: number;
-  side: Side;
   transport: MultiTransport;
+  /** 이번 매치 상대들(나 제외) */
+  opponents: string[];
+  /** 시작 타깃 전략 */
+  strategy: TargetStrategy;
   /** 교육 모드: Ctrl+Z 되돌리기 허용 */
   undoEnabled: boolean;
 }
@@ -68,6 +77,7 @@ export class VersusSession {
   private dangerBeepAccum = 0.6; // 위험 경고음 누적(진입 시 즉시 울리도록 초기값 충전)
   private hudAccum = 0;
   private lastHud: HudInfo = { left: [], right: [] };
+  private localCanvas: HTMLCanvasElement;
 
   constructor(
     localCanvas: HTMLCanvasElement,
@@ -83,18 +93,28 @@ export class VersusSession {
       handling: opts.handling,
       seed: opts.seed,
       myAttackMul: opts.myAttackMul,
-      side: opts.side,
       transport: opts.transport,
+      opponents: opts.opponents,
+      strategy: opts.strategy,
     });
     this.match.local.undoEnabled = opts.undoEnabled;
     this.match.onLocalEvents = (events) => this.drainEvents(events);
-    this.match.onResult = (r) => this.cbs.onResult?.(r);
-    // 새 플레이어가 board 스냅샷을 보내면 해당 canvas에 렌더러 바인딩
-    this.match.onPlayerAdded = (playerId) => {
-      this.bindRemoteRenderer(playerId);
+    this.localCanvas = localCanvas;
+    this.match.onSelfKO = () => {
+      this.sound.death();
+      this.localRenderer.flash = 1;
+      this.shakeMag = 1.6;
+      // 더 이상 조작할 수 없다 — 화면은 관전으로 넘어간다
+      this.input.detach();
+      this.localCanvas.style.transition =
+        "transform 0.7s cubic-bezier(0.4, 0, 1, 1), opacity 0.7s ease-out";
+      this.localCanvas.style.transform = "translateY(115%) rotate(-3deg)";
+      this.localCanvas.style.opacity = "0";
+      this.cbs.onSelfKO?.();
     };
-    this.match.onPlayerRemoved = (playerId) => {
-      this.remoteRenderers.delete(playerId);
+    // 스냅샷이 오기 전에 자리를 잡아둔 상대에게도 렌더러를 붙인다
+    this.match.onRemoteAdded = (playerId) => {
+      this.bindRemoteRenderer(playerId);
     };
 
     this.localRenderer = new Renderer(localCanvas);
@@ -111,6 +131,7 @@ export class VersusSession {
         this.actionText.push("UNDO", FUNKY.sky, 0.85);
       }
     };
+    this.attachStrategyKeys();
 
     this.loop = new GameLoop(this.match.local, opts.perf, {
       pollInput: () => this.input.poll(),
@@ -129,6 +150,7 @@ export class VersusSession {
   destroy(): void {
     this.loop.stop();
     this.input.detach();
+    window.removeEventListener("keydown", this.strategyKeys);
     this.sound.dispose();
     this.match.dispose();
   }
@@ -152,6 +174,50 @@ export class VersusSession {
   addRemoteCanvas(playerId: string, canvas: HTMLCanvasElement): void {
     this.remoteCanvases.set(playerId, canvas);
     this.bindRemoteRenderer(playerId);
+  }
+
+  /**
+   * 서버가 알린 탈락을 화면에 반영한다.
+   * 보드를 즉시 지우지 않고 아래로 무너뜨리며 사라지게 한 뒤 렌더러를 뗀다.
+   */
+  koRemote(playerId: string): void {
+    this.match.applyKO(playerId);
+    const canvas = this.remoteCanvases.get(playerId);
+    if (canvas) {
+      canvas.style.transition = "transform 0.7s cubic-bezier(0.4, 0, 1, 1), opacity 0.7s ease-out";
+      canvas.style.transform = "translateY(115%) rotate(3deg)";
+      canvas.style.opacity = "0";
+    }
+    // 연출이 끝나면 렌더를 멈춘다(미러 Game은 남겨 두고 그리기만 뗀다)
+    setTimeout(() => {
+      this.remoteRenderers.delete(playerId);
+      this.remoteCanvases.delete(playerId);
+    }, 720);
+  }
+
+  /** 크게 보고 있는 상대 — 이 사람에게서만 고빈도 스냅샷을 받는다 */
+  setFocus(playerId: string | null): void {
+    this.match.setFocus(playerId);
+  }
+
+  setStrategy(s: TargetStrategy): void {
+    if (this.match.strategy === s) return;
+    this.match.strategy = s;
+    this.actionText.push(`TARGET: ${s.toUpperCase()}`, FUNKY.yellow, 0.8);
+    this.sound.play("hold");
+    this.cbs.onStrategyChange?.(s);
+  }
+
+  /** 숫자키 1~4로 타깃 전략 전환(TETR.IO와 같은 자리) */
+  private strategyKeys = (e: KeyboardEvent): void => {
+    const idx = ["Digit1", "Digit2", "Digit3", "Digit4"].indexOf(e.code);
+    if (idx < 0) return;
+    e.preventDefault();
+    this.setStrategy(TARGET_STRATEGIES[idx]);
+  };
+
+  private attachStrategyKeys(): void {
+    window.addEventListener("keydown", this.strategyKeys);
   }
 
   setGfx(gfx: GfxOptions): void {
@@ -179,10 +245,11 @@ export class VersusSession {
     this.hudAccum++;
     if (this.hudAccum >= 3) {
       this.hudAccum = 0;
-      this.lastHud = versusHud(localGame);
+      this.lastHud = versusHud(localGame, this.match.strategy);
     }
 
     // 로컬: 풀 렌더(이펙트 + 가비지 게이지 + HUD 포함)
+    // KO 뒤에도 몇 프레임은 그린다 — 캔버스가 무너지는 연출 동안 보드가 남아야 한다
     this.localRenderer.render(localGame, alpha, this.gfx, this.particles, this.actionText, this.damage, this.lastHud, localGame.pendingGarbage, localGame.readyGarbage);
     // 원격: 각 상대 미러 단순 렌더(이펙트 없음, 게이지는 표시)
     for (const [playerId, renderer] of this.remoteRenderers) {
@@ -327,8 +394,8 @@ export class VersusSession {
   }
 }
 
-/** 대전 HUD — 로컬 보드에 APM/PPS/VS 표시(테트리오식 경쟁 지표). */
-function versusHud(game: Game): HudInfo {
+/** 대전 HUD — APM/PPS/VS + 현재 타깃 전략(숫자키 1~4로 전환). */
+function versusHud(game: Game, strategy: TargetStrategy): HudInfo {
   const s = game.stats;
   const ls = liveStats(s);
   return {
@@ -336,6 +403,7 @@ function versusHud(game: Game): HudInfo {
       { label: "PIECES", value: String(s.piecesPlaced), sub: `, ${ls.pps.toFixed(2)}/S` },
       { label: "ATTACK", value: String(s.attack), sub: `, ${ls.apm.toFixed(0)}/M` },
       { label: "VS", value: ls.vs.toFixed(1) },
+      { label: "TARGET", value: strategy.toUpperCase() },
     ],
     right: [],
   };

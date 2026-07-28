@@ -55,6 +55,13 @@ export type GameMessage =
   | { t: "attack"; holes: number[]; targetId?: string }
   /** 상대 화면 표시용 보드 스냅샷 */
   | { t: "board"; snap: GameSnapshot }
+  /**
+   * "지금 네 보드를 크게 보고 있다"는 알림.
+   * 받은 쪽은 그 사람에게만 스냅샷을 고빈도로 보내 트래픽을 아낀다
+   * (인원이 늘면 전체 브로드캐스트만으로는 N² 로 불어난다).
+   * watching=false면 포커스 해제.
+   */
+  | { t: "focus"; watching: boolean }
   /** 대기실·관전 채팅 */
   | { t: "chat"; nick: string; text: string };
 
