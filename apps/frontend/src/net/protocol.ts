@@ -1,73 +1,110 @@
-import type { RuleSet } from "@fetris/engine/types";
+import type { RuleSet, Handling } from "@fetris/engine/types";
 import type { GameSnapshot } from "@fetris/engine/game";
 
 // ============================================================================
-// 대전 네트워크 프로토콜 — 클라이언트 ↔ 서버(릴레이) ↔ 상대 클라이언트.
-// 서버는 sender-authoritative 릴레이라 페이로드를 그대로 전달한다.
-// N인 지원: relay → 전체 브로드캐스트, relay-to → 특정 플레이어에게.
+// 대전 네트워크 프로토콜 — 클라이언트 ↔ 릴레이 서버 ↔ 다른 클라이언트.
+//
+// 매치 진행(누가 참가하는지, 언제 시작하는지, 누가 몇 등인지)은 서버가 소유하고,
+// 게임 내용물(보드·가비지·공격)은 클라이언트끼리 sender-authoritative로 주고받는다.
+// 서버 쪽 정의는 apps/backend/src/protocol.ts — 변경 시 함께 맞춰야 한다.
 // ============================================================================
+
+export type RoomPhase = "lobby" | "countdown" | "playing" | "results";
+export type PlayerRole = "player" | "spectator";
 
 export interface PlayerInfo {
   id: string;
-  isHost: boolean;
   nick: string;
-  /** 봇 참가자 여부. 구버전 서버는 보내지 않으므로 optional. */
-  isBot?: boolean;
+  isHost: boolean;
+  isBot: boolean;
+  role: PlayerRole;
+  ready: boolean;
+  /** 이번 매치 생존 여부(playing 중에만 의미 있음) */
+  alive: boolean;
+  /** 확정된 순위. 1 = 우승. null = 미확정 */
+  placement: number | null;
+  /** 이 방에 머무는 동안 쌓인 우승 횟수 */
+  wins: number;
 }
 
 /**
- * 구버전 릴레이 서버 호환용 단일-상대 ID.
- * 구버전 서버는 myId/player/players/from 필드를 보내지 않으므로, 1대1에서
- * 상대를 식별할 수 없다. 그 경우 이 고정 ID로 단일 상대를 다룬다(N인은 새 서버 필요).
+ * 매치 설정. simRate와 handling은 리플레이 검증에 반드시 필요하다 —
+ * 같은 시드·입력이라도 simRate가 다르면 다른 결과가 나온다.
  */
-export const FALLBACK_PEER_ID = "__peer__";
+export interface MatchConfig {
+  rule: RuleSet;
+  handling: Handling;
+  simRate: number;
+  sharePieces: boolean;
+  undo: boolean;
+  attackMul: number;
+}
 
-/** 방 안에서 플레이어가 주고받는 게임 메시지(서버는 상대에게 그대로 중계) */
+export interface RoomState {
+  code: string;
+  phase: RoomPhase;
+  maxPlayers: number;
+  players: PlayerInfo[];
+  config: MatchConfig | null;
+  matchId: number;
+}
+
+/** 방 안에서 플레이어끼리 주고받는 게임 메시지(서버는 그대로 중계) */
 export type GameMessage =
-  /** 호스트→게스트: 대기실 룸 설정(룰·공격배수·옵션) 동기화. 입장 시·편집 시 전송. */
-  | { t: "settings"; rule: RuleSet; attackMul: [number, number]; undo: boolean; sharePieces: boolean; rounds: number }
-  /** 호스트→모두: 이번 판 시작(시드 포함). 매 대결/재대결마다 새 시드. */
-  | { t: "start"; seed: number }
-  /** 상쇄 후 보낸 순수 공격(holes = 줄별 구멍 컬럼, targetId = 공격 대상 플레이어 ID) */
+  /** 상쇄 후 보낸 순수 공격(holes = 줄별 구멍 컬럼, targetId = 공격 대상) */
   | { t: "attack"; holes: number[]; targetId?: string }
   /** 상대 화면 표시용 보드 스냅샷 */
   | { t: "board"; snap: GameSnapshot }
-  /** 대기실 채팅 메시지 */
-  | { t: "chat"; nick: string; text: string }
-  /** 내 게임오버 통지 */
-  | { t: "dead" };
+  /** 대기실·관전 채팅 */
+  | { t: "chat"; nick: string; text: string };
 
-/**
- * 클라이언트→서버 제어 메시지(방 수명 관리).
- * 봇 러너 전용 메시지(bot-hello 등)는 여기 없다 — 서버의 `/bot` 경로에만 해당하며
- * 정의는 backend `src/protocol.ts`에 있다.
- */
+/** 클라이언트 → 서버 제어 메시지 */
 export type ClientControl =
   | { t: "create"; maxPlayers?: number; nick?: string }
   | { t: "join"; code: string; nick?: string }
   | { t: "leave" }
   | { t: "relay"; msg: GameMessage }
   | { t: "relay-to"; targetId: string; msg: GameMessage }
-  /** 호스트 전용: 대기 중인 봇 러너에게 봇 한 명을 이 방으로 초대 요청 */
+  | { t: "ready"; ready: boolean }
+  | { t: "set-role"; role: PlayerRole }
+  | { t: "config"; config: MatchConfig }
+  | { t: "start-match" }
+  /** 내가 탈락했다는 자기 신고 */
+  | { t: "ko" }
+  /** 매치 종료 후 리플레이 제출(검증용) */
+  | { t: "replay"; matchId: number; frames: number; keys: number[] }
   | { t: "add-bot"; nick?: string }
-  /** 호스트 전용: 방에 있는 봇 퇴장 */
   | { t: "kick-bot"; playerId: string };
 
-/** 서버→클라이언트 제어 메시지 */
+/** 서버 → 클라이언트 제어 메시지 */
 export type ServerControl =
-  | { t: "created"; code: string; myId: string }
-  | { t: "joined"; code: string; myId: string; players: PlayerInfo[] }
-  | { t: "peer-joined"; player: PlayerInfo }
-  | { t: "peer-left"; playerId: string }
+  | { t: "created"; code: string; myId: string; state: RoomState }
+  | { t: "joined"; code: string; myId: string; state: RoomState }
+  | { t: "state"; state: RoomState }
+  | { t: "countdown"; matchId: number; startsAt: number; seconds: number }
+  | { t: "match-start"; matchId: number; seed: number; config: MatchConfig; players: string[] }
+  | { t: "ko"; playerId: string; placement: number; remaining: number }
+  | { t: "match-end"; matchId: number; winnerId: string | null; standings: { playerId: string; placement: number }[] }
   | { t: "error"; reason: string }
   | { t: "relay"; from: string; msg: GameMessage }
-  /** add-bot 접수됨 — 실제 착석은 뒤이어 오는 peer-joined로 알 수 있다 */
   | { t: "bot-pending"; ticket: string; nick: string; runnerId: string };
 
 export type AnyMessage = ClientControl | ServerControl;
 
-/** 플레이어 식별 — 좌(나)/우(상대) 렌더 컬러 구분에 사용 */
-export const enum Side {
-  P1 = 0,
-  P2 = 1,
-}
+/**
+ * 공격 타깃 전략 — TETR.IO 방식. 수동 지정은 없다.
+ *  random  — 매 공격마다 무작위 생존자
+ *  even    — 내가 가장 적게 때린 상대(공격을 고르게 분배)
+ *  elims   — KO에 가장 가까운 상대(보드가 높이 쌓인 쪽)
+ *  payback — 최근 나를 때린 상대에게 되갚음
+ */
+export type TargetStrategy = "random" | "even" | "elims" | "payback";
+
+export const TARGET_STRATEGIES: readonly TargetStrategy[] = ["random", "even", "elims", "payback"];
+
+export const TARGET_LABELS: Record<TargetStrategy, string> = {
+  random: "RANDOM",
+  even: "EVEN",
+  elims: "ELIMS",
+  payback: "PAYBACK",
+};

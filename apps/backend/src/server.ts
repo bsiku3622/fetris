@@ -1,22 +1,36 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer, type Server } from "node:http";
 import { randomUUID } from "node:crypto";
-import type { ClientControl, ServerControl, PlayerInfo, BotRunnerInfo } from "./protocol.js";
+import type {
+  ClientControl,
+  ServerControl,
+  PlayerInfo,
+  PlayerRole,
+  BotRunnerInfo,
+  MatchConfig,
+  RoomPhase,
+  RoomState,
+} from "./protocol.js";
 
 // ============================================================================
-// Fetris Custom Room 릴레이 서버 — N인 멀티플레이어 지원.
-//  - 방 코드 기반 매칭. 호스트가 방 생성, 참가자가 코드로 입장.
-//  - sender-authoritative 릴레이: 게임 메시지를 내용 해석 없이 중계.
-//  - relay: 발신자 제외 방 전체 브로드캐스트.
-//  - relay-to: 특정 플레이어(targetId)에게만 전달.
-//  - 플레이어가 나가면 방은 유지, 마지막 인원이 나가면 방 삭제.
-//  - 호스트 이탈 시 다음 플레이어가 호스트 승계(사람 우선).
+// Fetris 릴레이 서버 — 방 관리 + 서버 권위 매치 진행.
+//
+// 서버가 소유하는 것
+//  - 방 상태 머신: lobby → countdown → playing → results → lobby
+//  - 참가자 명단·역할(참가/관전)·준비 상태
+//  - 라스트맨 스탠딩 판정: KO 순서로 순위를 매기고 마지막 1인이 우승
+//  - 방에 머무는 동안의 누적 승수
+//
+// 서버가 모르는 것
+//  - 보드 내용, 가비지 계산, 시드로 무엇이 나오는지
+//  - relay/relay-to 페이로드는 해석 없이 그대로 중계(sender-authoritative)
+//
+// KO는 자기 신고다. 서버는 보드를 모르므로 검증할 수 없고, 리플레이 검증이
+// 붙기 전까지는 신고를 그대로 믿는다.
 //
 // 봇 엔드포인트 — WS 경로 `/bot` (사람 클라이언트는 `/`):
-//  - 서버는 봇을 실행하지 않는다. 외부 봇 러너가 `/bot`에 붙어 대기하고,
-//    호스트의 add-bot 요청을 받으면 서버가 티켓과 함께 러너를 초대한다.
-//  - 봇도 결국 일반 참가자로 앉으므로 게임 로직은 여전히 클라이언트 몫이다.
-//  - botToken이 설정되면 `/bot?token=...`이 일치해야 연결이 유지된다.
+//  외부 봇 러너가 붙어 대기하고, 호스트의 add-bot에 서버가 티켓을 발급해
+//  초대하면 봇이 참가자 슬롯에 착석한다. 서버는 봇을 실행하지 않는다.
 // ============================================================================
 
 let _idCounter = 0;
@@ -35,6 +49,11 @@ interface Player {
   isBot: boolean;
   /** 이 봇을 보낸 러너(초대로 앉은 경우) — 이탈 시 점유 해제용 */
   runner?: BotRunner;
+  role: PlayerRole;
+  ready: boolean;
+  alive: boolean;
+  placement: number | null;
+  wins: number;
 }
 
 interface Room {
@@ -43,6 +62,13 @@ interface Room {
   maxPlayers: number;
   /** add-bot으로 잡아둔 미착석 슬롯 수 */
   reserved: number;
+  phase: RoomPhase;
+  config: MatchConfig | null;
+  matchId: number;
+  /** 이번 매치에 참가한 플레이어 id (시작 시점에 확정) */
+  participants: string[];
+  countdownTimer: ReturnType<typeof setTimeout> | null;
+  resultsTimer: ReturnType<typeof setTimeout> | null;
 }
 
 /** `/bot`에 붙어 초대를 기다리는 봇 러너(control-plane 연결) */
@@ -72,6 +98,11 @@ const BOT_PATH = "/bot";
 /** 초대 후 이 시간 안에 봇이 착석하지 않으면 예약을 해제한다 */
 const BOT_JOIN_TIMEOUT_MS = 15_000;
 const MAX_BOT_CAPACITY = 16;
+/** 카운트다운 길이 — 클라는 이 시간 동안 보드를 띄우고 입력만 잠근다 */
+const COUNTDOWN_SECONDS = 3;
+/** 순위표를 보여주고 대기실로 돌아가기까지 */
+const RESULTS_MS = 6000;
+const MIN_PARTICIPANTS = 2;
 
 function genCode(rooms: Map<string, Room>): string {
   for (let attempt = 0; attempt < 1000; attempt++) {
@@ -87,6 +118,10 @@ function genCode(rooms: Map<string, Room>): string {
 export interface RelayServerOptions {
   /** 설정하면 `/bot?token=...`이 일치하는 연결만 봇으로 받아들인다 */
   botToken?: string;
+  /** 카운트다운 길이(초). 테스트에서 줄여 쓴다. */
+  countdownSeconds?: number;
+  /** 순위표 표시 시간(ms). 테스트에서 줄여 쓴다. */
+  resultsMs?: number;
 }
 
 export interface RelayServer {
@@ -100,6 +135,9 @@ export interface RelayServer {
 
 export function startServer(port: number, opts: RelayServerOptions = {}): RelayServer {
   const botToken = opts.botToken?.trim() || "";
+  const countdownSeconds = opts.countdownSeconds ?? COUNTDOWN_SECONDS;
+  const resultsMs = opts.resultsMs ?? RESULTS_MS;
+
   const rooms = new Map<string, Room>();
   const sockToPlayer = new Map<WebSocket, { room: Room; player: Player }>();
   const runners = new Map<WebSocket, BotRunner>();
@@ -152,10 +190,28 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
 
   const playerInfoOf = (p: Player): PlayerInfo => ({
     id: p.id,
-    isHost: p.isHost,
     nick: p.nick,
+    isHost: p.isHost,
     isBot: p.isBot,
+    role: p.role,
+    ready: p.ready,
+    alive: p.alive,
+    placement: p.placement,
+    wins: p.wins,
   });
+
+  const stateOf = (room: Room): RoomState => ({
+    code: room.code,
+    phase: room.phase,
+    maxPlayers: room.maxPlayers,
+    players: room.players.map(playerInfoOf),
+    config: room.config,
+    matchId: room.matchId,
+  });
+
+  const broadcastState = (room: Room): void => {
+    broadcast(room, { t: "state", state: stateOf(room) });
+  };
 
   const occupancy = (room: Room): number => room.players.length + room.reserved;
 
@@ -170,6 +226,136 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     if (asked) return asked;
     return `Bot ${room.players.filter((p) => p.isBot).length + room.reserved + 1}`;
   };
+
+  // ---- 매치 상태 머신 -------------------------------------------------------
+
+  const clearTimers = (room: Room): void => {
+    if (room.countdownTimer) clearTimeout(room.countdownTimer);
+    if (room.resultsTimer) clearTimeout(room.resultsTimer);
+    room.countdownTimer = null;
+    room.resultsTimer = null;
+  };
+
+  /** 이번 매치를 뛰는(뛴) 플레이어들 */
+  const participantsOf = (room: Room): Player[] =>
+    room.participants
+      .map((id) => room.players.find((p) => p.id === id))
+      .filter((p): p is Player => !!p);
+
+  /** 다음 매치에 참가할 자격이 있는 플레이어(관전자 제외) */
+  const rosterOf = (room: Room): Player[] => room.players.filter((p) => p.role === "player");
+
+  /** 대기실로 되돌리고 다음 판을 위해 준비 상태를 초기화한다 */
+  const returnToLobby = (room: Room): void => {
+    clearTimers(room);
+    room.phase = "lobby";
+    room.participants = [];
+    for (const p of room.players) {
+      p.alive = true;
+      p.placement = null;
+      // 봇은 언제나 준비됨. 사람은 매 판 다시 눌러야 한다.
+      p.ready = p.isBot;
+    }
+    broadcastState(room);
+  };
+
+  const endMatch = (room: Room, winner: Player | null): void => {
+    clearTimers(room);
+    if (winner) {
+      winner.placement = 1;
+      winner.alive = false;
+      winner.wins++;
+    }
+    const standings = participantsOf(room)
+      .filter((p) => p.placement !== null)
+      .sort((a, b) => (a.placement ?? 99) - (b.placement ?? 99))
+      .map((p) => ({ playerId: p.id, placement: p.placement as number }));
+
+    room.phase = "results";
+    broadcast(room, {
+      t: "match-end",
+      matchId: room.matchId,
+      winnerId: winner?.id ?? null,
+      standings,
+    });
+    broadcastState(room);
+    room.resultsTimer = setTimeout(() => returnToLobby(room), resultsMs);
+    room.resultsTimer.unref?.();
+  };
+
+  /**
+   * 탈락 처리 — 라스트맨 스탠딩. 남은 생존자가 1명이면 그 사람이 우승,
+   * 0명이면(동시 탈락) 승자 없이 끝난다.
+   */
+  const eliminate = (room: Room, player: Player): void => {
+    if (room.phase !== "playing" && room.phase !== "countdown") return;
+    if (!room.participants.includes(player.id)) return;
+    if (!player.alive) return;
+
+    player.alive = false;
+    const total = room.participants.length;
+    const dead = participantsOf(room).filter((p) => !p.alive).length;
+    // 첫 탈락자가 꼴찌 → 탈락 순서의 역순으로 순위가 매겨진다
+    player.placement = total - dead + 1;
+
+    const survivors = participantsOf(room).filter((p) => p.alive);
+    broadcast(room, {
+      t: "ko",
+      playerId: player.id,
+      placement: player.placement,
+      remaining: survivors.length,
+    });
+
+    if (survivors.length <= 1) {
+      endMatch(room, survivors[0] ?? null);
+    } else {
+      broadcastState(room);
+    }
+  };
+
+  const startMatch = (room: Room): void => {
+    clearTimers(room);
+    const roster = participantsOf(room);
+    // 카운트다운 도중 이탈로 인원이 무너졌으면 대기실로 되돌린다
+    if (roster.length < MIN_PARTICIPANTS) {
+      returnToLobby(room);
+      return;
+    }
+    room.phase = "playing";
+    const seed = (Math.random() * 0xffffffff) >>> 0;
+    broadcast(room, {
+      t: "match-start",
+      matchId: room.matchId,
+      seed,
+      config: room.config as MatchConfig,
+      players: room.participants.slice(),
+    });
+    broadcastState(room);
+  };
+
+  const beginCountdown = (room: Room): void => {
+    clearTimers(room);
+    room.matchId++;
+    room.phase = "countdown";
+    // 참가자 확정 — 이후 들어오는 사람은 관전자가 된다
+    room.participants = rosterOf(room).map((p) => p.id);
+    for (const p of room.players) {
+      p.alive = room.participants.includes(p.id);
+      p.placement = null;
+    }
+    const startsAt = Date.now() + countdownSeconds * 1000;
+    broadcast(room, {
+      t: "countdown",
+      matchId: room.matchId,
+      startsAt,
+      seconds: countdownSeconds,
+    });
+    broadcastState(room);
+    room.countdownTimer = setTimeout(() => startMatch(room), countdownSeconds * 1000);
+    room.countdownTimer.unref?.();
+  };
+
+  // ---- 방 수명 -------------------------------------------------------------
 
   const releasePending = (pending: PendingBot): void => {
     clearTimeout(pending.timer);
@@ -190,6 +376,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     if (room.players.some((p) => !p.isBot)) return;
     const leftover = room.players;
     room.players = [];
+    clearTimers(room);
     for (const p of leftover) {
       sockToPlayer.delete(p.ws);
       if (p.runner) p.runner.active = Math.max(0, p.runner.active - 1);
@@ -204,10 +391,16 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     if (!entry) return;
     sockToPlayer.delete(ws);
     const { room, player } = entry;
+    const wasParticipant =
+      (room.phase === "playing" || room.phase === "countdown") &&
+      room.participants.includes(player.id) &&
+      player.alive;
+
     room.players = room.players.filter((p) => p !== player);
     if (player.runner) player.runner.active = Math.max(0, player.runner.active - 1);
 
     if (room.players.length === 0) {
+      clearTimers(room);
       cancelPending((pending) => pending.room === room);
       rooms.delete(room.code);
       return;
@@ -219,7 +412,18 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       heir.isHost = true;
     }
 
-    broadcast(room, { t: "peer-left", playerId: player.id });
+    // 매치 중 이탈은 탈락으로 처리 — 이미 명단에서 빠졌으므로 직접 정산한다
+    if (wasParticipant) {
+      const survivors = participantsOf(room).filter((p) => p.alive);
+      broadcast(room, { t: "ko", playerId: player.id, placement: 0, remaining: survivors.length });
+      if (survivors.length <= 1) {
+        endMatch(room, survivors[0] ?? null);
+        closeRoomIfAbandoned(room);
+        return;
+      }
+    }
+
+    broadcastState(room);
     closeRoomIfAbandoned(room);
   };
 
@@ -248,7 +452,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
         // 기존 방에 있으면 먼저 나가기
         if (sockToPlayer.has(ws)) teardownPlayer(ws);
         const code = genCode(rooms);
-        const maxPlayers = Math.min(8, Math.max(2, (raw.maxPlayers ?? 4)));
+        const maxPlayers = Math.min(8, Math.max(2, raw.maxPlayers ?? 4));
         const playerId = genPlayerId();
         const isBot = botSockets.has(ws);
         const player: Player = {
@@ -257,11 +461,27 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           isHost: true,
           nick: sanitizeNick(raw.nick),
           isBot,
+          role: "player",
+          ready: isBot,
+          alive: true,
+          placement: null,
+          wins: 0,
         };
-        const room: Room = { code, players: [player], maxPlayers, reserved: 0 };
+        const room: Room = {
+          code,
+          players: [player],
+          maxPlayers,
+          reserved: 0,
+          phase: "lobby",
+          config: null,
+          matchId: 0,
+          participants: [],
+          countdownTimer: null,
+          resultsTimer: null,
+        };
         rooms.set(code, room);
         sockToPlayer.set(ws, { room, player });
-        send(ws, { t: "created", code, myId: playerId });
+        send(ws, { t: "created", code, myId: playerId, state: stateOf(room) });
         break;
       }
       case "join": {
@@ -302,12 +522,112 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
         if (runner) runner.active++;
 
         const playerId = genPlayerId();
-        const player: Player = { ws, id: playerId, isHost: false, nick, isBot, runner };
+        // 매치가 진행 중이면 관전자로 붙고 다음 판부터 참가한다
+        const midMatch = room.phase !== "lobby";
+        const player: Player = {
+          ws,
+          id: playerId,
+          isHost: false,
+          nick,
+          isBot,
+          runner,
+          role: midMatch ? "spectator" : "player",
+          ready: isBot && !midMatch,
+          alive: false,
+          placement: null,
+          wins: 0,
+        };
         room.players.push(player);
         sockToPlayer.set(ws, { room, player });
-        const currentPlayers = room.players.filter((p) => p !== player).map(playerInfoOf);
-        send(ws, { t: "joined", code: room.code, myId: playerId, players: currentPlayers });
-        broadcast(room, { t: "peer-joined", player: playerInfoOf(player) }, ws);
+        send(ws, { t: "joined", code: room.code, myId: playerId, state: stateOf(room) });
+        broadcastState(room);
+        break;
+      }
+      case "ready": {
+        const entry = sockToPlayer.get(ws);
+        if (!entry) return;
+        if (entry.room.phase !== "lobby") {
+          send(ws, { t: "error", reason: "not-in-lobby" });
+          return;
+        }
+        if (entry.player.role !== "player") {
+          send(ws, { t: "error", reason: "spectator-cannot-ready" });
+          return;
+        }
+        entry.player.ready = !!raw.ready;
+        broadcastState(entry.room);
+        break;
+      }
+      case "set-role": {
+        const entry = sockToPlayer.get(ws);
+        if (!entry) return;
+        if (entry.room.phase !== "lobby") {
+          send(ws, { t: "error", reason: "not-in-lobby" });
+          return;
+        }
+        const role: PlayerRole = raw.role === "spectator" ? "spectator" : "player";
+        entry.player.role = role;
+        if (role === "spectator") entry.player.ready = false;
+        broadcastState(entry.room);
+        break;
+      }
+      case "config": {
+        const entry = sockToPlayer.get(ws);
+        if (!entry) return;
+        if (!entry.player.isHost) {
+          send(ws, { t: "error", reason: "not-host" });
+          return;
+        }
+        if (entry.room.phase !== "lobby") {
+          send(ws, { t: "error", reason: "not-in-lobby" });
+          return;
+        }
+        if (!raw.config || typeof raw.config !== "object") {
+          send(ws, { t: "error", reason: "bad-config" });
+          return;
+        }
+        entry.room.config = raw.config;
+        // 설정이 바뀌면 준비를 물린다 — 모르는 룰로 시작하는 걸 막는다
+        for (const p of entry.room.players) if (!p.isBot) p.ready = false;
+        broadcastState(entry.room);
+        break;
+      }
+      case "start-match": {
+        const entry = sockToPlayer.get(ws);
+        if (!entry) return;
+        const room = entry.room;
+        if (!entry.player.isHost) {
+          send(ws, { t: "error", reason: "not-host" });
+          return;
+        }
+        if (room.phase !== "lobby") {
+          send(ws, { t: "error", reason: "not-in-lobby" });
+          return;
+        }
+        if (!room.config) {
+          send(ws, { t: "error", reason: "no-config" });
+          return;
+        }
+        const roster = rosterOf(room);
+        if (roster.length < MIN_PARTICIPANTS) {
+          send(ws, { t: "error", reason: "not-enough-players" });
+          return;
+        }
+        if (roster.some((p) => !p.ready)) {
+          send(ws, { t: "error", reason: "not-everyone-ready" });
+          return;
+        }
+        beginCountdown(room);
+        break;
+      }
+      case "ko": {
+        const entry = sockToPlayer.get(ws);
+        if (!entry) return;
+        eliminate(entry.room, entry.player);
+        break;
+      }
+      case "replay": {
+        // 리플레이 검증은 아직 붙지 않았다. 형식만 받아두고 조용히 버린다.
         break;
       }
       case "add-bot": {
@@ -321,6 +641,10 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           return;
         }
         const room = entry.room;
+        if (room.phase !== "lobby") {
+          send(ws, { t: "error", reason: "not-in-lobby" });
+          return;
+        }
         if (occupancy(room) >= room.maxPlayers) {
           send(ws, { t: "error", reason: "room-full" });
           return;
@@ -462,6 +786,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     close: () =>
       new Promise<void>((resolve) => {
         clearInterval(heartbeat);
+        for (const room of rooms.values()) clearTimers(room);
         for (const pending of [...pendingBots.values()]) clearTimeout(pending.timer);
         pendingBots.clear();
         for (const ws of wss.clients) ws.terminate();
