@@ -1,0 +1,25 @@
+name: web-ci
+
+# 웹 빌드 + 타입체크 + 테스트 검증(CI). 배포는 Vercel이 담당.
+# main push / PR 시 자동 검증, 수동 실행 가능.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build

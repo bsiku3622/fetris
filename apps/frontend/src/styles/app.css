@@ -1,0 +1,785 @@
+/* Fetris 전역 레이아웃 — funky-ui 토큰 위에 게임 셸 스타일 */
+
+:root {
+  --fx-bg: #fff5d1;
+  --fx-ink: #222;
+  --fx-border: #000;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: var(--fx-bg);
+  font-family: Pretendard, system-ui, -apple-system, sans-serif;
+  color: var(--fx-ink);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+.fx-app {
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- 메뉴 ---- */
+.fx-menu {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  position: relative;
+  overflow: hidden;
+}
+.fx-logo {
+  font-weight: 900;
+  font-size: clamp(3rem, 12vw, 9rem);
+  letter-spacing: -0.04em;
+  line-height: 0.9;
+  text-transform: uppercase;
+  position: relative;
+  transform: rotate(-3deg);
+}
+.fx-logo span {
+  display: inline-block;
+}
+.fx-menu-buttons {
+  display: grid;
+  gap: 0.75rem;
+  width: min(420px, 80vw);
+  z-index: 2;
+}
+.fx-menu-buttons .funky-button {
+  width: 100%;
+  justify-content: center;
+  font-size: 1.1rem;
+}
+.fx-tagline {
+  font-weight: 700;
+  color: #6f6a52;
+  letter-spacing: 0.04em;
+}
+
+/* funky 배경 떠다니는 도형 */
+.fx-bg-shapes {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.fx-shape {
+  position: absolute;
+  border: 3px solid #000;
+  box-shadow: 6px 6px 0 0 rgba(0, 0, 0, 0.2);
+  opacity: 0.9;
+  animation: fx-float 8s ease-in-out infinite;
+}
+@keyframes fx-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-22px) rotate(8deg);
+  }
+}
+
+/* ---- 게임 화면 ---- */
+.fx-game {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  display: flex;
+}
+.fx-canvas-wrap {
+  flex: 1;
+  position: relative;
+  background: #140f22; /* 캔버스 다크 스테이지와 일치 (리사이즈 시 깜빡임 방지) */
+}
+.fx-canvas-wrap canvas {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* 통계 HUD는 캔버스에 직접 그려짐(필드 가장자리 정렬). DOM은 FPS만. */
+.fx-fps {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  font-size: 0.7rem;
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+  z-index: 5;
+}
+
+/* ---- 오버레이(일시정지/결과) ---- */
+.fx-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 245, 209, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+.fx-panel {
+  background: #fff;
+  border: 3px solid #000;
+  box-shadow: 8px 8px 0 0 rgba(0, 0, 0, 0.2);
+  padding: 1.5rem;
+  width: min(440px, 90vw);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.fx-panel h2 {
+  margin: 0;
+  font-weight: 900;
+  font-size: 2rem;
+  text-transform: uppercase;
+}
+
+/* ---- 설정 ---- */
+.fx-settings {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem clamp(1rem, 5vw, 4rem);
+  gap: 1rem;
+  overflow: hidden;
+}
+.fx-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.fx-settings-body {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+.fx-section {
+  margin-bottom: 1.5rem;
+}
+.fx-section-title {
+  font-weight: 900;
+  font-size: 1.1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 3px solid #000;
+  padding-bottom: 0.3rem;
+  margin-bottom: 0.8rem;
+}
+.fx-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+.fx-row-label {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+.fx-row-desc {
+  font-size: 0.75rem;
+  color: #6f6a52;
+  font-weight: 500;
+}
+.fx-row-control {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 200px;
+  justify-content: flex-end;
+}
+
+/* 슬라이더 */
+.fx-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 140px;
+  height: 8px;
+  background: #fff0b8;
+  border: 2px solid #000;
+  outline: none;
+}
+.fx-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: #ff4eba;
+  border: 2px solid #000;
+  cursor: pointer;
+  box-shadow: 2px 2px 0 0 rgba(0, 0, 0, 0.2);
+}
+.fx-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: #ff4eba;
+  border: 2px solid #000;
+  cursor: pointer;
+}
+.fx-slider-val {
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  min-width: 76px;
+  text-align: right;
+}
+.fx-slider-val--editable {
+  cursor: text;
+  border-bottom: 2px dotted rgba(0, 0, 0, 0.3);
+}
+.fx-slider-val--editable:hover {
+  background: #fff0b8;
+  border-bottom-color: #000;
+}
+.fx-slider-input {
+  width: 76px;
+  border: 2px solid #000;
+  background: #fff;
+  padding: 0.15rem 0.35rem;
+  font-weight: 900;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  box-shadow: 2px 2px 0 0 rgba(0, 0, 0, 0.2);
+}
+.fx-slider-input:focus {
+  outline: none;
+  background: #fff0b8;
+}
+
+/* 토글 */
+.fx-toggle {
+  width: 52px;
+  height: 28px;
+  border: 2px solid #000;
+  background: #fff0b8;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.1s ease-out;
+  flex-shrink: 0;
+}
+.fx-toggle.on {
+  background: #00c22a;
+}
+.fx-toggle .knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 22px;
+  height: 22px;
+  background: #fff;
+  border: 2px solid #000;
+  transition: transform 0.1s ease-out;
+}
+.fx-toggle.on .knob {
+  transform: translateX(24px);
+}
+
+/* 세그먼트 선택 */
+.fx-seg {
+  display: inline-flex;
+  border: 2px solid #000;
+  overflow: hidden;
+}
+.fx-seg button {
+  border: none;
+  border-right: 2px solid #000;
+  background: #fff;
+  padding: 0.35rem 0.7rem;
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+.fx-seg button:last-child {
+  border-right: none;
+}
+.fx-seg button.active {
+  background: #7828c8;
+  color: #fff;
+}
+
+/* 키바인딩 버튼 */
+.fx-key {
+  min-width: 90px;
+  border: 2px solid #000;
+  background: #fff;
+  padding: 0.3rem 0.6rem;
+  font-weight: 700;
+  font-size: 0.8rem;
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: 2px 2px 0 0 rgba(0, 0, 0, 0.2);
+}
+.fx-key.listening {
+  background: #ffd500;
+  animation: fx-pulse 0.6s ease-in-out infinite;
+}
+@keyframes fx-pulse {
+  50% {
+    opacity: 0.6;
+  }
+}
+/* 단축키 슬롯 — 액션당 3개 나란히 */
+.fx-keyslots {
+  display: flex;
+  gap: 0.4rem;
+}
+.fx-key--slot {
+  min-width: 56px;
+  text-align: center;
+}
+.fx-key--empty {
+  background: #fff0b8;
+  color: #6f6a52;
+  border-style: dashed;
+  box-shadow: none;
+}
+/* 프리셋 바 */
+.fx-preset-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.75rem;
+  margin-bottom: 0.5rem;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.12);
+}
+.fx-preset-label {
+  font-weight: 900;
+  font-size: 0.8rem;
+  color: #6f6a52;
+  letter-spacing: 0.05em;
+  margin-right: 0.25rem;
+}
+.fx-preset-hint {
+  font-size: 0.75rem;
+  color: #6f6a52;
+  margin-left: 0.25rem;
+}
+/* 커스텀 프리셋 칩 — 버튼 + 모서리 삭제(×) */
+.fx-preset-chip {
+  position: relative;
+  display: inline-flex;
+}
+.fx-preset-del {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 2px solid #000;
+  border-radius: 50%;
+  background: #ff5a5a;
+  color: #fff;
+  font-weight: 900;
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fx-preset-name {
+  border: 2px solid #000;
+  background: #fff;
+  padding: 0.3rem 0.6rem;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 0.8rem;
+  width: 120px;
+}
+/* 키 그룹 소제목(게임 키 / 시스템 키) */
+.fx-keygroup-label {
+  font-weight: 900;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6f6a52;
+  margin: 0.9rem 0 0.2rem;
+}
+.fx-keygroup-label:first-of-type {
+  margin-top: 0.25rem;
+}
+
+.fx-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+  width: min(680px, 86vw);
+  z-index: 2;
+}
+.fx-mode-card {
+  border: 3px solid #000;
+  box-shadow: 6px 6px 0 0 rgba(0, 0, 0, 0.2);
+  padding: 1rem;
+  cursor: pointer;
+  background: #fff;
+  transition: transform 0.1s ease-out, box-shadow 0.1s ease-out;
+  text-align: left;
+  font-family: inherit;
+}
+.fx-mode-card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 8px 8px 0 0 rgba(0, 0, 0, 0.2);
+}
+.fx-mode-card:active {
+  transform: translate(6px, 6px);
+  box-shadow: 0 0 0 0 rgba(0, 0, 0, 0.2);
+}
+.fx-mode-card .name {
+  font-weight: 900;
+  font-size: 1.2rem;
+  text-transform: uppercase;
+}
+.fx-mode-card .desc {
+  font-size: 0.8rem;
+  color: #6f6a52;
+  font-weight: 500;
+  margin-top: 0.25rem;
+}
+
+/* ---- 대전(1v1) ---- */
+.fx-versus {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  background: #140f22;
+}
+.fx-versus-boards {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  gap: 2px;
+}
+.fx-versus-pane {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border: 3px solid #000;
+  min-width: 0;
+}
+.fx-versus-pane .fx-canvas-wrap {
+  flex: 1;
+}
+.fx-versus-label {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.75rem;
+  z-index: 6;
+  font-weight: 900;
+  font-size: 0.85rem;
+  letter-spacing: 0.1em;
+  padding: 0.15rem 0.5rem;
+  border: 2px solid;
+  border-radius: 6px;
+  background: rgba(20, 15, 34, 0.7);
+}
+.fx-versus-quit {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  z-index: 12;
+  font-weight: 900;
+  font-size: 0.8rem;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+}
+.fx-versus-quit:hover {
+  background: rgba(255, 78, 186, 0.6);
+}
+
+/* ---- 대기실 (3단 풀스크린: 플레이어 1 · 설정 2 · 채팅 1) ---- */
+.fx-room {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--fx-bg);
+  overflow: hidden;
+}
+/* 상단 CUSTOM ROOM 바 — funky AppShell navbar 룩 (보라 fill + 흰 이탤릭 브랜드) */
+.fx-room-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 1.75rem;
+  border-bottom: var(--funky-border);
+  background: var(--funky-purple);
+  color: var(--funky-ink-inverse);
+}
+.fx-room-bar__title {
+  font-weight: 900;
+  font-size: 1.1rem;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+/* EXIT — navbar 항목 (보라 위 흰 테두리 박스) */
+/* EXIT — funky-ui 사이트 nav 버튼(site-navlink) 차용: 컬러 면 위 ghost */
+.fx-room-exit {
+  font-family: inherit;
+  font-weight: 900;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--funky-ink-inverse);
+  background: rgba(255, 255, 255, 0.12);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  border-radius: var(--funky-radius);
+  padding: 0.4rem 0.85rem;
+  cursor: pointer;
+  transition: background-color var(--funky-motion-duration) var(--funky-motion-easing),
+    border-color var(--funky-motion-duration) var(--funky-motion-easing);
+}
+.fx-room-exit:hover {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.8);
+}
+/* 3단 본문 (1:2:1) */
+/* 본문 — 검정 파티션이 아니라 크림 위에 떠 있는 카드 3장 (class-explorer 차용) */
+.fx-room-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 1.1rem;
+  padding: 1.1rem;
+  overflow: hidden;
+}
+.fx-room-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--funky-surface);
+  border: var(--funky-border);
+  box-shadow: var(--funky-shadow-md);
+  overflow: hidden;
+}
+.fx-room-col--players {
+  flex: 1 1 0;
+}
+.fx-room-col--settings {
+  flex: 2 1 0;
+}
+.fx-room-col--chat {
+  flex: 1 1 0;
+}
+
+/* 컬럼 헤더 — 검정 바가 아니라 카드 위에 떠 있는 네온 칩 (class-explorer 차용) */
+.fx-room-col__head {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  margin: 0.9rem 0 0 0.9rem;
+  padding: 0.34rem 0.72rem;
+  border: var(--funky-border);
+  box-shadow: var(--funky-shadow-sm);
+  color: var(--funky-ink);
+  font-weight: 900;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.fx-room-col--players .fx-room-col__head {
+  background: var(--funky-cyan);
+}
+.fx-room-col--settings .fx-room-col__head {
+  background: var(--funky-yellow);
+}
+.fx-room-col--chat .fx-room-col__head {
+  background: var(--funky-orange);
+  color: var(--funky-ink);
+}
+.fx-room-col__head-count {
+  margin-left: 0.5rem;
+  font-size: 0.74rem;
+  opacity: 0.65;
+}
+.fx-room-col__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--funky-space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.fx-room-col__foot {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: var(--funky-space-lg);
+  border-top: var(--funky-border);
+}
+.fx-room-col__foot .funky-button {
+  width: 100%;
+  justify-content: center;
+}
+
+/* 방 코드 블록 */
+.fx-room-code {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.9rem 0.5rem;
+  background: var(--funky-green);
+  border: var(--funky-border);
+  box-shadow: var(--funky-shadow-sm);
+}
+.fx-room-code__label {
+  font-weight: 900;
+  font-size: 0.65rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--funky-ink-inverse);
+}
+.fx-room-code__value {
+  font-weight: 900;
+  font-size: 2.2rem;
+  letter-spacing: 0.26em;
+  line-height: 1.1;
+  text-transform: uppercase;
+  color: var(--funky-ink-inverse);
+}
+.fx-room-code__count {
+  font-weight: 800;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* 로스터 (플레이어 박스 리스트) */
+.fx-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.fx-player-box {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  border: var(--funky-border);
+  background: var(--funky-surface);
+  box-shadow: var(--funky-shadow-sm);
+}
+.fx-player-box__swatch {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 2px solid var(--funky-ink);
+}
+.fx-player-box__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 900;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 라운드 스코어 */
+.fx-room-score {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  font-weight: 900;
+  font-size: 1.1rem;
+}
+
+/* 설정 그룹 (탭 패널 내부) */
+.fx-settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+/* 채팅 */
+.fx-chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.fx-chat__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--funky-space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+.fx-chat__empty {
+  opacity: 0.4;
+  font-weight: 700;
+}
+.fx-chat__sys {
+  opacity: 0.55;
+  font-weight: 800;
+  font-style: italic;
+}
+.fx-chat__msg {
+  font-weight: 700;
+  word-break: break-word;
+}
+.fx-chat__nick {
+  font-weight: 900;
+}
+.fx-chat__compose {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 0.4rem;
+  padding: var(--funky-space-md);
+  border-top: var(--funky-border);
+}
+
+/* 에러 배너 (대기실 상단 고정) */
+.fx-room-error {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  font-weight: 900;
+  padding: 0.55rem 1.2rem;
+  color: var(--funky-ink-inverse);
+  background: var(--funky-danger);
+  border: var(--funky-border);
+  box-shadow: var(--funky-shadow-md);
+}
