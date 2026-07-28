@@ -2,11 +2,11 @@ import { describe, it, expect } from "vitest";
 import { VersusMatch } from "../src/app/VersusMatch";
 import { createLoopbackPair } from "../src/net/transport";
 import { Side } from "../src/net/protocol";
-import { Phase } from "../src/engine/game";
-import type { InputCommands } from "../src/engine/game";
-import { Piece, Rot } from "../src/engine/types";
-import { shapeOf } from "../src/engine/pieces";
-import { STANDARD_RULESET, DEFAULT_HANDLING } from "../src/engine/config";
+import { Phase } from "@fetris/engine/game";
+import type { InputCommands } from "@fetris/engine/game";
+import { Piece, Rot } from "@fetris/engine/types";
+import { shapeOf } from "@fetris/engine/pieces";
+import { STANDARD_RULESET, DEFAULT_HANDLING } from "@fetris/engine/config";
 
 const CMD = (over: Partial<InputCommands> = {}): InputCommands => ({
   rotateCW: false,

@@ -1,5 +1,5 @@
-import { Game } from "./game";
-import type { InputCommands } from "./game";
+import { Game } from "./game.js";
+import type { InputCommands } from "./game.js";
 
 // ============================================================================
 // InputManager — DOM 키보드 → 게임 입력.

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { B2BSurge } from "../src/engine/scoring";
-import { Piece, SpinType } from "../src/engine/types";
-import { STANDARD_RULESET } from "../src/engine/config";
+import { B2BSurge } from "../src/scoring.js";
+import { Piece, SpinType } from "../src/types.js";
+import { STANDARD_RULESET } from "../src/config.js";
 
 // TETR.IO 시즌2 B2B Charging + Surge 검증
 describe("B2BSurge — 시즌2 충전/방출", () => {

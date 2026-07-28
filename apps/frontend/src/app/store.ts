@@ -1,11 +1,11 @@
-import type { Handling, RuleSet, GameModeName } from "../engine/types";
-import type { GameSnapshot } from "../engine/game";
-import type { KeyMap } from "../engine/input";
+import type { Handling, RuleSet, GameModeName } from "@fetris/engine/types";
+import type { GameSnapshot } from "@fetris/engine/game";
+import type { KeyMap } from "@fetris/engine/input";
 import type { GfxOptions } from "../render/renderer";
 import type { AudioOptions } from "../audio/sound";
-import type { LoopPerfOptions } from "../engine/loop";
-import { DEFAULT_HANDLING, defaultRuleset } from "../engine/config";
-import { DEFAULT_KEYMAP } from "../engine/input";
+import type { LoopPerfOptions } from "@fetris/engine/loop";
+import { DEFAULT_HANDLING, defaultRuleset } from "@fetris/engine/config";
+import { DEFAULT_KEYMAP } from "@fetris/engine/input";
 import { DEFAULT_GFX } from "../render/renderer";
 import { DEFAULT_AUDIO } from "../audio/sound";
 

@@ -1,23 +1,23 @@
-import { Game, EventType } from "../engine/game";
-import type { GameEvent } from "../engine/game";
-import { GameLoop } from "../engine/loop";
-import type { LoopPerfOptions } from "../engine/loop";
+import { Game, EventType } from "@fetris/engine/game";
+import type { GameEvent } from "@fetris/engine/game";
+import { GameLoop } from "@fetris/engine/loop";
+import type { LoopPerfOptions } from "@fetris/engine/loop";
 import { Renderer } from "../render/renderer";
 import type { GfxOptions } from "../render/renderer";
 import { ParticleSystem, ActionTextManager, DamageNumberManager } from "../render/effects";
 import { FUNKY, PIECE_COLORS } from "../render/theme";
 import { SoundEngine, bgmForMode } from "../audio/sound";
 import type { AudioOptions } from "../audio/sound";
-import { InputManager } from "../engine/input";
-import type { KeyMap } from "../engine/input";
+import { InputManager } from "@fetris/engine/input";
+import type { KeyMap } from "@fetris/engine/input";
 import { VersusMatch } from "./VersusMatch";
 import type { MatchResult } from "./VersusMatch";
-import { liveStats } from "../engine/modes";
-import type { HudInfo } from "../engine/modes";
+import { liveStats } from "@fetris/engine/modes";
+import type { HudInfo } from "@fetris/engine/modes";
 import type { MultiTransport } from "../net/transport";
 import { Side } from "../net/protocol";
-import type { Handling, RuleSet } from "../engine/types";
-import { SpinType, Piece } from "../engine/types";
+import type { Handling, RuleSet } from "@fetris/engine/types";
+import { SpinType, Piece } from "@fetris/engine/types";
 
 // ============================================================================
 // VersusSession — 1대1 대전을 구동하는 UI 컨트롤러(GameSession의 대전판).

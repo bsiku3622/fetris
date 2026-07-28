@@ -1,0 +1,19 @@
+{
+  "name": "fetris-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Fetris 워크스페이스 — 게임 클라이언트 · 릴레이 서버 · 공유 엔진",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w fetris",
+    "dev:server": "npm run dev -w fetris-be",
+    "build": "npm run build -w @fetris/engine && npm run build -w fetris && npm run build -w fetris-be",
+    "build:engine": "npm run build -w @fetris/engine",
+    "test": "npm run test -w @fetris/engine && npm run test -w fetris && npm run test -w fetris-be",
+    "typecheck": "npm run typecheck -w @fetris/engine && npm run typecheck -w fetris && npm run typecheck -w fetris-be"
+  }
+}

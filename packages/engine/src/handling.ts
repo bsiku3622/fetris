@@ -1,4 +1,4 @@
-import type { Handling } from "./types";
+import type { Handling } from "./types.js";
 
 // ============================================================================
 // Handling 컨트롤러 — DAS/ARR/DCD를 서브프레임 정밀도로 처리.

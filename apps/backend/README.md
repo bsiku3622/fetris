@@ -87,7 +87,7 @@ npm run bot:example
 FETRIS_WS_URL=ws://localhost:8787 FETRIS_BOT_CAPACITY=4 node examples/bot-runner.mjs
 ```
 
-이 예제에는 플레이 로직이 없습니다(판이 시작되면 잠시 뒤 항복). 실제 봇은 `frontend/src/engine`을 재사용해 보드를 시뮬레이션하면서 `attack` / `board` / `dead` 게임 메시지를 내보내면 됩니다.
+이 예제에는 플레이 로직이 없습니다(판이 시작되면 잠시 뒤 항복). 실제 봇은 `@fetris/engine`을 그대로 import해 보드를 시뮬레이션하면서 `attack` / `board` / `dead` 게임 메시지를 내보내면 됩니다 — 엔진이 워크스페이스 공유 패키지라 서버·클라이언트와 같은 코드로 돌릴 수 있습니다.
 
 ## 테스트
 

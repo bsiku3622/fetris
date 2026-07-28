@@ -1,4 +1,4 @@
-import type { Handling, RuleSet, GameModeName } from "./types";
+import type { Handling, RuleSet, GameModeName } from "./types.js";
 
 // ============================================================================
 // 기본 설정값 — handling(전역), 모드별 RuleSet.

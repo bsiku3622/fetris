@@ -1,4 +1,4 @@
-import { Piece } from "../engine/types";
+import { Piece } from "@fetris/engine/types";
 
 // ============================================================================
 // 렌더 테마 — funky-ui 네온 팔레트를 피스 색으로. 캔버스는 실제 hex가 필요하므로

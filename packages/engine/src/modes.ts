@@ -1,7 +1,7 @@
-import { Game, Phase } from "./game";
-import type { GameModeName, RuleSet, Stats } from "./types";
-import { BlitzScore } from "./scoring";
-import { defaultRuleset } from "./config";
+import { Game, Phase } from "./game.js";
+import type { GameModeName, RuleSet, Stats } from "./types.js";
+import { BlitzScore } from "./scoring.js";
+import { defaultRuleset } from "./config.js";
 
 // ============================================================================
 // 게임 모드 — 40 LINES / BLITZ / ZEN / MARATHON / CUSTOM.

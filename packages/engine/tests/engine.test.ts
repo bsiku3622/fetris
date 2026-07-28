@@ -1,15 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { Board } from "../src/engine/board";
-import { Randomizer } from "../src/engine/randomizer";
-import { getKickset } from "../src/engine/srs";
-import { Game, Phase } from "../src/engine/game";
-import { B2BSurge } from "../src/engine/scoring";
-import { detectSpin } from "../src/engine/spin";
-import { Piece, Rot, SpinType } from "../src/engine/types";
-import { shapeOf } from "../src/engine/pieces";
-import { softDropGravity } from "../src/engine/handling";
-import { optimalInputs, finesseFault } from "../src/engine/finesse";
-import { STANDARD_RULESET, DEFAULT_HANDLING } from "../src/engine/config";
+import { Board } from "../src/board.js";
+import { Randomizer } from "../src/randomizer.js";
+import { getKickset } from "../src/srs.js";
+import { Game, Phase } from "../src/game.js";
+import { B2BSurge } from "../src/scoring.js";
+import { detectSpin } from "../src/spin.js";
+import { Piece, Rot, SpinType } from "../src/types.js";
+import { shapeOf } from "../src/pieces.js";
+import { softDropGravity } from "../src/handling.js";
+import { optimalInputs, finesseFault } from "../src/finesse.js";
+import { STANDARD_RULESET, DEFAULT_HANDLING } from "../src/config.js";
 
 describe("Randomizer 7-bag", () => {
   it("매 7개마다 7종이 정확히 한 번씩", () => {

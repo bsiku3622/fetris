@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Button, Tabs, Text } from "@studio-baeks/funky-ui";
 import type { Settings, KeymapPreset } from "../app/store";
-import type { Handling, GameModeName, RuleSet } from "../engine/types";
-import type { KeyMap } from "../engine/input";
-import { KEYMAP_PRESETS, keymapHasPreset, addPresetToKeymap, removePresetFromKeymap, GAME_ACTIONS, SYSTEM_ACTIONS } from "../engine/input";
+import type { Handling, GameModeName, RuleSet } from "@fetris/engine/types";
+import type { KeyMap } from "@fetris/engine/input";
+import { KEYMAP_PRESETS, keymapHasPreset, addPresetToKeymap, removePresetFromKeymap, GAME_ACTIONS, SYSTEM_ACTIONS } from "@fetris/engine/input";
 import { GFX_PRESETS } from "../render/renderer";
 import { Row, Slider, Toggle, Segmented, KeySlot } from "./controls";
 

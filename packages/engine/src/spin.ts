@@ -1,7 +1,7 @@
-import { Piece, Rot, SpinType } from "./types";
-import type { SpinBonusName } from "./types";
-import type { Board } from "./board";
-import { BOX_SIZE } from "./pieces";
+import { Piece, Rot, SpinType } from "./types.js";
+import type { SpinBonusName } from "./types.js";
+import type { Board } from "./board.js";
+import { BOX_SIZE } from "./pieces.js";
 
 // ============================================================================
 // 스핀 판정 — TETR.IO 시즌2 기준. 마지막 동작이 회전(rotate)일 때만 스핀 가능.
@@ -100,7 +100,7 @@ export function isImmobile(board: Board, piece: Piece, rot: Rot, px: number, py:
 }
 
 // 순환 의존을 피하려 형상 참조를 늦게 바인딩
-import { SHAPES } from "./pieces";
+import { SHAPES } from "./pieces.js";
 const SHAPE_REF = SHAPES;
 
 /** 박스 크기(코너 좌표 보정용) — JLSTZ는 3, I/O는 다름. T-spin은 T만이므로 3 고정 사용. */

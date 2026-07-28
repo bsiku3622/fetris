@@ -1,7 +1,7 @@
 name: web-ci
 
-# 웹 빌드 + 타입체크 + 테스트 검증(CI). 배포는 Vercel이 담당.
-# main push / PR 시 자동 검증, 수동 실행 가능.
+# 워크스페이스 전체(engine · frontend · backend) 타입체크 + 테스트 + 빌드 검증(CI).
+# 배포는 Vercel이 담당. main push / PR 시 자동 검증, 수동 실행 가능.
 
 on:
   push:

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Text, Badge, Tabs } from "@studio-baeks/funky-ui";
 import type { Settings } from "../app/store";
-import type { RuleSet, KicksetName, SpinBonusName, GarbageHoleMode, RandomizerName } from "../engine/types";
+import type { RuleSet, KicksetName, SpinBonusName, GarbageHoleMode, RandomizerName } from "@fetris/engine/types";
 import { NetClient } from "../net/client";
 import { isTauri, lanStart, lanStop, lanDiscover } from "../net/lan";
 import type { LanInfo } from "../net/lan";

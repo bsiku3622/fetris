@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
 
 // Tauri는 고정 포트를 기대한다. 웹 단독 빌드와 데스크탑 빌드가 같은 설정을 공유한다.
 const host = process.env.TAURI_DEV_HOST;
@@ -24,6 +25,14 @@ function stripFunkyCdnFont(): Plugin {
 
 export default defineConfig({
   plugins: [stripFunkyCdnFont(), react()],
+  resolve: {
+    alias: {
+      // 워크스페이스 engine을 빌드 산출물(dist) 대신 소스로 직접 참조한다 —
+      // 엔진을 고칠 때마다 재빌드하지 않아도 HMR이 그대로 동작한다.
+      // (backend는 dist를 쓴다. packages/engine/package.json의 exports 참고)
+      "@fetris/engine": fileURLToPath(new URL("../../packages/engine/src", import.meta.url)),
+    },
+  },
   // 상대 경로 base: Tauri의 file:// 로딩과 정적 호스팅 둘 다에서 동작
   base: "./",
   clearScreen: false,

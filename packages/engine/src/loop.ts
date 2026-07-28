@@ -1,5 +1,5 @@
-import { Game } from "./game";
-import type { InputCommands } from "./game";
+import { Game } from "./game.js";
+import type { InputCommands } from "./game.js";
 
 // ============================================================================
 // GameLoop — 고정 timestep 시뮬레이션 ↔ rAF 렌더 분리.

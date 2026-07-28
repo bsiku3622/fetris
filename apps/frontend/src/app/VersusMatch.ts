@@ -1,6 +1,6 @@
-import { Game, EventType } from "../engine/game";
-import type { GameEvent, InputCommands } from "../engine/game";
-import type { Handling, RuleSet } from "../engine/types";
+import { Game, EventType } from "@fetris/engine/game";
+import type { GameEvent, InputCommands } from "@fetris/engine/game";
+import type { Handling, RuleSet } from "@fetris/engine/types";
 import type { MultiTransport } from "../net/transport";
 import { Side, FALLBACK_PEER_ID } from "../net/protocol";
 import type { GameMessage } from "../net/protocol";

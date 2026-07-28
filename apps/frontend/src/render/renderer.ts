@@ -1,9 +1,9 @@
-import { Game } from "../engine/game";
-import { Piece } from "../engine/types";
-import { shapeOf, BOX_SIZE } from "../engine/pieces";
+import { Game } from "@fetris/engine/game";
+import { Piece } from "@fetris/engine/types";
+import { shapeOf, BOX_SIZE } from "@fetris/engine/pieces";
 import { PIECE_COLORS, FUNKY, darken, lighten } from "./theme";
 import type { ParticleSystem, ActionTextManager, DamageNumberManager } from "./effects";
-import type { HudInfo, StatItem } from "../engine/modes";
+import type { HudInfo, StatItem } from "@fetris/engine/modes";
 
 // ============================================================================
 // Renderer — 단일 캔버스에 [hold | playfield | next] 를 그린다.

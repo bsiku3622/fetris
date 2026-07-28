@@ -48,14 +48,16 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: "./src-tauri -> target"
+          workspaces: "./apps/frontend/src-tauri -> target"
 
+      # 워크스페이스 루트에서 설치 — engine·frontend·backend 의존성이 함께 잡힌다
       - name: Install npm deps
         run: npm ci
 
       - name: Build (Tauri)
         uses: tauri-apps/tauri-action@v0
         with:
+          projectPath: apps/frontend
           args: ${{ matrix.args }}
 
       - name: Upload artifacts
@@ -63,10 +65,10 @@ jobs:
         with:
           name: fetris-${{ matrix.platform }}-${{ strategy.job-index }}
           path: |
-            src-tauri/target/**/release/bundle/**/*.dmg
-            src-tauri/target/**/release/bundle/**/*.app
-            src-tauri/target/**/release/bundle/**/*.msi
-            src-tauri/target/**/release/bundle/**/*.exe
-            src-tauri/target/**/release/bundle/**/*.AppImage
-            src-tauri/target/**/release/bundle/**/*.deb
+            apps/frontend/src-tauri/target/**/release/bundle/**/*.dmg
+            apps/frontend/src-tauri/target/**/release/bundle/**/*.app
+            apps/frontend/src-tauri/target/**/release/bundle/**/*.msi
+            apps/frontend/src-tauri/target/**/release/bundle/**/*.exe
+            apps/frontend/src-tauri/target/**/release/bundle/**/*.AppImage
+            apps/frontend/src-tauri/target/**/release/bundle/**/*.deb
           if-no-files-found: ignore

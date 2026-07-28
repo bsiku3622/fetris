@@ -1,5 +1,5 @@
-import { Piece, Rot } from "./types";
-import { SHAPES, spawnX } from "./pieces";
+import { Piece, Rot } from "./types.js";
+import { SHAPES, spawnX } from "./pieces.js";
 
 // ============================================================================
 // Finesse — 빈 보드에서 피스를 (목표 x, 목표 회전)에 놓는 최소 "입력" 수를 BFS로 계산.

@@ -1,20 +1,20 @@
-import { Game, Phase, EventType } from "../engine/game";
-import type { GameEvent } from "../engine/game";
-import { GameLoop } from "../engine/loop";
-import type { LoopPerfOptions } from "../engine/loop";
+import { Game, Phase, EventType } from "@fetris/engine/game";
+import type { GameEvent } from "@fetris/engine/game";
+import { GameLoop } from "@fetris/engine/loop";
+import type { LoopPerfOptions } from "@fetris/engine/loop";
 import { Renderer } from "../render/renderer";
 import type { GfxOptions } from "../render/renderer";
 import { ParticleSystem, ActionTextManager, DamageNumberManager } from "../render/effects";
 import { FUNKY, PIECE_COLORS } from "../render/theme";
 import { SoundEngine, bgmForMode } from "../audio/sound";
 import type { AudioOptions } from "../audio/sound";
-import { InputManager } from "../engine/input";
-import type { KeyMap } from "../engine/input";
-import { Mode } from "../engine/modes";
+import { InputManager } from "@fetris/engine/input";
+import type { KeyMap } from "@fetris/engine/input";
+import { Mode } from "@fetris/engine/modes";
 import { saveZenState, loadZenState, clearZenState } from "./store";
-import type { HudInfo, ModeResult } from "../engine/modes";
-import type { Handling, GameModeName, RuleSet } from "../engine/types";
-import { SpinType, Piece } from "../engine/types";
+import type { HudInfo, ModeResult } from "@fetris/engine/modes";
+import type { Handling, GameModeName, RuleSet } from "@fetris/engine/types";
+import { SpinType, Piece } from "@fetris/engine/types";
 
 // ============================================================================
 // GameSession — React 밖에서 게임 1판을 구동하는 컨트롤러.

@@ -1,5 +1,5 @@
-import type { RuleSet } from "../engine/types";
-import type { GameSnapshot } from "../engine/game";
+import type { RuleSet } from "@fetris/engine/types";
+import type { GameSnapshot } from "@fetris/engine/game";
 
 // ============================================================================
 // 대전 네트워크 프로토콜 — 클라이언트 ↔ 서버(릴레이) ↔ 상대 클라이언트.

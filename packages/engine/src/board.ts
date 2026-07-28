@@ -1,5 +1,5 @@
-import { Piece } from "./types";
-import type { CellList } from "./pieces";
+import { Piece } from "./types.js";
+import type { CellList } from "./pieces.js";
 
 // ============================================================================
 // 보드 — Int8Array 그리드. hot path(충돌/라인클리어)에서 할당 0.

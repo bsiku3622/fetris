@@ -1,5 +1,5 @@
-import { mulberry32 } from "./randomizer";
-import type { GarbageChunk, GarbageHoleMode } from "./types";
+import { mulberry32 } from "./randomizer.js";
+import type { GarbageChunk, GarbageHoleMode } from "./types.js";
 
 // ============================================================================
 // 가비지 hole 패턴 생성 — 송신측(sender-authoritative)이 결정해 상대에게 보낸다.

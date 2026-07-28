@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react";
 import { Button, Text } from "@studio-baeks/funky-ui";
-import type { GameModeName } from "../engine/types";
+import type { GameModeName } from "@fetris/engine/types";
 import type { Settings } from "../app/store";
 import { loadRecords } from "../app/store";
-import { fmtTime } from "../engine/modes";
+import { fmtTime } from "@fetris/engine/modes";
 import { SoundEngine } from "../audio/sound";
 
 const MODES: { mode: GameModeName; name: string; desc: string }[] = [

@@ -16,6 +16,7 @@
     "tauri:build": "tauri build"
   },
   "dependencies": {
+    "@fetris/engine": "*",
     "@studio-baeks/funky-ui": "^0.1.1",
     "@tauri-apps/api": "^2.11.1",
     "react": "^18.3.1",

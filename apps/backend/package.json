@@ -13,6 +13,7 @@
     "bot:example": "node examples/bot-runner.mjs"
   },
   "dependencies": {
+    "@fetris/engine": "*",
     "ws": "^8.18.0"
   },
   "devDependencies": {

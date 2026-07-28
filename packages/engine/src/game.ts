@@ -1,15 +1,15 @@
-import { Piece, Rot, SpinType, LastAction } from "./types";
-import type { Handling, RuleSet, Stats, ClearResult, GarbageChunk } from "./types";
-import { Board } from "./board";
-import { GarbageGen, cancelGarbage, queuedLines } from "./garbage";
-import { Randomizer, Queue } from "./randomizer";
-import type { QueueSnapshot } from "./randomizer";
-import { shapeOf, spawnX, ALL_PIECES } from "./pieces";
-import { getKickset } from "./srs";
-import { detectSpin } from "./spin";
-import { finesseFault } from "./finesse";
-import { B2BSurge } from "./scoring";
-import { HandlingController, softDropGravity } from "./handling";
+import { Piece, Rot, SpinType, LastAction } from "./types.js";
+import type { Handling, RuleSet, Stats, ClearResult, GarbageChunk } from "./types.js";
+import { Board } from "./board.js";
+import { GarbageGen, cancelGarbage, queuedLines } from "./garbage.js";
+import { Randomizer, Queue } from "./randomizer.js";
+import type { QueueSnapshot } from "./randomizer.js";
+import { shapeOf, spawnX, ALL_PIECES } from "./pieces.js";
+import { getKickset } from "./srs.js";
+import { detectSpin } from "./spin.js";
+import { finesseFault } from "./finesse.js";
+import { B2BSurge } from "./scoring.js";
+import { HandlingController, softDropGravity } from "./handling.js";
 
 // ============================================================================
 // Game — 결정론적 코어. update(dtFrames, input)로 한 시뮬 스텝 진행.

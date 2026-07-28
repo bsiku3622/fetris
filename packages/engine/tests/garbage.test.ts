@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { GarbageGen, cancelGarbage, queuedLines } from "../src/engine/garbage";
-import { Game } from "../src/engine/game";
-import type { InputCommands } from "../src/engine/game";
-import { Piece } from "../src/engine/types";
-import type { GarbageChunk } from "../src/engine/types";
-import { STANDARD_RULESET, DEFAULT_HANDLING } from "../src/engine/config";
+import { GarbageGen, cancelGarbage, queuedLines } from "../src/garbage.js";
+import { Game } from "../src/game.js";
+import type { InputCommands } from "../src/game.js";
+import { Piece } from "../src/types.js";
+import type { GarbageChunk } from "../src/types.js";
+import { STANDARD_RULESET, DEFAULT_HANDLING } from "../src/config.js";
 
 const CMD = (over: Partial<InputCommands> = {}): InputCommands => ({
   rotateCW: false,

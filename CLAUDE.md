@@ -4,35 +4,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 저장소 구성
 
-모노레포가 아니라 **독립된 두 하위 프로젝트**입니다. 각자 자체 `package.json`·`.git`·`tsconfig`를 가집니다. 루트에는 빌드 설정이 없으니 명령은 항상 해당 하위 디렉토리에서 실행합니다.
+npm workspaces 기반 **단일 저장소**입니다. 루트에 통합 스크립트가 있고, 개별 작업은 `-w <패키지>`로 지정하거나 해당 디렉토리에서 실행합니다.
 
-- `frontend/` — 게임 클라이언트. TypeScript + Canvas2D 엔진 + React 18 셸, Vite 6 번들, Tauri v2 데스크탑 패키징.
-- `backend/` (`fetris-be`) — 1대1 대전용 WebSocket 릴레이 서버. `ws` 단독 의존, sender-authoritative 메시지 중계만 담당(게임 로직 없음).
+- `packages/engine` (`@fetris/engine`) — 게임 코어. **순수 TS·결정론적**이며 클라이언트와 서버가 공유합니다. 서버 사이드 리플레이 검증이 이 공유를 전제로 하므로, 비결정적 요소(`Math.random`, 시간 의존, 엔진 구현 재량 함수)를 넣지 마세요.
+- `apps/frontend` (`fetris`) — 게임 클라이언트. Canvas2D 렌더 + React 18 셸, Vite 6 번들, Tauri v2 데스크탑 패키징.
+- `apps/backend` (`fetris-be`) — 대전 릴레이 서버. `ws` 의존 + `@fetris/engine`(검증용). 방·매치 진행은 서버가 관리하고, 게임 페이로드는 해석 없이 중계합니다.
+
+engine은 **frontend에서 소스로, backend에서 빌드 산출물로** 참조됩니다 — frontend는 `vite.config.ts`의 alias와 `tsconfig.json`의 paths로 `packages/engine/src`를 직접 보므로 엔진을 고쳐도 재빌드 없이 HMR이 됩니다. backend는 `exports` 맵을 통해 `dist`를 쓰므로 **backend를 빌드·실행하기 전에 `npm run build:engine`이 선행돼야 합니다.**
 
 ## 명령
 
-### frontend/
+### 루트 (워크스페이스 전체)
 
 ```bash
-npm run dev          # Vite dev 서버 (http://localhost:1420)
-npm test             # Vitest — 엔진 단위 테스트 (tests/*.test.ts)
-npx vitest run tests/engine.test.ts   # 단일 테스트 파일
-npx vitest run -t "<이름>"            # 이름으로 단일 테스트
-npm run typecheck    # tsc -b --noEmit
-npm run build        # tsc -b && vite build → dist/
-npm run tauri:dev    # Tauri 데스크탑 dev (Rust 필요)
-npm run tauri:build  # 네이티브 번들 (현재 OS 대상만 — 크로스 컴파일 불가)
+npm run dev          # 프론트 dev 서버 (http://localhost:1420)
+npm run dev:server   # 릴레이 서버 dev (기본 :8787)
+npm run build        # engine → frontend → backend 순차 빌드
+npm run build:engine # engine만 빌드 (backend 실행 전 필요)
+npm test             # 세 패키지 테스트 전부
+npm run typecheck    # 세 패키지 타입체크 전부
 ```
 
-### backend/
+### 개별 패키지
 
 ```bash
-npm run dev          # tsx watch, 기본 :8787 (PORT 환경변수로 변경)
-npm test             # Vitest — 방 생성/입장/중계/이탈 검증
-npm run build        # tsc → dist/, npm start로 실행
+npm test -w @fetris/engine       # 엔진 단위 테스트 (packages/engine/tests)
+npm test -w fetris               # 대전 통합 테스트 (apps/frontend/tests)
+npm test -w fetris-be            # 방·중계·봇 엔드포인트 테스트
+npm run tauri:dev -w fetris      # Tauri 데스크탑 dev (Rust 필요)
+npm run tauri:build -w fetris    # 네이티브 번들 (현재 OS만 — 크로스 컴파일 불가)
+
+# 단일 테스트는 해당 패키지 디렉토리에서
+cd packages/engine && npx vitest run tests/engine.test.ts
+cd packages/engine && npx vitest run -t "<이름>"
 ```
 
-데스크탑 3-OS 빌드와 웹 배포(GitHub Pages)는 `frontend/.github/workflows/`의 Actions가 처리합니다(로컬에서 재현 불필요).
+데스크탑 3-OS 빌드와 웹 CI는 루트 `.github/workflows/`의 Actions가 처리합니다(로컬에서 재현 불필요).
 
 ## 아키텍처 핵심
 
@@ -48,11 +55,13 @@ npm run build        # tsc → dist/, npm start로 실행
 
 `engine/loop.ts`의 `GameLoop`는 **고정 timestep 시뮬 ↔ rAF 렌더**를 분리합니다. 엔진 시간 단위는 항상 60Hz 프레임(`dtFrames`)이라 `simRate`(60/120/240)나 디스플레이 주사율과 무관하게 메커니즘 수치가 일관됩니다. 메커니즘 상수를 다룰 때 이 "60Hz 프레임 기준" 가정을 항상 유지하세요.
 
-### engine/ 레이어 (순수 TS, DOM 비의존)
+### packages/engine 레이어 (순수 TS)
 
 `board`(그리드/충돌/라인클리어) · `srs`(SRS+/SRS-X/180° 킥테이블) · `spin`(T-spin 3-corner + immobile 판정) · `scoring`(B2B Surge, 곱셈 콤보) · `handling`(DAS/ARR/DCD/SDF) · `randomizer`(7-bag) · `garbage`(대전 가비지/상쇄) · `pieces` · `finesse` · `modes` · `input` · `config`(기본값/룰셋) · `types`.
 
-### 화면 흐름 (frontend/src/app/)
+`input.ts`만 DOM(키 이벤트)에 의존하고 나머지는 전부 DOM 비의존입니다. 서버는 순수 모듈만 import하므로 barrel(index) 파일을 만들지 마세요 — subpath(`@fetris/engine/game`)로만 가져다 씁니다. 패키지 내부 상대 import는 Node ESM 규칙상 **`.js` 확장자가 필요**합니다(`./types.js`). 반대로 소비자 쪽은 확장자 없이 씁니다(`@fetris/engine/types`).
+
+### 화면 흐름 (apps/frontend/src/app/)
 
 `App.tsx`가 `Screen` 유니온(`menu`/`game`/`settings`/`versus`)으로 단일 화면을 전환합니다. 설정은 `store.ts`에서 localStorage(`fetris.settings.v1`)에 깊은 병합으로 영속화됩니다 — 신규 설정 필드를 추가할 땐 깊은 병합 호환을 깨지 않도록 기본값을 `config.ts`/각 모듈 DEFAULT에 함께 넣습니다.
 
@@ -64,9 +73,10 @@ npm run build        # tsc → dist/, npm start로 실행
 - 클라 `net/transport.ts`의 `Transport` 추상화에만 `VersusMatch`가 의존합니다 → 실제 WebSocket이든 로컬 루프백이든 동일 동작(서버 없이 테스트·로컬 대전 가능). 새 대전 로직은 `Transport`/`MultiTransport` 인터페이스 뒤에서 작성하세요.
 - 공격은 **sender-authoritative**: 내 `Attack` 이벤트를 현재 타깃에게 송신하고, 수신 공격은 내 로컬 보드에 가비지로 적재합니다. 보드 스냅샷은 `SNAPSHOT_EVERY_FRAMES` 주기로 브로드캐스트해 상대 화면(시뮬 안 하는 미러)을 갱신합니다.
 - backend는 `relay` 메시지의 게임 페이로드를 **해석하지 않고** 그대로 중계만 합니다. 프로토콜 변경 시 클라 `net/protocol.ts`와 backend `src/protocol.ts`를 함께 맞춰야 합니다.
+- 봇은 서버가 실행하지 않습니다. 외부 봇 러너가 `/bot` 경로로 붙어 대기하고, 호스트의 `add-bot` 요청에 서버가 티켓을 발급해 초대하면 착석합니다 — 전체 프로토콜은 `apps/backend/README.md`의 "봇 엔드포인트" 절에 있습니다.
 
 ## 작업 시 주의
 
 - 사운드는 **100% Web Audio 코드 합성**입니다(`audio/sound.ts`). 외부 오디오 에셋을 추가하지 마세요 — CC0 자유 배포가 프로젝트 전제입니다.
-- 설정 항목을 추가/변경할 땐 `frontend/docs/settings-reference.md`도 함께 갱신합니다.
-- `frontend/.claude/.mode`는 `/discuss`·`/discuss-done` 스킬로만 변경합니다(직접 수정 금지).
+- 설정 항목을 추가/변경할 땐 `apps/frontend/docs/settings-reference.md`도 함께 갱신합니다.
+- 루트 `.claude/.mode`는 `/discuss`·`/discuss-done` 스킬로만 변경합니다(직접 수정 금지). 스킬이 셸의 현재 디렉토리 기준으로 파일을 만드니, 호출 전에 작업 위치가 저장소 루트인지 확인하세요.

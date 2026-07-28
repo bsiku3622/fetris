@@ -1,6 +1,6 @@
-import { Piece } from "./types";
-import { ALL_PIECES } from "./pieces";
-import type { RandomizerName } from "./types";
+import { Piece } from "./types.js";
+import { ALL_PIECES } from "./pieces.js";
+import type { RandomizerName } from "./types.js";
 
 // ============================================================================
 // 랜더마이저 — 큐를 채운다. 결정론을 위해 시드 가능한 PRNG(mulberry32) 사용.

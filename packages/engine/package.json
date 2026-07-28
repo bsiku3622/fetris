@@ -1,0 +1,26 @@
+{
+  "name": "@fetris/engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Fetris 게임 코어 — 순수 TS, 결정론적. 클라이언트와 릴레이 서버가 공유한다.",
+  "exports": {
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

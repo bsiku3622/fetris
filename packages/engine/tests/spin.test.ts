@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { detectSpin } from "../src/engine/spin";
-import { Board } from "../src/engine/board";
-import { Piece, Rot, SpinType } from "../src/engine/types";
+import { detectSpin } from "../src/spin.js";
+import { Board } from "../src/board.js";
+import { Piece, Rot, SpinType } from "../src/types.js";
 
 // 3x3 T 박스의 특정 코너에만 블록을 채운 보드 생성(스핀 판정 단위 테스트용).
 function boardWithCells(cells: Array<[number, number]>): Board {

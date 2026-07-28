@@ -1,4 +1,4 @@
-import { Piece, Rot } from "./types";
+import { Piece, Rot } from "./types.js";
 
 // ============================================================================
 // SRS / SRS+ / SRS-X 킥 테이블

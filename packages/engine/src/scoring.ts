@@ -1,5 +1,5 @@
-import { Piece, SpinType } from "./types";
-import type { ClearResult, RuleSet } from "./types";
+import { Piece, SpinType } from "./types.js";
+import type { ClearResult, RuleSet } from "./types.js";
 
 // ============================================================================
 // 점수 / 가비지 / B2B Surge / 콤보 — TETR.IO 시즌2 기준.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { GameModeName } from "../engine/types";
+import type { GameModeName } from "@fetris/engine/types";
 import { loadSettings, saveSettings, defaultSettings } from "./store";
 import type { Settings } from "./store";
 import { MenuScreen } from "../ui/MenuScreen";

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@studio-baeks/funky-ui";
-import type { GameModeName } from "../engine/types";
+import type { GameModeName } from "@fetris/engine/types";
 import type { Settings } from "../app/store";
 import { loadRecords, saveRecords } from "../app/store";
 import { GameSession } from "../app/GameSession";
-import type { HudInfo, ModeResult } from "../engine/modes";
+import type { HudInfo, ModeResult } from "@fetris/engine/modes";
 
 export function GameScreen({
   mode,
