@@ -11,6 +11,8 @@ export interface PlayerInfo {
   id: string;
   isHost: boolean;
   nick: string;
+  /** 봇 참가자 여부. 구버전 서버는 보내지 않으므로 optional. */
+  isBot?: boolean;
 }
 
 /**
@@ -35,13 +37,21 @@ export type GameMessage =
   /** 내 게임오버 통지 */
   | { t: "dead" };
 
-/** 클라이언트→서버 제어 메시지(방 수명 관리) */
+/**
+ * 클라이언트→서버 제어 메시지(방 수명 관리).
+ * 봇 러너 전용 메시지(bot-hello 등)는 여기 없다 — 서버의 `/bot` 경로에만 해당하며
+ * 정의는 backend `src/protocol.ts`에 있다.
+ */
 export type ClientControl =
   | { t: "create"; maxPlayers?: number; nick?: string }
   | { t: "join"; code: string; nick?: string }
   | { t: "leave" }
   | { t: "relay"; msg: GameMessage }
-  | { t: "relay-to"; targetId: string; msg: GameMessage };
+  | { t: "relay-to"; targetId: string; msg: GameMessage }
+  /** 호스트 전용: 대기 중인 봇 러너에게 봇 한 명을 이 방으로 초대 요청 */
+  | { t: "add-bot"; nick?: string }
+  /** 호스트 전용: 방에 있는 봇 퇴장 */
+  | { t: "kick-bot"; playerId: string };
 
 /** 서버→클라이언트 제어 메시지 */
 export type ServerControl =
@@ -50,7 +60,9 @@ export type ServerControl =
   | { t: "peer-joined"; player: PlayerInfo }
   | { t: "peer-left"; playerId: string }
   | { t: "error"; reason: string }
-  | { t: "relay"; from: string; msg: GameMessage };
+  | { t: "relay"; from: string; msg: GameMessage }
+  /** add-bot 접수됨 — 실제 착석은 뒤이어 오는 peer-joined로 알 수 있다 */
+  | { t: "bot-pending"; ticket: string; nick: string; runnerId: string };
 
 export type AnyMessage = ClientControl | ServerControl;
 

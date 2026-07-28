@@ -40,6 +40,8 @@ export class NetClient {
   onPlayerList?: (players: PlayerInfo[]) => void;
   onPeerJoinedFull?: (player: PlayerInfo) => void;
   onPeerLeftById?: (playerId: string) => void;
+  /** add-bot 접수됨(착석은 뒤이어 오는 onPeerJoinedFull로 확인) */
+  onBotPending?: (nick: string) => void;
   /** 앱 레벨에서 게임 메시지를 엿보기(룰 핸드셰이크 등). transport보다 먼저 호출됨. */
   onGameMessage?: (m: GameMessage) => void;
 
@@ -97,6 +99,9 @@ export class NetClient {
         this.onPeerLeftById?.(msg.playerId);
         this.playerLeftCb?.(msg.playerId);
         break;
+      case "bot-pending":
+        this.onBotPending?.(msg.nick);
+        break;
       case "error":
         this.onError?.(msg.reason);
         break;
@@ -125,6 +130,14 @@ export class NetClient {
   }
   leaveRoom(): void {
     this.sendControl({ t: "leave" });
+  }
+  /** 호스트 전용: 대기 중인 봇 러너에게 봇 한 명을 이 방으로 초대 요청 */
+  addBot(nick?: string): void {
+    this.sendControl({ t: "add-bot", nick });
+  }
+  /** 호스트 전용: 방에 있는 봇 퇴장 */
+  kickBot(playerId: string): void {
+    this.sendControl({ t: "kick-bot", playerId });
   }
 
   disconnect(): void {
