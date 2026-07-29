@@ -128,13 +128,27 @@ KO는 자기 신고입니다. 서버는 보드를 실시간으로 보지 않으�
 }
 ```
 
-토큰 관리는 CLI로 합니다. **서버는 파일 변경을 스스로 감지하므로 재시작이 필요 없습니다.**
+토큰 관리는 관리 웹이나 CLI로 합니다. **서버는 파일 변경을 스스로 감지하므로 재시작이 필요 없습니다.**
 
 ```bash
 FETRIS_BOT_TOKENS=/srv/fetris/bot-tokens.json npm run bot:token -- add 친구A "연습 상대"
 FETRIS_BOT_TOKENS=/srv/fetris/bot-tokens.json npm run bot:token -- list
 FETRIS_BOT_TOKENS=/srv/fetris/bot-tokens.json npm run bot:token -- revoke 친구A
 ```
+
+토큰 파일은 릴레이가 읽을 수 있어야 합니다 — 관리 도구가 쓰고 서비스 사용자가 읽도록 `chown baeks:www-data` + `chmod 640`으로 둡니다.
+
+### 관리 웹 (VPN 전용)
+
+터미널 없이 발급/폐기하려면 별도 프로세스로 도는 관리 서버를 씁니다.
+
+```bash
+ADMIN_HOST=10.8.0.1 ADMIN_PORT=8788 \
+FETRIS_BOT_TOKENS=/srv/fetris/bot-tokens.json \
+npm run start:admin -w fetris-be
+```
+
+**로그인이 없습니다.** WireGuard 주소에만 바인딩하는 것이 유일한 접근 통제이므로 `0.0.0.0`으로 열면 안 됩니다. 릴레이와 별도 프로세스라 관리 서버가 죽어도 대전은 계속되고, 토큰 파일을 써야 하므로 파일 소유자(`User=baeks`)로 실행합니다.
 
 **소유자는 토큰에 묶여 있어 러너가 사칭할 수 없습니다.** `bot-hello`에 무슨 이름을 실어 보내든 서버는 접속 토큰에서 확정한 소유자를 씁니다. 이 값이 러너 목록과 방 로스터(`PlayerInfo.botOwner`)에 그대로 표시됩니다.
 
