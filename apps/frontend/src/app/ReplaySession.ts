@@ -1,7 +1,11 @@
 import { MatchReplayPlayer } from "@fetris/engine/replay";
 import type { MatchReplayFile } from "@fetris/engine/replay";
+import { EventType } from "@fetris/engine/game";
+import { SpinType } from "@fetris/engine/types";
 import { Renderer } from "../render/renderer";
 import type { GfxOptions } from "../render/renderer";
+import { SoundEngine } from "../audio/sound";
+import type { AudioOptions } from "../audio/sound";
 import { liveStats } from "@fetris/engine/modes";
 import type { HudInfo } from "@fetris/engine/modes";
 
@@ -43,15 +47,25 @@ export class ReplaySession {
   private lastTime = 0;
   private progressAccum = 0;
   private hud: HudInfo = { left: [], right: [] };
+  private sound: SoundEngine;
+  /** 소리를 낼 보드 수(앞에서부터) */
+  private loudCount: number;
+  /** 녹화 보드용 — 직전 성적을 들고 있다가 차이를 소리로 옮긴다 */
+  private lastStats: { lines: number; pieces: number; attack: number }[] = [];
 
   constructor(
     canvases: Map<string, HTMLCanvasElement>,
     file: MatchReplayFile,
     gfx: GfxOptions,
+    audio: AudioOptions,
     cbs: ReplayCallbacks = {},
   ) {
     this.gfx = gfx;
     this.cbs = cbs;
+    this.sound = new SoundEngine(audio);
+    // 소리는 대전과 같은 규칙을 따른다 — 둘까지는 양쪽 다(뒤쪽은 죽여서),
+    // 셋 이상은 뭉개지므로 1위 보드만 울린다.
+    this.loudCount = file.players.length <= 2 ? file.players.length : 1;
     this.match = new MatchReplayPlayer(file);
     this.frames = this.match.frames;
     this.ids = file.players.map((p) => p.id);
@@ -78,6 +92,7 @@ export class ReplaySession {
   play(): void {
     if (this.playing) return;
     if (this.match.done) this.match.reset();
+    this.sound.ensure();
     this.playing = true;
     this.lastTime = performance.now();
     this.accum = 0;
@@ -105,6 +120,9 @@ export class ReplaySession {
   /** 특정 프레임으로 이동(재생 중이면 그대로 이어서 재생) */
   seek(frame: number): void {
     this.match.seek(frame);
+    // 탐색 중 지나친 사건까지 몰아 울리면 안 된다 — 기준점만 새로 잡는다
+    this.syncStats();
+    for (const b of this.match.boards) b.game.events.length = 0;
     this.accum = 0;
     this.lastTime = performance.now();
     this.draw();
@@ -134,6 +152,7 @@ export class ReplaySession {
     this.playing = false;
     cancelAnimationFrame(this.raf);
     this.raf = 0;
+    this.sound.dispose();
   }
 
   private loop = (): void => {
@@ -156,6 +175,8 @@ export class ReplaySession {
           this.cbs.onEnd?.();
           return;
         }
+        // 빨리 감기 중에는 소리를 내지 않는다(한 프레임에 몰려 울려 시끄럽다)
+        if (this.speed <= 2) this.ring();
       }
     }
 
@@ -169,6 +190,92 @@ export class ReplaySession {
 
     this.raf = requestAnimationFrame(this.loop);
   };
+
+  /**
+   * 이번 프레임에 일어난 일을 소리로 옮긴다.
+   *
+   * 시뮬레이션으로 도는 보드는 엔진 이벤트가 그대로 있어 스핀까지 살릴 수 있고,
+   * 서버 녹화로 도는 보드는 상태만 있으므로 성적 차이로 되짚는다.
+   */
+  private ring(): void {
+    for (let i = 0; i < this.match.boards.length; i++) {
+      if (i >= this.loudCount) {
+        // 소리를 안 낼 보드라도 이벤트는 비워야 다음 프레임에 쌓이지 않는다
+        this.match.boards[i].game.events.length = 0;
+        continue;
+      }
+      const g = this.match.boards[i].game;
+      const play = () => {
+        if (g.events.length > 0) this.ringEvents(i);
+        else this.ringStats(i);
+      };
+      // 두 번째 보드는 한 단계 죽여 첫 보드를 덮지 않게 한다
+      if (i === 0) play();
+      else this.sound.asOpponent(play);
+    }
+  }
+
+  /** 엔진 이벤트가 있는 보드(입력 로그로 재현 중) */
+  private ringEvents(i: number): void {
+    const g = this.match.boards[i].game;
+    for (const e of g.events) {
+      switch (e.type) {
+        case EventType.Move:
+          this.sound.play("move");
+          break;
+        case EventType.Rotate:
+          this.sound.play("rotate");
+          break;
+        case EventType.Hold:
+          this.sound.play("hold");
+          break;
+        case EventType.HardDrop:
+          this.sound.play("harddrop");
+          break;
+        case EventType.SpinDetect:
+          this.sound.spinHit(true);
+          break;
+        case EventType.LineClear:
+          this.sound.clear(
+            e.a ?? 1,
+            (e.spin ?? SpinType.None) !== SpinType.None,
+            (e.clear?.b2b ?? 0) > 1,
+            e.clear?.combo ?? 1,
+          );
+          break;
+        case EventType.GarbageIn:
+          this.sound.garbageRise(e.a ?? 1);
+          break;
+        case EventType.TopOut:
+          this.sound.death();
+          break;
+      }
+    }
+    g.events.length = 0;
+    this.lastStats[i] = this.statsOf(i);
+  }
+
+  /** 상태만 있는 보드(서버 녹화로 재생 중) — 성적 차이로 되짚는다 */
+  private ringStats(i: number): void {
+    const now = this.statsOf(i);
+    const before = this.lastStats[i];
+    this.lastStats[i] = now;
+    if (!before) return;
+    const cleared = now.lines - before.lines;
+    if (cleared > 0) this.sound.clear(Math.min(4, cleared), false, false, 1);
+    else if (now.pieces > before.pieces) this.sound.play("harddrop");
+    if (now.attack > before.attack) this.sound.spike(now.attack - before.attack);
+  }
+
+  private statsOf(i: number): { lines: number; pieces: number; attack: number } {
+    const s = this.match.boards[i].game.stats;
+    return { lines: s.lines, pieces: s.piecesPlaced, attack: s.attack };
+  }
+
+  /** 소리의 기준점을 지금 상태로 다시 잡는다(탐색 직후) */
+  private syncStats(): void {
+    for (let i = 0; i < this.match.boards.length; i++) this.lastStats[i] = this.statsOf(i);
+  }
 
   private draw(): void {
     for (let i = 0; i < this.renderers.length; i++) {

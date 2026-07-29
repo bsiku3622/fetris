@@ -114,6 +114,7 @@ export function ReplayScreen({ settings, onExit }: { settings: Settings; onExit:
       canvases,
       loaded.file,
       { ...settings.gfx, nextCount: loaded.file.rule.nextCount },
+      settings.audio,
       {
         onProgress: (f, p) => {
           setFrame(f);
