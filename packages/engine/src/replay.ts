@@ -139,6 +139,62 @@ export function verifyReplay(opts: ReplayOptions, expected: string): {
   return { ok: actual === expected, actual };
 }
 
+/** 리플레이 파일 포맷 버전 — 구조가 바뀌면 올린다 */
+export const REPLAY_FORMAT = 1;
+
+/**
+ * 내려받는 리플레이 파일.
+ *
+ * 재생에 필요한 것을 전부 담는다 — 시드·룰·핸들링·simRate가 하나라도 빠지면
+ * 같은 판을 다시 만들 수 없다. `runReplay`에 그대로 넘길 수 있는 형태다.
+ */
+export interface ReplayFile {
+  format: typeof REPLAY_FORMAT;
+  game: "fetris";
+  /** ISO 8601 */
+  recordedAt: string;
+  match: {
+    /** 방 코드(로컬 판이면 없음) */
+    code?: string;
+    matchId: number;
+  };
+  player: {
+    nick: string;
+    /** 이 판에서의 순위(1 = 우승). 미확정이면 없음 */
+    placement?: number;
+  };
+  /** runReplay에 그대로 넘기는 조건들 */
+  rule: RuleSet;
+  handling: Handling;
+  simRate: number;
+  seed: number;
+  frames: number;
+  keys: ReplayKeys;
+  /** 최종 상태 지문 — 재생 결과와 대조해 파일이 온전한지 확인한다 */
+  fingerprint: string;
+  /** 참고용 최종 성적(재생에는 쓰이지 않는다) */
+  stats?: {
+    piecesPlaced: number;
+    lines: number;
+    attack: number;
+  };
+}
+
+/** 파일을 재생해 지문이 맞는지 확인한다(열어볼 때 무결성 검사) */
+export function verifyReplayFile(file: ReplayFile): { ok: boolean; actual: string } {
+  return verifyReplay(
+    {
+      rule: file.rule,
+      handling: file.handling,
+      seed: file.seed,
+      keys: file.keys,
+      frames: file.frames,
+      simRate: file.simRate,
+    },
+    file.fingerprint,
+  );
+}
+
 /**
  * 입력 기록기 — 클라이언트가 프레임 번호와 함께 키 변화를 쌓는다.
  * 게임 루프의 hot path에서 쓰이므로 배열 하나에 밀어 넣기만 한다.

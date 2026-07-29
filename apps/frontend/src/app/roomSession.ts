@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NetClient } from "../net/client";
 import type { BotRunnerInfo, GameMessage, MatchConfig, PlayerRole, RoomState } from "../net/protocol";
+import type { ReplayFile } from "@fetris/engine/replay";
 
 // ============================================================================
 // useRoomSession — 방 연결을 화면보다 위층에서 유지하는 훅.
@@ -49,6 +50,11 @@ export interface RoomSession {
   koed: boolean;
   /** 부를 수 있는 봇 러너 — list-runners 응답으로 채워진다 */
   runners: BotRunnerInfo[];
+  /**
+   * 방금 끝난 판의 리플레이. 대전 화면이 사라져도 결과 화면에서 내려받을 수
+   * 있도록 세션이 정리되기 전에 여기로 옮겨 둔다.
+   */
+  lastReplay: ReplayFile | null;
 
   connect(url: string, mode: "host" | "join", opts: { code?: string; maxPlayers?: number; nick: string }): Promise<void>;
   leave(): void;
@@ -62,6 +68,8 @@ export interface RoomSession {
   kickBot(playerId: string): void;
   /** 러너 목록 새로고침 요청 */
   refreshRunners(): void;
+  /** 매치가 끝날 때 대전 화면이 리플레이를 넘겨준다 */
+  storeReplay(file: ReplayFile): void;
   sendChat(nick: string, text: string): void;
   /** 대전 화면이 매치를 인수했을 때 — 같은 매치로 다시 소환되지 않게 비운다 */
   consumeMatchStart(): void;
@@ -96,6 +104,7 @@ export function useRoomSession(): RoomSession {
   const [matchEnd, setMatchEnd] = useState<MatchEndInfo | null>(null);
   const [koed, setKoed] = useState(false);
   const [runners, setRunners] = useState<BotRunnerInfo[]>([]);
+  const [lastReplay, setLastReplay] = useState<ReplayFile | null>(null);
   /** 로스터 대비 입퇴장 안내를 만들기 위한 직전 스냅샷 */
   const prevPlayers = useRef<Map<string, string>>(new Map());
   /** 재연결에 필요한 마지막 접속 정보 */
@@ -152,6 +161,7 @@ export function useRoomSession(): RoomSession {
       net.onMatchStart = (matchId, seed, config, players) => {
         setKoed(false);
         setMatchEnd(null);
+        setLastReplay(null);
         setMatchStart({ matchId, seed, config, players });
       };
       net.onKO = (playerId) => {
@@ -260,6 +270,7 @@ export function useRoomSession(): RoomSession {
     setMatchStart(null);
     setMatchEnd(null);
     setKoed(false);
+    setLastReplay(null);
     prevPlayers.current = new Map();
   }, []);
 
@@ -275,6 +286,7 @@ export function useRoomSession(): RoomSession {
       matchEnd,
       koed,
       runners,
+      lastReplay,
       connect,
       leave,
       setRole: (r) => netRef.current?.setRole(r),
@@ -284,6 +296,7 @@ export function useRoomSession(): RoomSession {
       addBot: (runnerId) => netRef.current?.addBot(undefined, runnerId),
       kickBot: (id) => netRef.current?.kickBot(id),
       refreshRunners: () => netRef.current?.listRunners(),
+      storeReplay: (file) => setLastReplay(file),
       sendChat: (nick, text) => {
         netRef.current?.sendGame({ t: "chat", nick, text });
         pushChat({ nick, text });
@@ -293,6 +306,6 @@ export function useRoomSession(): RoomSession {
       clearError: () => setError(""),
       pushSystemChat,
     }),
-    [state, myId, code, error, chat, matchStart, matchEnd, koed, runners, connect, leave, pushChat, pushSystemChat],
+    [state, myId, code, error, chat, matchStart, matchEnd, koed, runners, lastReplay, connect, leave, pushChat, pushSystemChat],
   );
 }

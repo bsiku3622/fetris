@@ -6,6 +6,7 @@ import { isTauri, lanStart, lanStop, lanDiscover } from "../net/lan";
 import type { LanInfo } from "../net/lan";
 import type { BotRunnerInfo, MatchConfig, PlayerInfo } from "../net/protocol";
 import type { RoomSession } from "../app/roomSession";
+import type { ReplayFile } from "@fetris/engine/replay";
 import { MatchStage } from "./MatchStage";
 import { FUNKY } from "../render/theme";
 
@@ -534,6 +535,27 @@ export function VersusScreen({
 
 // ---- 결과 ------------------------------------------------------------------
 
+/**
+ * 리플레이를 JSON 파일로 내려받는다.
+ * 시드·룰·핸들링·simRate가 모두 들어 있어 나중에 그대로 재생할 수 있다.
+ */
+function downloadReplay(file: ReplayFile): void {
+  const stamp = file.recordedAt.slice(0, 19).replace(/[:T]/g, "-");
+  const safeNick = file.player.nick.replace(/[^\w가-힣-]/g, "_").slice(0, 20);
+  const name = `fetris-${file.match.code ?? "local"}-${safeNick}-${stamp}.json`;
+
+  const blob = new Blob([JSON.stringify(file)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // 브라우저가 저장을 시작할 틈을 준 뒤 해제한다
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function ResultsView({ room }: { room: RoomSession }) {
   const end = room.matchEnd!;
   const players = room.state?.players ?? [];
@@ -571,6 +593,11 @@ function ResultsView({ room }: { room: RoomSession }) {
         <Button variant="primary" size="lg" onClick={() => room.skipResults()}>
           대기실로 돌아가기
         </Button>
+        {room.lastReplay && (
+          <Button variant="secondary" size="md" onClick={() => downloadReplay(room.lastReplay!)}>
+            리플레이 저장
+          </Button>
+        )}
         <Text variant="chrome" muted style={{ fontSize: "0.78rem" }}>
           누르지 않아도 잠시 후 자동으로 돌아갑니다
         </Text>

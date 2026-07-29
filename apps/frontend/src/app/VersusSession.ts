@@ -10,7 +10,8 @@ import { SoundEngine, bgmForMode } from "../audio/sound";
 import type { AudioOptions } from "../audio/sound";
 import { InputManager } from "@fetris/engine/input";
 import type { KeyMap, Action } from "@fetris/engine/input";
-import { ReplayRecorder, ReplayAction, fingerprint } from "@fetris/engine/replay";
+import { ReplayRecorder, ReplayAction, fingerprint, REPLAY_FORMAT } from "@fetris/engine/replay";
+import type { ReplayFile } from "@fetris/engine/replay";
 import { VersusMatch } from "./VersusMatch";
 import { liveStats } from "@fetris/engine/modes";
 import type { HudInfo } from "@fetris/engine/modes";
@@ -81,6 +82,8 @@ export class VersusSession {
   private localCanvas: HTMLCanvasElement;
   /** 서버 검증용 입력 기록 — 매치가 끝나면 통째로 제출한다 */
   private recorder = new ReplayRecorder();
+  /** 리플레이 재현에 필요 — 이 값이 다르면 같은 입력이어도 결과가 갈린다 */
+  private simRate: number;
 
   constructor(
     localCanvas: HTMLCanvasElement,
@@ -102,6 +105,7 @@ export class VersusSession {
     });
     this.match.local.undoEnabled = opts.undoEnabled;
     this.match.onLocalEvents = (events) => this.drainEvents(events);
+    this.simRate = opts.perf.simRate;
     this.localCanvas = localCanvas;
     this.match.onSelfKO = () => {
       this.sound.death();
@@ -242,6 +246,30 @@ export class VersusSession {
       frames: this.recorder.frame,
       keys: this.recorder.keys.slice(),
       fingerprint: fingerprint(this.match.local),
+    };
+  }
+
+  /** 내려받기용 리플레이 — 재생에 필요한 조건을 전부 담는다 */
+  replayFile(meta: { code?: string; matchId: number; nick: string; placement?: number }): ReplayFile {
+    const g = this.match.local;
+    return {
+      format: REPLAY_FORMAT,
+      game: "fetris",
+      recordedAt: new Date().toISOString(),
+      match: { code: meta.code, matchId: meta.matchId },
+      player: { nick: meta.nick, placement: meta.placement },
+      rule: g.rule,
+      handling: g.handling.h,
+      simRate: this.simRate,
+      seed: g.seed,
+      frames: this.recorder.frame,
+      keys: this.recorder.keys.slice(),
+      fingerprint: fingerprint(g),
+      stats: {
+        piecesPlaced: g.stats.piecesPlaced,
+        lines: g.stats.lines,
+        attack: g.stats.attack,
+      },
     };
   }
 

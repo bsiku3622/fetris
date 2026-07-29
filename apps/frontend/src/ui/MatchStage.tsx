@@ -122,7 +122,8 @@ export function MatchStage({
     sessionRef.current?.setFocus(focusId);
   }, [focusId]);
 
-  // 매치가 끝나면 입력 로그를 제출한다 — 서버가 같은 조건으로 재현해 대조한다
+  // 매치가 끝나면 입력 로그를 제출하고(서버가 재현해 대조), 같은 기록을
+  // 내려받기용으로 넘겨 둔다 — 이 화면이 사라지면 세션과 함께 사라지기 때문이다.
   const submittedRef = useRef(-1);
   useEffect(() => {
     const end = room.matchEnd;
@@ -130,8 +131,19 @@ export function MatchStage({
     if (!end || !session || !room.net) return;
     if (submittedRef.current === end.matchId) return;
     submittedRef.current = end.matchId;
+
     const payload = session.replayPayload();
     room.net.submitReplay(end.matchId, payload.frames, payload.keys, payload.fingerprint);
+
+    room.storeReplay(
+      session.replayFile({
+        code: room.code,
+        matchId: end.matchId,
+        nick: byId(myId)?.nick ?? "player",
+        placement: end.standings.find((s) => s.playerId === myId)?.placement,
+      }),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.matchEnd, room.net]);
 
   const colorOf = (idx: number) => OPP_PALETTE[idx % OPP_PALETTE.length];
