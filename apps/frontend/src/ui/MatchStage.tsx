@@ -126,25 +126,31 @@ export function MatchStage({
     sessionRef.current?.setFocus(focusId);
   }, [focusId]);
 
-  // 매치가 끝나면 입력 로그를 제출하고(서버가 재현해 대조), 같은 기록을
-  // 내려받기용으로 넘겨 둔다 — 이 화면이 사라지면 세션과 함께 사라지기 때문이다.
+  // 매치가 끝나면 입력 로그를 서버에 제출하고(재현해 대조), 같은 기록을
+  // 내려받기용으로 남긴다. storeReplay는 방에도 공유되어 관전자가 받아 간다.
   const submittedRef = useRef(-1);
   useEffect(() => {
     const end = room.matchEnd;
     const session = sessionRef.current;
     if (!end || !session || !room.net) return;
     if (submittedRef.current === end.matchId) return;
+    if (iAmSpectator) return; // 관전자는 남길 판이 없다
     submittedRef.current = end.matchId;
 
-    if (iAmSpectator) return; // 관전자는 남길 판이 없다
-
     const payload = session.replayPayload();
-    room.net.submitReplay(end.matchId, payload.frames, payload.keys, payload.fingerprint);
+    room.net.submitReplay(
+      end.matchId,
+      payload.frames,
+      payload.keys,
+      payload.garbage,
+      payload.fingerprint,
+    );
 
     room.storeReplay(
       session.replayFile({
         code: room.code,
         matchId: end.matchId,
+        playerId: myId,
         nick: byId(myId)?.nick ?? "player",
         placement: end.standings.find((s) => s.playerId === myId)?.placement,
       }),

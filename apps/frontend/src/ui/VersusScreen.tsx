@@ -11,7 +11,7 @@ import { MatchStage } from "./MatchStage";
 import { FUNKY } from "../render/theme";
 
 // ============================================================================
-// VersusScreen — 커스텀 룸(최대 8인 라스트맨 스탠딩).
+// VersusScreen — 커스텀 룸(라스트맨 스탠딩).
 //  연결 없음 → 로비(방 만들기 / 코드 입장)
 //  lobby     → 대기실(로스터·설정·봇·채팅)
 //  playing   → MatchStage(대전 + 관전)
@@ -232,14 +232,16 @@ export function VersusScreen({
     setChatInput("");
   };
 
-  // ---- 대전 / 관전 ---------------------------------------------------------
-  if (state && state.phase === "playing" && room.matchStart) {
-    return <MatchStage settings={settings} room={room} match={room.matchStart} />;
-  }
-
-  // ---- 결과 ---------------------------------------------------------------
-  if (state && state.phase === "results" && room.matchEnd) {
-    return <ResultsView room={room} />;
+  // ---- 대전 / 관전 / 결과 --------------------------------------------------
+  // 결과는 대전 화면 위에 겹쳐 띄운다. 판이 끝났다고 무대를 걷어내면 세션이
+  // 함께 사라져 리플레이를 만들 수 없고, 마지막 보드도 볼 수 없다.
+  if (state && (state.phase === "playing" || state.phase === "results") && room.matchStart) {
+    return (
+      <>
+        <MatchStage settings={settings} room={room} match={room.matchStart} />
+        {state.phase === "results" && room.matchEnd && <ResultsView room={room} />}
+      </>
+    );
   }
 
   // ---- 로비(연결 전) -------------------------------------------------------
@@ -250,7 +252,7 @@ export function VersusScreen({
           <span style={{ color: FUNKY.sky }}>CUSTOM</span> <span style={{ color: FUNKY.pink }}>ROOM</span>
         </div>
         <Text variant="chrome" muted>
-          라스트맨 스탠딩 · 최대 8인
+          라스트맨 스탠딩 · 관전 자유
         </Text>
 
         {room.error && (
@@ -596,7 +598,9 @@ export function VersusScreen({
 function downloadReplay(file: ReplayFile): void {
   const stamp = file.recordedAt.slice(0, 19).replace(/[:T]/g, "-");
   const safeNick = file.player.nick.replace(/[^\w가-힣-]/g, "_").slice(0, 20);
-  const name = `fetris-${file.match.code ?? "local"}-${safeNick}-${stamp}.json`;
+  // 순위를 넣어 같은 닉이 둘일 때도 파일이 서로 덮이지 않게 한다
+  const rank = file.player.placement ? `-${file.player.placement}위` : "";
+  const name = `fetris-${file.match.code ?? "local"}-${safeNick}${rank}-${stamp}.json`;
 
   const blob = new Blob([JSON.stringify(file)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -659,14 +663,55 @@ function ResultsView({ room }: { room: RoomSession }) {
             </div>
           ))}
         </div>
+        {/*
+          리플레이는 참가자들이 방에 나눠준 것을 모아 보여준다.
+          관전자는 자기 입력 로그가 없으므로 이 목록으로만 내려받을 수 있다.
+        */}
+        {room.sharedReplays.length > 0 && (
+          <div style={{ width: "100%", marginBottom: 4 }}>
+            <div
+              style={{
+                fontSize: "0.66rem",
+                fontWeight: 900,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                opacity: 0.5,
+                marginBottom: 6,
+              }}
+            >
+              리플레이
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center" }}>
+              {room.sharedReplays.map((r) => (
+                <button
+                  key={`${r.player.id ?? r.player.nick}-${r.match.matchId}`}
+                  onClick={() => downloadReplay(r)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "5px 10px",
+                    border: "2px solid var(--funky-line)",
+                    background: "var(--funky-surface)",
+                    boxShadow: "2px 2px 0 var(--funky-line)",
+                    fontWeight: 800,
+                    fontSize: "0.76rem",
+                    cursor: "pointer",
+                    font: "inherit",
+                  }}
+                >
+                  <span style={{ opacity: 0.55 }}>↓</span>
+                  <span>{r.player.nick}</span>
+                  {r.player.placement ? <span style={{ opacity: 0.5 }}>#{r.player.placement}</span> : null}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <Button variant="primary" size="lg" onClick={() => room.skipResults()}>
           대기실로 돌아가기
         </Button>
-        {room.lastReplay && (
-          <Button variant="secondary" size="md" onClick={() => downloadReplay(room.lastReplay!)}>
-            리플레이 저장
-          </Button>
-        )}
         <Text variant="chrome" muted style={{ fontSize: "0.78rem" }}>
           누르지 않아도 잠시 후 자동으로 돌아갑니다
         </Text>

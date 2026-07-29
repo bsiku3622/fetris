@@ -57,6 +57,11 @@ export interface RoomSession {
    * 있도록 세션이 정리되기 전에 여기로 옮겨 둔다.
    */
   lastReplay: ReplayFile | null;
+  /**
+   * 참가자들이 나눠준 이번 판 기록(내 것 포함, 순위 순).
+   * 관전자도 여기서 내려받는다.
+   */
+  sharedReplays: ReplayFile[];
 
   connect(url: string, mode: "host" | "join", opts: { code?: string; maxPlayers?: number; nick: string }): Promise<void>;
   leave(): void;
@@ -70,7 +75,7 @@ export interface RoomSession {
   kickBot(playerId: string): void;
   /** 러너 목록 새로고침 요청 */
   refreshRunners(): void;
-  /** 매치가 끝날 때 대전 화면이 리플레이를 넘겨준다 */
+  /** 매치가 끝날 때 대전 화면이 리플레이를 넘겨준다(방에도 공유된다) */
   storeReplay(file: ReplayFile): void;
   sendChat(nick: string, text: string): void;
   /** 대전 화면이 매치를 인수했을 때 — 같은 매치로 다시 소환되지 않게 비운다 */
@@ -95,6 +100,14 @@ export function humanError(reason: string): string {
   }
 }
 
+/**
+ * 리플레이 목록에 같은 판을 두 번 넣지 않기 위한 키. 닉은 방 안에서 겹칠 수
+ * 있으므로(기본 닉 그대로 여럿 들어오면 실제로 겹친다) 사람은 id로 구분한다.
+ */
+function replayKey(r: ReplayFile): string {
+  return `${r.player.id ?? r.player.nick}@${r.match.matchId}`;
+}
+
 export function useRoomSession(): RoomSession {
   const netRef = useRef<NetClient | null>(null);
   const [state, setState] = useState<RoomState | null>(null);
@@ -107,6 +120,7 @@ export function useRoomSession(): RoomSession {
   const [koed, setKoed] = useState(false);
   const [runners, setRunners] = useState<BotRunnerInfo[]>([]);
   const [lastReplay, setLastReplay] = useState<ReplayFile | null>(null);
+  const [sharedReplays, setSharedReplays] = useState<ReplayFile[]>([]);
   /** 로스터 대비 입퇴장 안내를 만들기 위한 직전 스냅샷 */
   const prevPlayers = useRef<Map<string, string>>(new Map());
   /** 재연결에 필요한 마지막 접속 정보 */
@@ -164,6 +178,7 @@ export function useRoomSession(): RoomSession {
         setKoed(false);
         setMatchEnd(null);
         setLastReplay(null);
+        setSharedReplays([]);
         setMatchStart({ matchId, seed, config, players });
       };
       net.onKO = (playerId) => {
@@ -184,6 +199,14 @@ export function useRoomSession(): RoomSession {
       net.onRunners = (list) => setRunners(list);
       net.onGameMessage = (m: GameMessage) => {
         if (m.t === "chat") pushChat({ nick: m.nick, text: m.text });
+        else if (m.t === "replay-share") {
+          // 같은 사람이 두 번 보내도 하나만 남긴다
+          setSharedReplays((prev) =>
+            prev.some((r) => replayKey(r) === replayKey(m.file))
+              ? prev
+              : [...prev, m.file].sort((a, b) => (a.player.placement ?? 99) - (b.player.placement ?? 99)),
+          );
+        }
       };
     },
     [pushChat, pushSystemChat],
@@ -277,6 +300,7 @@ export function useRoomSession(): RoomSession {
     setMatchEnd(null);
     setKoed(false);
     setLastReplay(null);
+    setSharedReplays([]);
     prevPlayers.current = new Map();
   }, []);
 
@@ -293,6 +317,7 @@ export function useRoomSession(): RoomSession {
       koed,
       runners,
       lastReplay,
+      sharedReplays,
       connect,
       leave,
       setRole: (r) => netRef.current?.setRole(r),
@@ -302,7 +327,16 @@ export function useRoomSession(): RoomSession {
       addBot: (runnerId) => netRef.current?.addBot(undefined, runnerId),
       kickBot: (id) => netRef.current?.kickBot(id),
       refreshRunners: () => netRef.current?.listRunners(),
-      storeReplay: (file) => setLastReplay(file),
+      storeReplay: (file) => {
+        setLastReplay(file);
+        // 관전자와 다른 참가자도 이 판을 내려받을 수 있도록 방에 나눠준다
+        setSharedReplays((prev) =>
+          prev.some((r) => replayKey(r) === replayKey(file))
+            ? prev
+            : [...prev, file].sort((a, b) => (a.player.placement ?? 99) - (b.player.placement ?? 99)),
+        );
+        netRef.current?.sendGame({ t: "replay-share", file });
+      },
       sendChat: (nick, text) => {
         netRef.current?.sendGame({ t: "chat", nick, text });
         pushChat({ nick, text });
@@ -312,6 +346,6 @@ export function useRoomSession(): RoomSession {
       clearError: () => setError(""),
       pushSystemChat,
     }),
-    [state, myId, code, error, chat, matchStart, matchEnd, koed, runners, lastReplay, connect, leave, pushChat, pushSystemChat],
+    [state, myId, code, error, chat, matchStart, matchEnd, koed, runners, lastReplay, sharedReplays, connect, leave, pushChat, pushSystemChat],
   );
 }
