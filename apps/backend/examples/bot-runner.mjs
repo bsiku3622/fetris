@@ -17,12 +17,16 @@
 //   !bot status      현재 설정
 //   !bot help        도움말
 //
+// 판이 끝나면 자기 리플레이를 서버에 제출하고(검증) 방에도 나눠준다. 이게 없으면
+// 봇만 있는 방을 구경한 사람은 내려받을 기록이 하나도 남지 않는다.
+//
 // 실행:
 //   FETRIS_WS_URL=wss://fetris-be.bsiku.dev FETRIS_BOT_TOKEN=... node examples/bot-runner.mjs
 // ============================================================================
 
 import { WebSocket } from "ws";
 import { Game, EventType } from "@fetris/engine/game";
+import { ReplayRecorder, ReplayAction, fingerprint, REPLAY_FORMAT } from "@fetris/engine/replay";
 import { shapeOf } from "@fetris/engine/pieces";
 import { Piece } from "@fetris/engine/types";
 
@@ -162,6 +166,12 @@ function joinAsBot({ code, ticket, nick }) {
   let config = null;
   let sinceDrop = 0;
   let frame = 0;
+  /** 리플레이 기록 — 키 입력과 받은 가비지를 프레임 단위로 남긴다 */
+  let recorder = null;
+  let matchId = 0;
+  let matchSeed = 0;
+  /** 판이 끝나기 전에 떠 놓은 리플레이(톱아웃하면 게임 객체가 먼저 사라진다) */
+  let pendingReplay = null;
 
   const send = (m) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
@@ -195,6 +205,7 @@ function joinAsBot({ code, ticket, nick }) {
         break;
       case "match-end":
         stopMatch();
+        submitReplay(msg);
         break;
       case "relay":
         onGameMessage(msg.from, msg.msg);
@@ -215,7 +226,11 @@ function joinAsBot({ code, ticket, nick }) {
   function onGameMessage(from, msg) {
     switch (msg.t) {
       case "attack":
-        if (game) game.receiveGarbage({ holes: msg.holes });
+        if (game) {
+          game.receiveGarbage({ holes: msg.holes });
+          // 키 입력만으로는 이 판을 되살릴 수 없다 — 받은 가비지도 남겨야 한다
+          recorder?.pushGarbage(msg.holes);
+        }
         hitBy.set(from, frame);
         break;
       case "board": {
@@ -292,6 +307,10 @@ function joinAsBot({ code, ticket, nick }) {
     plan = null;
     sinceDrop = 0;
     frame = 0;
+    matchId = msg.matchId;
+    matchSeed = seed;
+    recorder = new ReplayRecorder();
+    pendingReplay = null;
 
     const dt = 60 / config.simRate;
     loop = setInterval(() => step(dt), 1000 / config.simRate);
@@ -307,8 +326,56 @@ function joinAsBot({ code, ticket, nick }) {
     if (snapTimer) clearInterval(snapTimer);
     loop = null;
     snapTimer = null;
+    // 톱아웃하면 여기서 판이 먼저 정리된다 — 기록은 그 전에 떠 둬야 한다
+    if (game && recorder && !pendingReplay) pendingReplay = captureReplay(game, recorder);
     game = null;
+    recorder = null;
     mirrors.clear();
+  }
+
+  /** 지금 상태로 리플레이 한 벌을 만든다(재생·검증에 필요한 조건 전부) */
+  function captureReplay(g, rec) {
+    return {
+      format: REPLAY_FORMAT,
+      game: "fetris",
+      match: { code, matchId },
+      rule: g.rule,
+      handling: g.handling.h,
+      simRate: config.simRate,
+      seed: matchSeed,
+      frames: rec.frame,
+      keys: rec.keys.slice(),
+      garbage: rec.garbage.slice(),
+      fingerprint: fingerprint(g),
+      stats: {
+        piecesPlaced: g.stats.piecesPlaced,
+        lines: g.stats.lines,
+        attack: g.stats.attack,
+      },
+    };
+  }
+
+  /**
+   * 판이 끝나면 기록을 서버에 제출하고(재현해 대조) 방에도 나눠준다.
+   * 관전자는 자기 로그가 없어 이 공유로만 봇의 판을 내려받을 수 있다.
+   */
+  function submitReplay(end) {
+    const r = pendingReplay;
+    pendingReplay = null;
+    if (!r) return;
+    const placement = end.standings?.find((s) => s.playerId === myId)?.placement;
+    send({
+      t: "replay",
+      matchId: r.match.matchId,
+      frames: r.frames,
+      keys: r.keys,
+      garbage: r.garbage,
+      fingerprint: r.fingerprint,
+    });
+    sendGame({
+      t: "replay-share",
+      file: { ...r, recordedAt: new Date().toISOString(), player: { id: myId, nick, placement } },
+    });
   }
 
   function step(dt) {
@@ -316,7 +383,12 @@ function joinAsBot({ code, ticket, nick }) {
     frame += dt;
     sinceDrop += dt;
 
-    game.update(dt, think(), 0);
+    // think()이 이번 프레임의 조작을 만들고(그 안에서 pressDir 등이 기록된다),
+    // commitFrame이 그것을 이번 프레임으로 확정한 뒤 시뮬이 한 스텝 나간다.
+    // 이 순서가 어긋나면 재현이 한 프레임씩 밀려 검증에 걸린다.
+    const cmd = think();
+    recorder?.commitFrame();
+    game.update(dt, cmd, 0);
 
     for (const e of game.events) {
       if (e.type === EventType.Attack && e.cells?.length) {
@@ -346,17 +418,20 @@ function joinAsBot({ code, ticket, nick }) {
     if (!plan) plan = bestPlacement(game);
     if (!plan) return EMPTY_CMD;
 
-    if (game.rot !== plan.rot) return { ...EMPTY_CMD, rotateCW: true };
+    if (game.rot !== plan.rot) {
+      recorder?.push(ReplayAction.RotateCW, true);
+      return { ...EMPTY_CMD, rotateCW: true };
+    }
     if (game.px < plan.px) {
-      game.pressDir(1);
+      press(1);
       return EMPTY_CMD;
     }
     if (game.px > plan.px) {
-      game.pressDir(-1);
+      press(-1);
       return EMPTY_CMD;
     }
-    game.releaseDir(1);
-    game.releaseDir(-1);
+    release(1);
+    release(-1);
 
     // pps만큼만 놓는다 — 사람과 비슷한 속도로 맞추는 손잡이
     const framesPerPiece = 60 / settings.pps;
@@ -364,7 +439,25 @@ function joinAsBot({ code, ticket, nick }) {
 
     sinceDrop = 0;
     plan = null;
+    recorder?.push(ReplayAction.HardDrop, true);
     return { ...EMPTY_CMD, hardDrop: true };
+  }
+
+  /**
+   * 방향키 누름/뗌 — 호출을 그대로 1:1로 남긴다.
+   *
+   * "눌린 상태면 건너뛰기" 같은 압축을 하면 안 된다. pressDir는 이미 눌려 있어도
+   * 매번 초기 이동을 다시 걸어 주고(그래서 이 봇이 한 프레임에 한 칸씩 움직인다)
+   * finesse 카운터도 올라간다. 호출 횟수 자체가 결과에 남으므로 그대로 기록해야
+   * 서버 재현이 맞는다.
+   */
+  function press(dir) {
+    game.pressDir(dir);
+    recorder?.push(dir > 0 ? ReplayAction.MoveRight : ReplayAction.MoveLeft, true);
+  }
+  function release(dir) {
+    game.releaseDir(dir);
+    recorder?.push(dir > 0 ? ReplayAction.MoveRight : ReplayAction.MoveLeft, false);
   }
 
   function pickTarget() {
