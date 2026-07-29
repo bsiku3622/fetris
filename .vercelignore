@@ -1,0 +1,13 @@
+# Vercel CLI는 루트 .gitignore만 참고하므로, 하위 패키지의 무시 규칙을 여기 모은다.
+# (git push 기반 배포에는 영향이 없지만 `vercel deploy`가 통째로 업로드하는 걸 막는다)
+
+**/node_modules
+
+# Rust 빌드 캐시 — 수 GB에 달하고 웹 빌드와 무관하다
+apps/frontend/src-tauri/target
+
+# 빌드 산출물은 Vercel이 직접 만든다
+apps/frontend/dist
+apps/backend/dist
+packages/engine/dist
+**/*.tsbuildinfo
