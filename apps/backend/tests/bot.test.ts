@@ -160,11 +160,10 @@ describe("봇 엔드포인트", () => {
     await host.waitFor("bot-pending"); // 아직 착석 전이지만 슬롯은 예약됨
     await runner.waitFor("bot-invite");
 
-    const late = await Client.connect(url);
-    late.send({ t: "join", code });
-    const m = await late.next();
-    expect(m.t).toBe("error");
-    if (m.t === "error") expect(m.reason).toBe("room-full");
+    // 호스트 1 + 예약 1 = 정원 2가 찼으므로 이후 입장자는 관전자가 된다
+    const late = await joinRoom(url, code, "지각생");
+    const s = await host.waitState((st) => st.players.some((p) => p.nick === "지각생"));
+    expect(s.players.find((p) => p.nick === "지각생")?.role).toBe("spectator");
 
     host.close();
     late.close();

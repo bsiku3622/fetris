@@ -101,7 +101,12 @@ interface PendingBot {
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const CODE_LEN = 4;
-const HEARTBEAT_MS = 30_000;
+const HEARTBEAT_MS = 25_000;
+/**
+ * 이만큼 연속으로 pong이 없어야 끊는다. 1회로 두면 잠깐의 네트워크 순단이나
+ * 탭이 백그라운드로 내려간 사이의 지연에도 방에서 튕겨나간다.
+ */
+const HEARTBEAT_MISS_LIMIT = 3;
 const BOT_PATH = "/bot";
 /** 초대 후 이 시간 안에 봇이 착석하지 않으면 예약을 해제한다 */
 const BOT_JOIN_TIMEOUT_MS = 15_000;
@@ -162,7 +167,8 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
   const runners = new Map<WebSocket, BotRunner>();
   const pendingBots = new Map<string, PendingBot>();
   const botSockets = new WeakSet<WebSocket>();
-  const alive = new WeakMap<WebSocket, boolean>();
+  /** 소켓별 연속 pong 미수신 횟수(하트비트용) */
+  const alive = new WeakMap<WebSocket, number>();
 
   const send = (ws: WebSocket, msg: ServerControl): void => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
@@ -238,7 +244,16 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     broadcast(room, { t: "state", state: stateOf(room) });
   };
 
-  const occupancy = (room: Room): number => room.players.length + room.reserved;
+  /**
+   * 정원은 **게임에 참가하는 인원**만 센다. 관전자는 자리를 차지하지 않으므로
+   * 정원이 찬 방에도 얼마든지 들어와 구경할 수 있다.
+   */
+  const occupancy = (room: Room): number =>
+    room.players.filter((p) => p.role === "player").length + room.reserved;
+
+  /** maxPlayers가 0이면 제한 없음(기본값) */
+  const isFull = (room: Room): boolean =>
+    room.maxPlayers > 0 && occupancy(room) >= room.maxPlayers;
 
   const sanitizeNick = (n: unknown, fallback = "Player"): string => {
     const s = typeof n === "string" ? n.trim().slice(0, 16) : "";
@@ -539,7 +554,12 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
         // 기존 방에 있으면 먼저 나가기
         if (sockToPlayer.has(ws)) teardownPlayer(ws);
         const code = genCode(rooms);
-        const maxPlayers = Math.min(8, Math.max(2, raw.maxPlayers ?? 4));
+        // 0 = 제한 없음(기본). 값을 주면 2~8로 clamp한다.
+        const asked = raw.maxPlayers;
+        const maxPlayers =
+          asked === undefined || asked === null || asked <= 0
+            ? 0
+            : Math.min(8, Math.max(2, Math.floor(asked)));
         const playerId = genPlayerId();
         const isBot = botSockets.has(ws);
         const player: Player = {
@@ -595,11 +615,6 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           send(ws, { t: "error", reason: "room-not-found" });
           return;
         }
-        // 티켓 입장은 이미 잡아둔 예약 슬롯을 쓰므로 정원 검사에서 제외
-        if (!pending && occupancy(room) >= room.maxPlayers) {
-          send(ws, { t: "error", reason: "room-full" });
-          return;
-        }
         if (sockToPlayer.has(ws)) teardownPlayer(ws);
 
         const isBot = botSockets.has(ws);
@@ -610,8 +625,9 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
         if (runner) runner.active++;
 
         const playerId = genPlayerId();
-        // 매치가 진행 중이면 관전자로 붙고 다음 판부터 참가한다
-        const midMatch = room.phase !== "lobby";
+        // 매치 중이거나 참가 정원이 찼으면 관전자로 붙는다 — 입장 자체는 막지 않는다.
+        // (티켓 입장은 이미 슬롯을 예약해 뒀으므로 정원 검사에서 제외)
+        const midMatch = room.phase !== "lobby" || (!pending && isFull(room));
         const player: Player = {
           ws,
           id: playerId,
@@ -654,6 +670,11 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           return;
         }
         const role: PlayerRole = raw.role === "spectator" ? "spectator" : "player";
+        // 관전자 → 참가자 전환은 자리가 있어야 한다(관전은 언제나 가능)
+        if (role === "player" && entry.player.role === "spectator" && isFull(entry.room)) {
+          send(ws, { t: "error", reason: "room-full" });
+          return;
+        }
         entry.player.role = role;
         if (role === "spectator") entry.player.ready = false;
         broadcastState(entry.room);
@@ -735,7 +756,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           send(ws, { t: "error", reason: "not-in-lobby" });
           return;
         }
-        if (occupancy(room) >= room.maxPlayers) {
+        if (isFull(room)) {
           send(ws, { t: "error", reason: "room-full" });
           return;
         }
@@ -865,8 +886,8 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       botSockets.add(ws);
     }
 
-    alive.set(ws, true);
-    ws.on("pong", () => alive.set(ws, true));
+    alive.set(ws, 0);
+    ws.on("pong", () => alive.set(ws, 0));
     ws.on("message", (data) => {
       let msg: ClientControl;
       try {
@@ -888,11 +909,12 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
 
   const heartbeat = setInterval(() => {
     for (const ws of wss.clients) {
-      if (alive.get(ws) === false) {
+      const missed = (alive.get(ws) ?? 0) + 1;
+      if (missed >= HEARTBEAT_MISS_LIMIT) {
         ws.terminate();
         continue;
       }
-      alive.set(ws, false);
+      alive.set(ws, missed);
       ws.ping();
     }
   }, HEARTBEAT_MS);

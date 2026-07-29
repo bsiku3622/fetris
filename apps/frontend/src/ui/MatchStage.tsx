@@ -244,7 +244,9 @@ export function MatchStage({
               const p = byId(id);
               const dead = p && !p.alive;
               return (
-                <div key={id} style={{ width: 150, height: 220, flex: "0 0 auto", position: "relative" }}>
+                // display:flex가 없으면 .fx-versus-pane의 flex:1이 먹지 않아
+                // 캔버스 높이가 0으로 찌그러진다(상대 보드가 안 보이던 원인)
+                <div key={id} style={{ width: 150, height: 220, flex: "0 0 auto", position: "relative", display: "flex" }}>
                   <OppPane
                     id={id}
                     label={p?.nick ?? `P${idx + 2}`}

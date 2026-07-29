@@ -300,8 +300,10 @@ export class Renderer {
     const meterW = Math.max(8, Math.round(cell * 0.55));
     const gap = Math.max(3, Math.round(cell * 0.16));
     const mx = fieldX - meterW - gap;
-    const animRatio = Math.min(1, animated / Math.max(1, cap));
-    const barH = fieldH * animRatio;
+    // 게이지 길이를 실제 블록 높이에 맞춘다 — 1줄 = 셀 1칸.
+    // cap 비율로 그리면 cap이 낮을 때 몇 줄 안 되는데도 필드 끝까지 차서
+    // 실제로 들어올 양을 눈으로 가늠할 수 없다.
+    const barH = Math.min(fieldH, animated * cell);
     const danger = actual >= cap; // cap 도달(이번에 다 들어옴)
 
     ctx.save();
@@ -323,7 +325,7 @@ export class Renderer {
       ctx.fillRect(mx, fieldY + fieldH - barH, meterW, barH);
       ctx.shadowBlur = 0;
       // 투하 준비된 줄(활성) — 바닥부터 불투명 빨강으로 덮어 단계 구분
-      const readyH = Math.min(barH, fieldH * Math.min(1, ready / Math.max(1, cap)));
+      const readyH = Math.min(barH, ready * cell);
       if (readyH > 0.5) {
         ctx.fillStyle = "rgba(255,45,45,0.96)";
         ctx.fillRect(mx, fieldY + fieldH - readyH, meterW, readyH);

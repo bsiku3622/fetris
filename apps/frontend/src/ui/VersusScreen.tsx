@@ -78,7 +78,8 @@ export function VersusScreen({
   onPlayZen: () => void;
 }) {
   const [joinCode, setJoinCode] = useState("");
-  const [maxPlayers, setMaxPlayers] = useState(4);
+  // 0 = 제한 없음(기본). 관전자는 어차피 정원에 안 잡힌다.
+  const [maxPlayers, setMaxPlayers] = useState(0);
   const [cfg, setCfg] = useState<Cfg>(DEFAULT_CFG);
   const [chatInput, setChatInput] = useState("");
   const [serverUrl, setServerUrl] = useState(() => {
@@ -258,9 +259,12 @@ export function VersusScreen({
             <input value={serverUrl} onChange={(e) => setServerUrl(e.target.value)} style={inputStyle} placeholder="ws://localhost:8787" />
           </label>
           <SelectField
-            label="방 인원"
+            label="참가 인원"
             value={String(maxPlayers)}
-            options={[2, 3, 4, 5, 6, 7, 8].map((n) => ({ value: String(n), label: `${n}인` }))}
+            options={[
+              { value: "0", label: "제한 없음" },
+              ...[2, 3, 4, 5, 6, 7, 8].map((n) => ({ value: String(n), label: `${n}인까지` })),
+            ]}
             onChange={(v) => setMaxPlayers(Number(v))}
           />
           <Button variant="primary" size="lg" onClick={() => host()}>
@@ -311,9 +315,12 @@ export function VersusScreen({
   // ---- 대기실 --------------------------------------------------------------
   const roster = state.players;
   const participants = roster.filter((p) => p.role === "player");
+  const spectators = roster.filter((p) => p.role === "spectator");
   const readyCount = participants.filter((p) => p.ready).length;
   const canStart = isHost && participants.length >= 2 && readyCount === participants.length;
-  const emptySlots = Math.max(0, state.maxPlayers - roster.length);
+  // 정원이 무제한이면 슬롯을 그리는 대신 "봇 부르기" 한 칸만 둔다
+  const unlimited = state.maxPlayers === 0;
+  const emptySlots = unlimited ? 1 : Math.max(0, state.maxPlayers - participants.length);
 
   return (
     <div className="fx-room">
@@ -330,7 +337,11 @@ export function VersusScreen({
         {/* 왼쪽 — 플레이어 / 방 코드 / 준비 */}
         <section className="fx-room-col fx-room-col--players">
           <div className="fx-room-col__head">
-            Players<span className="fx-room-col__head-count">{roster.length}/{state.maxPlayers}</span>
+            Players
+            <span className="fx-room-col__head-count">
+              {participants.length}
+              {unlimited ? "" : `/${state.maxPlayers}`}
+            </span>
           </div>
           <div className="fx-room-col__body">
             <div className="fx-room-code">
@@ -338,6 +349,7 @@ export function VersusScreen({
               <span className="fx-room-code__value">{room.code}</span>
               <span className="fx-room-code__count">
                 {participants.length}명 참가 · {readyCount}명 준비
+                {spectators.length > 0 ? ` · 관전 ${spectators.length}명` : ""}
               </span>
             </div>
 
@@ -367,6 +379,7 @@ export function VersusScreen({
                 <EmptySlot
                   key={`empty-${i}`}
                   canFill={isHost}
+                  unlimited={unlimited}
                   runners={room.runners}
                   onRefresh={() => room.refreshRunners()}
                   onFill={(runnerId) => room.addBot(runnerId)}
@@ -615,11 +628,14 @@ function PlayerRow({
  */
 function EmptySlot({
   canFill,
+  unlimited,
   runners,
   onRefresh,
   onFill,
 }: {
   canFill: boolean;
+  /** 정원 제한이 없으면 "빈 자리"가 의미 없으므로 봇 부르기 칸으로 쓴다 */
+  unlimited: boolean;
   runners: BotRunnerInfo[];
   onRefresh: () => void;
   onFill: (runnerId?: string) => void;
@@ -636,7 +652,7 @@ function EmptySlot({
     <div style={{ position: "relative" }}>
       <div className="fx-player-box" style={{ opacity: 0.5, borderStyle: "dashed" }}>
         <span className="fx-player-box__swatch" style={{ background: "transparent", border: "2px dashed var(--funky-line)" }} />
-        <span className="fx-player-box__name" style={{ opacity: 0.6 }}>빈 자리</span>
+        <span className="fx-player-box__name" style={{ opacity: 0.6 }}>{unlimited ? "봇 부르기" : "빈 자리"}</span>
         {canFill && (
           <button
             onClick={toggle}

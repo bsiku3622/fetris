@@ -48,19 +48,50 @@ describe("방 수명", () => {
     guest.close();
   });
 
-  it("꽉 찬 방에는 입장 불가 (maxPlayers=2)", async () => {
+  it("참가 정원이 차면 관전자로 들어온다 (입장 자체는 막지 않는다)", async () => {
     const { host, code } = await createRoom(url, 2);
     const g1 = await joinRoom(url, code, "G1");
+    const g2 = await joinRoom(url, code, "구경꾼");
 
-    const g2 = await Client.connect(url);
-    g2.send({ t: "join", code });
-    const m = await g2.next();
-    expect(m.t).toBe("error");
-    if (m.t === "error") expect(m.reason).toBe("room-full");
+    const s = await host.waitState((st) => st.players.some((p) => p.nick === "구경꾼"));
+    const late = s.players.find((p) => p.nick === "구경꾼");
+    expect(late?.role).toBe("spectator");
+    // 참가자는 정원만큼만 남는다
+    expect(s.players.filter((p) => p.role === "player")).toHaveLength(2);
 
     host.close();
     g1.close();
     g2.close();
+  });
+
+  it("관전자는 정원을 차지하지 않는다", async () => {
+    const { host, code } = await createRoom(url, 2);
+    const guest = await joinRoom(url, code, "G1");
+    // 정원 2가 찼지만 관전자는 얼마든지 들어올 수 있다
+    const s1 = await joinRoom(url, code, "관전1");
+    const s2 = await joinRoom(url, code, "관전2");
+
+    const s = await host.waitState((st) => st.players.length === 4);
+    expect(s.players.filter((p) => p.role === "player")).toHaveLength(2);
+    expect(s.players.filter((p) => p.role === "spectator")).toHaveLength(2);
+
+    host.close();
+    guest.close();
+    s1.close();
+    s2.close();
+  });
+
+  it("정원이 없으면(기본) 인원 제한 없이 참가한다", async () => {
+    const { host, code, state } = await createRoom(url); // maxPlayers 미지정 = 무제한
+    expect(state.maxPlayers).toBe(0);
+    const guests = [];
+    for (let i = 0; i < 5; i++) guests.push(await joinRoom(url, code, `G${i}`));
+
+    const s = await host.waitState((st) => st.players.length === 6);
+    expect(s.players.every((p) => p.role === "player")).toBe(true);
+
+    host.close();
+    for (const g of guests) g.close();
   });
 
   it("정원 안에서는 여러 명이 입장한다", async () => {

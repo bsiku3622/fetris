@@ -131,7 +131,7 @@ export const TEST_CONFIG: MatchConfig = {
 /** 방을 만들고 호스트 클라이언트·코드·초기 상태를 돌려준다 */
 export async function createRoom(
   url: string,
-  maxPlayers = 4,
+  maxPlayers = 0, // 0 = 제한 없음(서버 기본값과 동일)
   nick = "호스트",
 ): Promise<{ host: Client; code: string; state: RoomState }> {
   const host = await Client.connect(url);

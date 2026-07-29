@@ -108,6 +108,12 @@ export function useRoomSession(): RoomSession {
   const [runners, setRunners] = useState<BotRunnerInfo[]>([]);
   /** 로스터 대비 입퇴장 안내를 만들기 위한 직전 스냅샷 */
   const prevPlayers = useRef<Map<string, string>>(new Map());
+  /** 재연결에 필요한 마지막 접속 정보 */
+  const lastConnect = useRef<{ url: string; code: string; nick: string } | null>(null);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectTries = useRef(0);
+  /** 사용자가 직접 나간 경우엔 재연결하지 않는다 */
+  const leftOnPurpose = useRef(false);
 
   const pushChat = useCallback((line: ChatLine) => {
     setChat((prev) => [...prev.slice(-59), line]);
@@ -119,6 +125,7 @@ export function useRoomSession(): RoomSession {
 
   useEffect(() => {
     return () => {
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       netRef.current?.disconnect();
       netRef.current = null;
     };
@@ -129,7 +136,13 @@ export function useRoomSession(): RoomSession {
       net.onError = (reason) => setError(humanError(reason));
       net.onDisconnect = () => {
         setState(null);
-        setError("서버 연결이 끊겼습니다.");
+        // 스스로 나간 게 아니라면 같은 방으로 되돌아가려 시도한다.
+        // 잠깐의 네트워크 순단으로 방에서 튕겨나가는 걸 막는다.
+        if (leftOnPurpose.current || !lastConnect.current) {
+          setError("서버 연결이 끊겼습니다.");
+          return;
+        }
+        scheduleReconnect();
       };
       net.onRoomState = (s) => {
         // 입퇴장을 채팅에 흘린다
@@ -177,6 +190,40 @@ export function useRoomSession(): RoomSession {
     [pushChat, pushSystemChat],
   );
 
+  /**
+   * 끊긴 방으로 되돌아간다. 매치가 진행 중이면 서버가 관전자로 앉히므로
+   * 판을 망치지 않고, 대기실이었다면 참가자로 복귀한다.
+   */
+  const scheduleReconnect = useCallback(() => {
+    const info = lastConnect.current;
+    if (!info) return;
+    if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+    if (reconnectTries.current >= 5) {
+      setError("서버 연결이 끊겼습니다. 다시 입장해주세요.");
+      return;
+    }
+    const attempt = ++reconnectTries.current;
+    const delay = Math.min(8000, 1000 * attempt);
+    setError(`연결이 끊겨 다시 접속하는 중… (${attempt}/5)`);
+    reconnectTimer.current = setTimeout(async () => {
+      const net = new NetClient(info.url);
+      netRef.current = net;
+      wire(net);
+      net.onJoined = (c) => {
+        setCode(c);
+        setMyId(net.myId);
+        setError("");
+        reconnectTries.current = 0;
+      };
+      try {
+        await net.connect();
+        net.joinRoom(info.code, info.nick);
+      } catch {
+        scheduleReconnect();
+      }
+    }, delay);
+  }, [wire]);
+
   const connect = useCallback(
     async (
       url: string,
@@ -186,6 +233,9 @@ export function useRoomSession(): RoomSession {
       setError("");
       setChat([]);
       prevPlayers.current = new Map();
+      leftOnPurpose.current = false;
+      reconnectTries.current = 0;
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       netRef.current?.disconnect();
       const net = new NetClient(url);
       netRef.current = net;
@@ -193,10 +243,13 @@ export function useRoomSession(): RoomSession {
       net.onCreated = (c) => {
         setCode(c);
         setMyId(net.myId);
+        // 재연결 때는 방을 새로 만들 수 없으니 코드로 되돌아간다
+        lastConnect.current = { url, code: c, nick: opts.nick };
       };
       net.onJoined = (c) => {
         setCode(c);
         setMyId(net.myId);
+        lastConnect.current = { url, code: c, nick: opts.nick };
       };
       try {
         await net.connect();
@@ -204,13 +257,17 @@ export function useRoomSession(): RoomSession {
         setError("서버에 연결할 수 없습니다. 주소를 확인해주세요.");
         return;
       }
-      if (mode === "host") net.createRoom(opts.maxPlayers ?? 4, opts.nick);
+      if (mode === "host") net.createRoom(opts.maxPlayers ?? 0, opts.nick);
       else net.joinRoom(opts.code ?? "", opts.nick);
     },
     [wire],
   );
 
   const leave = useCallback(() => {
+    leftOnPurpose.current = true;
+    lastConnect.current = null;
+    reconnectTries.current = 0;
+    if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
     netRef.current?.disconnect();
     netRef.current = null;
     setState(null);
