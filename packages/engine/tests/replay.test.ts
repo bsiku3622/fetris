@@ -163,6 +163,21 @@ describe("리플레이", () => {
     expect(fingerprint(runReplay(opts))).toBe(fingerprint(runReplay(opts)));
   });
 
+  it("지문은 벽시계(startTime)에 흔들리지 않는다", () => {
+    // 실제 판은 update(dt, cmd, performance.now())로 돌고 재현은 now=0으로 돈다.
+    // 지문이 startTime을 물고 있으면 정상 플레이도 전부 불일치로 잡힌다.
+    const live = new Game(RULE, HANDLING, SEED);
+    const replayed = new Game(RULE, HANDLING, SEED);
+    for (let f = 0; f < 120; f++) {
+      live.update(1, undefined, 123456.789);
+      replayed.update(1, undefined, 0);
+      live.events.length = 0;
+      replayed.events.length = 0;
+    }
+    expect(live.stats.startTime).not.toBe(replayed.stats.startTime);
+    expect(fingerprint(live)).toBe(fingerprint(replayed));
+  });
+
   it("기록기는 입력을 프레임 경계에 맞춰 쌓는다", () => {
     const rec = new ReplayRecorder();
     rec.push(ReplayAction.MoveLeft, true);

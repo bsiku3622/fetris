@@ -78,6 +78,8 @@ export class VersusMatch {
   onSelfKO?: () => void;
   /** 상대 미러가 새로 만들어졌다(렌더러 바인딩용) */
   onRemoteAdded?: (playerId: string) => void;
+  /** 가비지를 받았다 — 리플레이 기록기가 같이 남겨야 재현이 성립한다 */
+  onGarbage?: (holes: number[]) => void;
 
   constructor(opts: VersusOptions) {
     this.rule = opts.rule;
@@ -248,6 +250,7 @@ export class VersusMatch {
         // 서버가 relay-to로 나에게만 보낸 것이므로 그대로 받는다
         if (!this.alive) break;
         this.local.receiveGarbage({ holes: m.holes });
+        this.onGarbage?.(m.holes);
         if (from) {
           this.hitBy.set(from, { frame: this.frame, amount: m.holes.length });
         }

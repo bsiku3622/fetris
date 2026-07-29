@@ -111,10 +111,18 @@ export type ClientControl =
   | { t: "ko" }
   /**
    * 매치 종료 후 리플레이 제출(검증용).
-   * keys는 [frame, action, down] 평탄 배열, fingerprint는 최종 상태 지문.
-   * 서버가 같은 시드·핸들링·simRate로 재현해 지문을 대조한다.
+   * keys는 [frame, action, down], garbage는 [frame, n, ...holes] 평탄 배열이고
+   * fingerprint는 최종 상태 지문. 서버가 같은 시드·핸들링·simRate로 재현해
+   * 지문을 대조한다. 가비지는 바깥에서 들어온 입력이라 같이 받아야 재현된다.
    */
-  | { t: "replay"; matchId: number; frames: number; keys: number[]; fingerprint: string }
+  | {
+      t: "replay";
+      matchId: number;
+      frames: number;
+      keys: number[];
+      garbage?: number[];
+      fingerprint: string;
+    }
   /**
    * 호스트 전용: 봇 한 명을 이 방으로 초대 요청.
    * runnerId를 주면 그 러너에게만 보내고, 없으면 여유가 가장 많은 러너를 고른다.

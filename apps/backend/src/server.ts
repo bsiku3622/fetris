@@ -390,6 +390,10 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
    *
    * 재현은 CPU를 쓰므로 이벤트 루프 밖으로 미룬다. sharePieces가 꺼져 있으면
    * 각자 다른 시드로 돌았기 때문에 서버가 재현할 근거가 없어 건너뛴다.
+   *
+   * 받은 가비지는 제출자가 함께 신고한다 — 서버는 게임 페이로드를 해석하지 않아
+   * 대조할 원본이 없다. 즉 이 검증이 잡는 것은 "제출한 입력이 정말 그 결과를
+   * 만드는가"까지이고, 가비지 신고 자체의 진위는 범위 밖이다.
    */
   const verifySubmittedReplay = (
     room: Room,
@@ -403,6 +407,8 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     const frames = Math.floor(Number(raw.frames));
     if (!Number.isFinite(frames) || frames <= 0 || frames > MAX_REPLAY_FRAMES) return;
     if (raw.keys.length > MAX_REPLAY_KEYS) return;
+    const garbage = Array.isArray(raw.garbage) ? raw.garbage : [];
+    if (garbage.length > MAX_REPLAY_KEYS) return;
 
     const seed = room.seed;
     const nick = player.nick;
@@ -415,6 +421,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
             handling: config.handling as Handling,
             seed,
             keys: raw.keys,
+            garbage,
             frames,
             simRate: config.simRate,
           },

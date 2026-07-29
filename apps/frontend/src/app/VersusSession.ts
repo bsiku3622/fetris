@@ -157,6 +157,8 @@ export class VersusSession {
       const mapped = REPLAY_ACTION[action];
       if (mapped !== undefined) this.recorder.push(mapped, down);
     };
+    // 받은 가비지도 같이 남긴다 — 대전은 키 입력만으로 판이 결정되지 않는다
+    this.match.onGarbage = (holes) => this.recorder.pushGarbage(holes);
 
     this.loop = new GameLoop(this.match.local, opts.perf, {
       pollInput: () => this.input.poll(),
@@ -253,29 +255,37 @@ export class VersusSession {
    * 서버 검증에 제출할 리플레이. 입력 로그와 최종 상태 지문을 함께 넘긴다 —
    * 서버가 같은 시드·핸들링·simRate로 재현해 지문을 대조한다.
    */
-  replayPayload(): { frames: number; keys: number[]; fingerprint: string } {
+  replayPayload(): { frames: number; keys: number[]; garbage: number[]; fingerprint: string } {
     return {
       frames: this.recorder.frame,
       keys: this.recorder.keys.slice(),
+      garbage: this.recorder.garbage.slice(),
       fingerprint: fingerprint(this.match.local),
     };
   }
 
   /** 내려받기용 리플레이 — 재생에 필요한 조건을 전부 담는다 */
-  replayFile(meta: { code?: string; matchId: number; nick: string; placement?: number }): ReplayFile {
+  replayFile(meta: {
+    code?: string;
+    matchId: number;
+    playerId: string;
+    nick: string;
+    placement?: number;
+  }): ReplayFile {
     const g = this.match.local;
     return {
       format: REPLAY_FORMAT,
       game: "fetris",
       recordedAt: new Date().toISOString(),
       match: { code: meta.code, matchId: meta.matchId },
-      player: { nick: meta.nick, placement: meta.placement },
+      player: { id: meta.playerId, nick: meta.nick, placement: meta.placement },
       rule: g.rule,
       handling: g.handling.h,
       simRate: this.simRate,
       seed: g.seed,
       frames: this.recorder.frame,
       keys: this.recorder.keys.slice(),
+      garbage: this.recorder.garbage.slice(),
       fingerprint: fingerprint(g),
       stats: {
         piecesPlaced: g.stats.piecesPlaced,

@@ -1,5 +1,6 @@
 import type { RuleSet, Handling } from "@fetris/engine/types";
 import type { GameSnapshot } from "@fetris/engine/game";
+import type { ReplayFile } from "@fetris/engine/replay";
 
 // ============================================================================
 // 대전 네트워크 프로토콜 — 클라이언트 ↔ 릴레이 서버 ↔ 다른 클라이언트.
@@ -78,7 +79,12 @@ export type GameMessage =
    */
   | { t: "focus"; watching: boolean }
   /** 대기실·관전 채팅 */
-  | { t: "chat"; nick: string; text: string };
+  | { t: "chat"; nick: string; text: string }
+  /**
+   * 매치가 끝난 뒤 자기 판의 기록을 방에 나눠준다.
+   * 관전자는 자기 입력 로그가 없으므로, 이걸 받아야 그 경기를 내려받을 수 있다.
+   */
+  | { t: "replay-share"; file: ReplayFile };
 
 /** 클라이언트 → 서버 제어 메시지 */
 export type ClientControl =
@@ -95,7 +101,14 @@ export type ClientControl =
   /** 내가 탈락했다는 자기 신고 */
   | { t: "ko" }
   /** 매치 종료 후 리플레이 제출(검증용) */
-  | { t: "replay"; matchId: number; frames: number; keys: number[]; fingerprint: string }
+  | {
+      t: "replay";
+      matchId: number;
+      frames: number;
+      keys: number[];
+      garbage: number[];
+      fingerprint: string;
+    }
   /** runnerId를 주면 그 러너를 지목, 없으면 서버가 여유 있는 러너를 고른다 */
   | { t: "add-bot"; nick?: string; runnerId?: string }
   | { t: "kick-bot"; playerId: string }

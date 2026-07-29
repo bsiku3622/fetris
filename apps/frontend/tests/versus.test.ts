@@ -6,6 +6,7 @@ import type { InputCommands } from "@fetris/engine/game";
 import { Piece, Rot } from "@fetris/engine/types";
 import { shapeOf } from "@fetris/engine/pieces";
 import { STANDARD_RULESET, DEFAULT_HANDLING } from "@fetris/engine/config";
+import { ReplayRecorder, ReplayAction, runReplay, fingerprint } from "@fetris/engine/replay";
 
 const CMD = (over: Partial<InputCommands> = {}): InputCommands => ({
   rotateCW: false,
@@ -244,5 +245,83 @@ describe("타깃 전략", () => {
     setupQuad(m, 4);
     m.tick(1, CMD({ hardDrop: true }));
     expect(sent.at(-1)?.target).toBe("Z");
+  });
+});
+
+// ============================================================================
+// 대전 리플레이 — 세션이 기록한 로그로 판을 그대로 되살릴 수 있어야 한다.
+//
+// 서버 검증이 여기에 걸려 있다. 키만 남기고 받은 가비지를 빠뜨리면 정상 플레이가
+// 전부 replay-mismatch로 잡히므로, 수신 시점이 프레임 경계와 맞는지까지 본다.
+// ============================================================================
+
+describe("대전 리플레이 기록", () => {
+  /** VersusSession이 하는 것과 같은 배선으로 한 판을 돌린다 */
+  function playRecorded(seed = 909) {
+    const [a, b] = makePair(seed);
+    const rec = new ReplayRecorder();
+    // 세션과 같은 자리: 가비지를 받으면 기록기에도 남긴다
+    a.onGarbage = (holes) => rec.pushGarbage(holes);
+
+    const step = (cmd: InputCommands) => {
+      rec.commitFrame();
+      a.tick(1, cmd);
+      b.tick(1, CMD());
+    };
+
+    for (let i = 0; i < 70 && a.local.cur === Piece.None; i++) step(CMD());
+
+    // b가 quad를 세 번 비워 a에게 가비지를 보낸다. 그 사이 a도 조각을 놓는다.
+    for (let round = 0; round < 3; round++) {
+      setupQuad(b, 4);
+      b.tick(1, CMD({ hardDrop: true }));
+      for (let i = 0; i < 40; i++) {
+        if (i % 13 === 0) {
+          rec.push(ReplayAction.HardDrop, true);
+          step(CMD({ hardDrop: true }));
+        } else if (i % 7 === 2) {
+          rec.push(ReplayAction.MoveLeft, true);
+          a.local.pressDir(-1);
+          step(CMD());
+        } else if (i % 7 === 5) {
+          rec.push(ReplayAction.MoveLeft, false);
+          a.local.releaseDir(-1);
+          step(CMD());
+        } else {
+          step(CMD());
+        }
+      }
+    }
+    return { a, rec };
+  }
+
+  it("받은 가비지까지 기록해 판을 그대로 재현한다", () => {
+    const { a, rec } = playRecorded();
+    expect(rec.garbage.length).toBeGreaterThan(0);
+    expect(a.local.stats.piecesPlaced).toBeGreaterThan(0);
+
+    const replayed = runReplay({
+      rule: a.local.rule,
+      handling: a.local.handling.h,
+      seed: a.local.seed,
+      keys: rec.keys,
+      garbage: rec.garbage,
+      frames: rec.frame,
+      simRate: 60,
+    });
+    expect(fingerprint(replayed)).toBe(fingerprint(a.local));
+  });
+
+  it("가비지를 빼고 재현하면 어긋난다(기록이 실제로 쓰이고 있다)", () => {
+    const { a, rec } = playRecorded();
+    const replayed = runReplay({
+      rule: a.local.rule,
+      handling: a.local.handling.h,
+      seed: a.local.seed,
+      keys: rec.keys,
+      frames: rec.frame,
+      simRate: 60,
+    });
+    expect(fingerprint(replayed)).not.toBe(fingerprint(a.local));
   });
 });

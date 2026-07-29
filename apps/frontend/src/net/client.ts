@@ -189,8 +189,14 @@ export class NetClient {
   reportKO(): void {
     this.sendControl({ t: "ko" });
   }
-  submitReplay(matchId: number, frames: number, keys: number[], fingerprint: string): void {
-    this.sendControl({ t: "replay", matchId, frames, keys, fingerprint });
+  submitReplay(
+    matchId: number,
+    frames: number,
+    keys: number[],
+    garbage: number[],
+    fingerprint: string,
+  ): void {
+    this.sendControl({ t: "replay", matchId, frames, keys, garbage, fingerprint });
   }
 
   // ---- 봇 ------------------------------------------------------------------

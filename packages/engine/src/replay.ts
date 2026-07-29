@@ -36,11 +36,25 @@ export const enum ReplayAction {
  */
 export type ReplayKeys = number[];
 
+/**
+ * 받은 가비지 로그 — [frame, n, hole0..holeN-1, frame, n, ...].
+ *
+ * 대전에서는 키 입력만으로 판이 결정되지 않는다. 상대가 보낸 가비지는 바깥에서
+ * 들어오는 입력이라, 이걸 같이 기록해야 재현이 성립한다.
+ *
+ * 주의: 이 로그는 제출자가 스스로 신고하는 값이다. 서버 검증은 "제출한 입력이
+ * 정말 그 결과를 만드는가"를 보는 것이지, 받은 가비지가 진짜인지까지 보증하지는
+ * 않는다(서버는 게임 페이로드를 해석하지 않고 중계만 한다).
+ */
+export type ReplayGarbage = number[];
+
 export interface ReplayOptions {
   rule: RuleSet;
   handling: Handling;
   seed: number;
   keys: ReplayKeys;
+  /** 대전에서 받은 가비지(싱글이면 없음) */
+  garbage?: ReplayGarbage;
   /** 시뮬레이션한 총 프레임 수 */
   frames: number;
   /** 기록 당시의 simRate(60/120/240) */
@@ -72,6 +86,7 @@ export class ReplayPlayer {
   private cmd: InputCommands = { ...EMPTY_CMD };
   private softHeld = false;
   private ki = 0;
+  private gi = 0;
 
   constructor(opts: ReplayOptions) {
     this.opts = opts;
@@ -131,6 +146,21 @@ export class ReplayPlayer {
       this.ki += 3;
     }
 
+    // 이번 프레임에 도착한 가비지를 큐에 적재(실제 판에서도 update 직전에 쌓였다)
+    const garbage = this.opts.garbage;
+    if (garbage) {
+      while (this.gi + 1 < garbage.length && garbage[this.gi] === this.frame) {
+        const n = garbage[this.gi + 1];
+        // 손상된 로그가 무한 루프를 만들지 않도록 막는다
+        if (!Number.isInteger(n) || n <= 0 || this.gi + 2 + n > garbage.length) {
+          this.gi = garbage.length;
+          break;
+        }
+        this.game.receiveGarbage({ holes: garbage.slice(this.gi + 2, this.gi + 2 + n) });
+        this.gi += 2 + n;
+      }
+    }
+
     cmd.softDropHeld = this.softHeld;
     this.game.update(this.dt, cmd, 0);
     this.frame++;
@@ -155,6 +185,7 @@ export class ReplayPlayer {
     this.game.reset(this.opts.seed);
     this.frame = 0;
     this.ki = 0;
+    this.gi = 0;
     this.softHeld = false;
     this.cmd = { ...EMPTY_CMD };
   }
@@ -172,9 +203,13 @@ export function runReplay(opts: ReplayOptions): Game {
 /**
  * 상태 지문 — 스냅샷 전체를 주고받지 않고 한 문자열로 대조한다.
  * FNV-1a 32비트. 암호학적 강도는 필요 없다(위조가 아니라 불일치 탐지가 목적).
+ *
+ * stats.startTime만 빼고 해시한다 — performance.now() 기준 벽시계라 재현본과
+ * 같아질 수가 없다. 나머지 stats는 전부 시뮬레이션에서 나온 값이다.
  */
 export function fingerprint(game: Game): string {
-  const snap = JSON.stringify(game.serialize());
+  const raw = game.serialize();
+  const snap = JSON.stringify({ ...raw, stats: { ...raw.stats, startTime: 0 } });
   let h = 0x811c9dc5;
   for (let i = 0; i < snap.length; i++) {
     h ^= snap.charCodeAt(i);
@@ -214,6 +249,8 @@ export interface ReplayFile {
     matchId: number;
   };
   player: {
+    /** 방 안에서의 고유 id — 닉은 겹칠 수 있어서 이걸로 구분한다 */
+    id?: string;
     nick: string;
     /** 이 판에서의 순위(1 = 우승). 미확정이면 없음 */
     placement?: number;
@@ -225,6 +262,8 @@ export interface ReplayFile {
   seed: number;
   frames: number;
   keys: ReplayKeys;
+  /** 대전에서 받은 가비지(싱글 판이면 없음) */
+  garbage?: ReplayGarbage;
   /** 최종 상태 지문 — 재생 결과와 대조해 파일이 온전한지 확인한다 */
   fingerprint: string;
   /** 참고용 최종 성적(재생에는 쓰이지 않는다) */
@@ -243,6 +282,7 @@ export function verifyReplayFile(file: ReplayFile): { ok: boolean; actual: strin
       handling: file.handling,
       seed: file.seed,
       keys: file.keys,
+      garbage: file.garbage,
       frames: file.frames,
       simRate: file.simRate,
     },
@@ -256,14 +296,23 @@ export function verifyReplayFile(file: ReplayFile): { ok: boolean; actual: strin
  */
 export class ReplayRecorder {
   readonly keys: ReplayKeys = [];
+  /** 대전에서 받은 가비지 — 키만으로는 판이 결정되지 않는다 */
+  readonly garbage: ReplayGarbage = [];
   /** 시뮬레이션이 진행한 프레임 수(정수로 누적) */
   frame = 0;
 
   /** 아직 반영되지 않은 입력 — 다음 프레임 경계에서 기록된다 */
   private pending: { action: ReplayAction; down: boolean }[] = [];
+  private pendingGarbage: number[][] = [];
 
   push(action: ReplayAction, down: boolean): void {
     this.pending.push({ action, down });
+  }
+
+  /** 상대에게서 가비지를 받았을 때 — Game.receiveGarbage와 같은 자리에서 부른다 */
+  pushGarbage(holes: readonly number[]): void {
+    if (holes.length === 0) return;
+    this.pendingGarbage.push(holes.slice());
   }
 
   /** 한 시뮬 스텝을 시작하기 직전에 호출 — 대기 중인 입력을 이번 프레임으로 확정한다 */
@@ -273,12 +322,19 @@ export class ReplayRecorder {
       this.keys.push(this.frame, p.action, p.down ? 1 : 0);
     }
     this.pending.length = 0;
+    for (let i = 0; i < this.pendingGarbage.length; i++) {
+      const holes = this.pendingGarbage[i];
+      this.garbage.push(this.frame, holes.length, ...holes);
+    }
+    this.pendingGarbage.length = 0;
     this.frame++;
   }
 
   reset(): void {
     this.keys.length = 0;
+    this.garbage.length = 0;
     this.pending.length = 0;
+    this.pendingGarbage.length = 0;
     this.frame = 0;
   }
 }
