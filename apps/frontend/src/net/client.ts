@@ -6,6 +6,7 @@ import type {
   RoomState,
   MatchConfig,
   PlayerRole,
+  BotRunnerInfo,
 } from "./protocol";
 
 // ============================================================================
@@ -56,6 +57,8 @@ export class NetClient {
   onError?: (reason: string) => void;
   onDisconnect?: () => void;
   onBotPending?: (nick: string) => void;
+  /** list-runners 응답 — 부를 수 있는 봇 러너 목록 */
+  onRunners?: (runners: BotRunnerInfo[]) => void;
   /** 앱 레벨에서 게임 메시지 엿보기(채팅 등). transport보다 먼저 호출된다. */
   onGameMessage?: (m: GameMessage, from?: string) => void;
 
@@ -141,6 +144,9 @@ export class NetClient {
       case "bot-pending":
         this.onBotPending?.(msg.nick);
         break;
+      case "runners":
+        this.onRunners?.(msg.runners);
+        break;
       case "error":
         this.onError?.(msg.reason);
         break;
@@ -191,11 +197,15 @@ export class NetClient {
 
   // ---- 봇 ------------------------------------------------------------------
 
-  addBot(nick?: string): void {
-    this.sendControl({ t: "add-bot", nick });
+  /** runnerId를 주면 그 러너를 지목한다 */
+  addBot(nick?: string, runnerId?: string): void {
+    this.sendControl({ t: "add-bot", nick, runnerId });
   }
   kickBot(playerId: string): void {
     this.sendControl({ t: "kick-bot", playerId });
+  }
+  listRunners(): void {
+    this.sendControl({ t: "list-runners" });
   }
 
   // ---- 게임 메시지 ---------------------------------------------------------

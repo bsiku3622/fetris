@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import { randomUUID } from "node:crypto";
 import { verifyReplay } from "@fetris/engine/replay";
 import type { Handling, RuleSet } from "@fetris/engine/types";
+import { BotTokenStore } from "./botTokens.js";
 import type {
   ClientControl,
   ServerControl,
@@ -83,6 +84,9 @@ interface BotRunner {
   capacity: number;
   /** 예약 + 착석 중인 봇 수 */
   active: number;
+  /** 접속 토큰에 묶인 소유자 — 러너가 스스로 바꿀 수 없다 */
+  owner: string;
+  label?: string;
 }
 
 /** add-bot으로 발급했으나 아직 착석하지 않은 초대 */
@@ -123,8 +127,13 @@ function genCode(rooms: Map<string, Room>): string {
 }
 
 export interface RelayServerOptions {
-  /** 설정하면 `/bot?token=...`이 일치하는 연결만 봇으로 받아들인다 */
+  /** 단일 토큰(구식). 소유자 구분이 없어 botTokensPath를 권장한다. */
   botToken?: string;
+  /**
+   * 토큰별 소유자를 담은 JSON 파일 경로. 지정하면 봇 경로에 토큰이 필수가 된다.
+   * 형식: { "tokens": [{ "token": "...", "owner": "이름", "label": "메모" }] }
+   */
+  botTokensPath?: string;
   /** 카운트다운 길이(초). 테스트에서 줄여 쓴다. */
   countdownSeconds?: number;
   /** 순위표 표시 시간(ms). 테스트에서 줄여 쓴다. */
@@ -141,7 +150,10 @@ export interface RelayServer {
 }
 
 export function startServer(port: number, opts: RelayServerOptions = {}): RelayServer {
-  const botToken = opts.botToken?.trim() || "";
+  const tokens = new BotTokenStore({
+    path: opts.botTokensPath,
+    legacyToken: opts.botToken,
+  });
   const countdownSeconds = opts.countdownSeconds ?? COUNTDOWN_SECONDS;
   const resultsMs = opts.resultsMs ?? RESULTS_MS;
 
@@ -161,7 +173,12 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     name: r.name,
     capacity: r.capacity,
     active: r.active,
+    owner: r.owner,
+    label: r.label,
   });
+
+  /** 봇 소켓에 확정된 소유자 — bot-hello 때 토큰에서 결정된다 */
+  const socketOwner = new WeakMap<WebSocket, { owner: string; label?: string }>();
 
   const http = createServer((req, res) => {
     const path = (req.url ?? "/").split("?")[0];
@@ -178,7 +195,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
         JSON.stringify({
           runners: list,
           idle: list.filter((r) => r.active < r.capacity).length,
-          authRequired: botToken.length > 0,
+          authRequired: tokens.required,
         }),
       );
       return;
@@ -200,6 +217,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     nick: p.nick,
     isHost: p.isHost,
     isBot: p.isBot,
+    botOwner: p.runner?.owner ?? (p.isBot ? socketOwner.get(p.ws)?.owner : undefined),
     role: p.role,
     ready: p.ready,
     alive: p.alive,
@@ -494,15 +512,25 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     cancelPending((pending) => pending.runner === runner);
   };
 
-  /** 여유가 가장 많은 러너 선택 */
+  const runnerAvailable = (r: BotRunner): boolean =>
+    r.active < r.capacity && r.ws.readyState === WebSocket.OPEN;
+
+  /** 여유가 가장 많은 러너 선택(호스트가 지목하지 않았을 때) */
   const pickRunner = (): BotRunner | null => {
     let best: BotRunner | null = null;
     for (const r of runners.values()) {
-      if (r.active >= r.capacity) continue;
-      if (r.ws.readyState !== WebSocket.OPEN) continue;
+      if (!runnerAvailable(r)) continue;
       if (!best || r.active < best.active) best = r;
     }
     return best;
+  };
+
+  /** 호스트가 지목한 러너 찾기 */
+  const findRunner = (id: string): BotRunner | null => {
+    for (const r of runners.values()) {
+      if (r.id === id) return r;
+    }
+    return null;
   };
 
   const handle = (ws: WebSocket, raw: ClientControl): void => {
@@ -711,7 +739,21 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           send(ws, { t: "error", reason: "room-full" });
           return;
         }
-        const runner = pickRunner();
+        // 호스트가 특정 러너를 지목했으면 그 러너에게만 보낸다
+        let runner: BotRunner | null;
+        if (typeof raw.runnerId === "string" && raw.runnerId) {
+          runner = findRunner(raw.runnerId);
+          if (!runner) {
+            send(ws, { t: "error", reason: "runner-not-found" });
+            return;
+          }
+          if (!runnerAvailable(runner)) {
+            send(ws, { t: "error", reason: "runner-busy" });
+            return;
+          }
+        } else {
+          runner = pickRunner();
+        }
         if (!runner) {
           send(ws, { t: "error", reason: "no-bot-available" });
           return;
@@ -761,13 +803,30 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           Math.max(1, Math.floor(Number(raw.capacity)) || 1),
         );
         const name = sanitizeNick(raw.name, "Bot Runner");
+        // 소유자는 접속 토큰에서 이미 확정됐다 — 러너가 스스로 주장할 수 없다
+        const identity = socketOwner.get(ws) ?? { owner: "anonymous" };
         const existing = runners.get(ws);
-        const runner: BotRunner = existing ?? { ws, id: genRunnerId(), name, capacity, active: 0 };
+        const runner: BotRunner =
+          existing ?? {
+            ws,
+            id: genRunnerId(),
+            name,
+            capacity,
+            active: 0,
+            owner: identity.owner,
+            label: identity.label,
+          };
         // 재등록이면 이름·정원만 갱신(진행 중인 봇 점유는 유지)
         runner.name = name;
         runner.capacity = capacity;
         runners.set(ws, runner);
         send(ws, { t: "bot-ready", runner: runnerInfo(runner) });
+        break;
+      }
+      case "list-runners": {
+        // 방에 있는 사람이면 누구나 볼 수 있다(부르는 건 호스트만)
+        if (!sockToPlayer.has(ws)) return;
+        send(ws, { t: "runners", runners: [...runners.values()].map(runnerInfo) });
         break;
       }
       case "relay": {
@@ -793,15 +852,16 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
   wss.on("connection", (ws: WebSocket, req) => {
     const path = (req.url ?? "/").split("?")[0];
     if (path === BOT_PATH || path === `${BOT_PATH}/`) {
-      if (botToken) {
-        const query = (req.url ?? "").split("?")[1] ?? "";
-        const token = new URLSearchParams(query).get("token") ?? "";
-        if (token !== botToken) {
-          send(ws, { t: "error", reason: "bot-auth-failed" });
-          ws.close(4401, "bot-auth-failed");
-          return;
-        }
+      const query = (req.url ?? "").split("?")[1] ?? "";
+      const token = new URLSearchParams(query).get("token") ?? "";
+      const identity = tokens.verify(token);
+      if (!identity) {
+        send(ws, { t: "error", reason: "bot-auth-failed" });
+        ws.close(4401, "bot-auth-failed");
+        return;
       }
+      // 소유자를 소켓에 못박는다 — 이후 러너가 무슨 이름을 대든 바뀌지 않는다
+      socketOwner.set(ws, identity);
       botSockets.add(ws);
     }
 

@@ -112,11 +112,47 @@ KO는 자기 신고입니다. 서버는 보드를 실시간으로 보지 않으�
 - 대기 중인 러너가 없거나 모두 `capacity`를 채웠으면 `no-bot-available`.
 - `ticket`은 `/bot` 경로에서만 사용할 수 있습니다(사람 클라이언트가 봇 슬롯을 가로챌 수 없음).
 - 사람이 모두 나가 봇만 남은 방은 봇 연결까지 닫고 정리합니다.
-- 에러 사유: `not-in-room`, `not-host`, `room-full`, `no-bot-available`, `bot-join-timeout`, `invalid-ticket`, `bot-path-required`, `not-a-bot`, `bot-auth-failed`.
+- 에러 사유: `not-in-room`, `not-host`, `not-in-lobby`, `room-full`, `no-bot-available`, `runner-not-found`, `runner-busy`, `bot-join-timeout`, `invalid-ticket`, `bot-path-required`, `not-a-bot`, `bot-auth-failed`.
 
-### 인증
+### 인증 — 러너별 토큰
 
-`FETRIS_BOT_TOKEN`을 설정하면 `/bot?token=…`이 일치하는 연결만 봇으로 받아들입니다(불일치 시 `bot-auth-failed`와 함께 close 4401). 설정하지 않으면 봇 경로가 열려 있으므로, 공개 서버에서는 지정을 권장합니다. 사람 경로(`/`)는 토큰과 무관합니다.
+`FETRIS_BOT_TOKENS`에 토큰 파일 경로를 주면 봇 경로에 **토큰이 필수**가 되고, 토큰마다 소유자가 붙습니다.
+
+```jsonc
+// /srv/fetris/bot-tokens.json
+{
+  "tokens": [
+    { "token": "…", "owner": "재원", "label": "메인 봇" },
+    { "token": "…", "owner": "친구A" }
+  ]
+}
+```
+
+토큰 관리는 CLI로 합니다. **서버는 파일 변경을 스스로 감지하므로 재시작이 필요 없습니다.**
+
+```bash
+FETRIS_BOT_TOKENS=/srv/fetris/bot-tokens.json npm run bot:token -- add 친구A "연습 상대"
+FETRIS_BOT_TOKENS=/srv/fetris/bot-tokens.json npm run bot:token -- list
+FETRIS_BOT_TOKENS=/srv/fetris/bot-tokens.json npm run bot:token -- revoke 친구A
+```
+
+**소유자는 토큰에 묶여 있어 러너가 사칭할 수 없습니다.** `bot-hello`에 무슨 이름을 실어 보내든 서버는 접속 토큰에서 확정한 소유자를 씁니다. 이 값이 러너 목록과 방 로스터(`PlayerInfo.botOwner`)에 그대로 표시됩니다.
+
+토큰 파일을 지정하지 않으면 봇 경로가 열려 있습니다(로컬 개발 편의). 공개 서버라면 반드시 지정하세요 — 그렇지 않으면 주소만 아는 누구나 러너를 등록할 수 있습니다. 사람 경로(`/`)는 토큰과 무관합니다.
+
+구식 단일 토큰(`FETRIS_BOT_TOKEN`)도 계속 동작하지만 소유자 구분이 없습니다.
+
+### 봇 고르기
+
+호스트는 어느 봇을 부를지 지목할 수 있습니다.
+
+```jsonc
+{ "t": "list-runners" }                        // → { "t": "runners", "runners": [...] }
+{ "t": "add-bot", "runnerId": "r1a2b" }        // 지목
+{ "t": "add-bot" }                             // 생략하면 여유가 가장 많은 러너를 자동 선택
+```
+
+지목한 러너가 없으면 `runner-not-found`, 정원을 채웠으면 `runner-busy`가 돌아옵니다. 목록 조회는 방에 있는 사람이면 누구나 할 수 있고, 부르는 것은 호스트 전용입니다.
 
 ### 참조 러너
 

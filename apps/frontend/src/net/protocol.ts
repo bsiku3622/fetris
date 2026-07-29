@@ -17,6 +17,8 @@ export interface PlayerInfo {
   nick: string;
   isHost: boolean;
   isBot: boolean;
+  /** 봇이라면 이 봇을 올린 사람(토큰 소유자) */
+  botOwner?: string;
   role: PlayerRole;
   ready: boolean;
   /** 이번 매치 생존 여부(playing 중에만 의미 있음) */
@@ -47,6 +49,17 @@ export interface RoomState {
   players: PlayerInfo[];
   config: MatchConfig | null;
   matchId: number;
+}
+
+/** 지금 봇을 보내줄 수 있는 러너 — 호스트가 이 중에서 고른다 */
+export interface BotRunnerInfo {
+  id: string;
+  name: string;
+  capacity: number;
+  active: number;
+  /** 토큰에 묶인 소유자. 러너가 스스로 사칭할 수 없다. */
+  owner: string;
+  label?: string;
 }
 
 /** 방 안에서 플레이어끼리 주고받는 게임 메시지(서버는 그대로 중계) */
@@ -80,8 +93,11 @@ export type ClientControl =
   | { t: "ko" }
   /** 매치 종료 후 리플레이 제출(검증용) */
   | { t: "replay"; matchId: number; frames: number; keys: number[]; fingerprint: string }
-  | { t: "add-bot"; nick?: string }
-  | { t: "kick-bot"; playerId: string };
+  /** runnerId를 주면 그 러너를 지목, 없으면 서버가 여유 있는 러너를 고른다 */
+  | { t: "add-bot"; nick?: string; runnerId?: string }
+  | { t: "kick-bot"; playerId: string }
+  /** 대기 중인 봇 러너 목록 요청 */
+  | { t: "list-runners" };
 
 /** 서버 → 클라이언트 제어 메시지 */
 export type ServerControl =
@@ -94,7 +110,8 @@ export type ServerControl =
   | { t: "match-end"; matchId: number; winnerId: string | null; standings: { playerId: string; placement: number }[] }
   | { t: "error"; reason: string }
   | { t: "relay"; from: string; msg: GameMessage }
-  | { t: "bot-pending"; ticket: string; nick: string; runnerId: string };
+  | { t: "bot-pending"; ticket: string; nick: string; runnerId: string }
+  | { t: "runners"; runners: BotRunnerInfo[] };
 
 export type AnyMessage = ClientControl | ServerControl;
 

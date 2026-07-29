@@ -32,6 +32,8 @@ export interface PlayerInfo {
   isHost: boolean;
   /** 봇 경로(`/bot`)로 접속한 참가자 여부 */
   isBot: boolean;
+  /** 봇이라면 이 봇을 올린 사람(토큰 소유자). 사람 참가자는 없음. */
+  botOwner?: string;
   role: PlayerRole;
   ready: boolean;
   /** 이번 매치 생존 여부(playing 중에만 의미 있음) */
@@ -77,6 +79,10 @@ export interface BotRunnerInfo {
   name: string;
   capacity: number;
   active: number;
+  /** 이 러너를 올린 사람 — 토큰에 묶여 있어 러너가 스스로 사칭할 수 없다 */
+  owner: string;
+  /** 토큰에 달린 메모(어떤 봇인지) */
+  label?: string;
 }
 
 /** 클라이언트 → 서버 */
@@ -103,10 +109,15 @@ export type ClientControl =
    * 서버가 같은 시드·핸들링·simRate로 재현해 지문을 대조한다.
    */
   | { t: "replay"; matchId: number; frames: number; keys: number[]; fingerprint: string }
-  /** 호스트 전용: 대기 중인 러너에게 봇 한 명을 이 방으로 초대 요청 */
-  | { t: "add-bot"; nick?: string }
+  /**
+   * 호스트 전용: 봇 한 명을 이 방으로 초대 요청.
+   * runnerId를 주면 그 러너에게만 보내고, 없으면 여유가 가장 많은 러너를 고른다.
+   */
+  | { t: "add-bot"; nick?: string; runnerId?: string }
   /** 호스트 전용: 방에 있는 봇 퇴장 */
   | { t: "kick-bot"; playerId: string }
+  /** 대기 중인 봇 러너 목록 요청(누구 봇을 부를지 고르기 위해) */
+  | { t: "list-runners" }
   /** 봇 러너 등록(봇 경로 전용) */
   | { t: "bot-hello"; name?: string; capacity?: number };
 
@@ -128,6 +139,8 @@ export type ServerControl =
   | { t: "relay"; from: string; msg: GameMessage }
   /** 러너 등록 완료 */
   | { t: "bot-ready"; runner: BotRunnerInfo }
+  /** list-runners 응답 — 지금 붙일 수 있는 러너들 */
+  | { t: "runners"; runners: BotRunnerInfo[] }
   /** 서버 → 러너: 이 방에 봇을 하나 붙여달라는 초대 */
   | { t: "bot-invite"; code: string; ticket: string; nick: string }
   /** 서버 → 호스트: add-bot 접수됨(착석하면 state로 반영된다) */

@@ -10,7 +10,8 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "bot:example": "node examples/bot-runner.mjs"
+    "bot:example": "node examples/bot-runner.mjs",
+    "bot:token": "node scripts/bot-token.mjs"
   },
   "dependencies": {
     "@fetris/engine": "*",

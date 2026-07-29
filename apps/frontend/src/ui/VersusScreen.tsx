@@ -4,7 +4,7 @@ import type { Settings } from "../app/store";
 import type { RuleSet, KicksetName, SpinBonusName, GarbageHoleMode, RandomizerName } from "@fetris/engine/types";
 import { isTauri, lanStart, lanStop, lanDiscover } from "../net/lan";
 import type { LanInfo } from "../net/lan";
-import type { MatchConfig, PlayerInfo } from "../net/protocol";
+import type { BotRunnerInfo, MatchConfig, PlayerInfo } from "../net/protocol";
 import type { RoomSession } from "../app/roomSession";
 import { MatchStage } from "./MatchStage";
 import { FUNKY } from "../render/theme";
@@ -364,7 +364,13 @@ export function VersusScreen({
                 />
               ))}
               {Array.from({ length: emptySlots }, (_, i) => (
-                <EmptySlot key={`empty-${i}`} canFill={isHost} onFill={() => room.addBot()} />
+                <EmptySlot
+                  key={`empty-${i}`}
+                  canFill={isHost}
+                  runners={room.runners}
+                  onRefresh={() => room.refreshRunners()}
+                  onFill={(runnerId) => room.addBot(runnerId)}
+                />
               ))}
             </div>
           </div>
@@ -583,7 +589,7 @@ function PlayerRow({
       <span className="fx-player-box__swatch" style={{ background: color }} />
       <span className="fx-player-box__name">{player.nick}</span>
       {player.wins > 0 && <Badge color="yellow">{player.wins}승</Badge>}
-      {player.isBot && <Badge color="purple">BOT</Badge>}
+      {player.isBot && <Badge color="purple">{player.botOwner ? `BOT · ${player.botOwner}` : "BOT"}</Badge>}
       {player.isHost && <Badge color="yellow">호스트</Badge>}
       {me && <Badge color="sky">나</Badge>}
       {player.role === "spectator" ? (
@@ -603,18 +609,116 @@ function PlayerRow({
   );
 }
 
-function EmptySlot({ canFill, onFill }: { canFill: boolean; onFill: () => void }) {
+/**
+ * 빈 슬롯 — 호스트는 여기서 어느 봇을 부를지 고른다.
+ * 러너가 하나뿐이면 바로 부르고, 여럿이면 소유자별로 골라 넣는다.
+ */
+function EmptySlot({
+  canFill,
+  runners,
+  onRefresh,
+  onFill,
+}: {
+  canFill: boolean;
+  runners: BotRunnerInfo[];
+  onRefresh: () => void;
+  onFill: (runnerId?: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const available = runners.filter((r) => r.active < r.capacity);
+
+  const toggle = () => {
+    if (!open) onRefresh(); // 열 때마다 최신 목록을 받아온다
+    setOpen((v) => !v);
+  };
+
   return (
-    <div className="fx-player-box" style={{ opacity: 0.5, borderStyle: "dashed" }}>
-      <span className="fx-player-box__swatch" style={{ background: "transparent", border: "2px dashed var(--funky-line)" }} />
-      <span className="fx-player-box__name" style={{ opacity: 0.6 }}>빈 자리</span>
-      {canFill && (
-        <button
-          onClick={onFill}
-          style={{ marginLeft: "auto", border: "2px solid var(--funky-line)", background: "transparent", fontWeight: 900, fontSize: "0.7rem", cursor: "pointer", padding: "2px 6px" }}
+    <div style={{ position: "relative" }}>
+      <div className="fx-player-box" style={{ opacity: 0.5, borderStyle: "dashed" }}>
+        <span className="fx-player-box__swatch" style={{ background: "transparent", border: "2px dashed var(--funky-line)" }} />
+        <span className="fx-player-box__name" style={{ opacity: 0.6 }}>빈 자리</span>
+        {canFill && (
+          <button
+            onClick={toggle}
+            style={{ marginLeft: "auto", border: "2px solid var(--funky-line)", background: open ? FUNKY.sky : "transparent", fontWeight: 900, fontSize: "0.7rem", cursor: "pointer", padding: "2px 6px" }}
+          >
+            + 봇
+          </button>
+        )}
+      </div>
+
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            right: 0,
+            zIndex: 20,
+            minWidth: 200,
+            marginTop: 4,
+            border: "2px solid var(--funky-line)",
+            background: "var(--funky-surface)",
+            boxShadow: "4px 4px 0 rgba(0,0,0,0.25)",
+            fontSize: "0.75rem",
+            fontWeight: 800,
+          }}
         >
-          + 봇
-        </button>
+          {available.length === 0 ? (
+            <div style={{ padding: "10px 12px", opacity: 0.7, lineHeight: 1.5 }}>
+              대기 중인 봇이 없어요.
+              <br />
+              <span style={{ opacity: 0.7, fontWeight: 700 }}>봇 러너를 먼저 띄워야 합니다.</span>
+            </div>
+          ) : (
+            <>
+              {available.map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => {
+                    onFill(r.id);
+                    setOpen(false);
+                  }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "8px 12px",
+                    border: "none",
+                    borderBottom: "1px solid rgba(0,0,0,0.12)",
+                    background: "transparent",
+                    cursor: "pointer",
+                    font: "inherit",
+                  }}
+                >
+                  <div>{r.name}</div>
+                  <div style={{ opacity: 0.6, fontSize: "0.68rem", fontWeight: 700 }}>
+                    {r.owner}
+                    {r.label ? ` · ${r.label}` : ""} · 여유 {r.capacity - r.active}
+                  </div>
+                </button>
+              ))}
+              <button
+                onClick={() => {
+                  onFill();
+                  setOpen(false);
+                }}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "8px 12px",
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  font: "inherit",
+                  opacity: 0.7,
+                }}
+              >
+                아무나 (자동 선택)
+              </button>
+            </>
+          )}
+        </div>
       )}
     </div>
   );

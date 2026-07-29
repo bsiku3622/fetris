@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NetClient } from "../net/client";
-import type { GameMessage, MatchConfig, PlayerRole, RoomState } from "../net/protocol";
+import type { BotRunnerInfo, GameMessage, MatchConfig, PlayerRole, RoomState } from "../net/protocol";
 
 // ============================================================================
 // useRoomSession — 방 연결을 화면보다 위층에서 유지하는 훅.
@@ -55,6 +55,8 @@ export interface RoomSession {
   matchEnd: MatchEndInfo | null;
   /** 이번 매치에서 내가 탈락했는지 */
   koed: boolean;
+  /** 부를 수 있는 봇 러너 — list-runners 응답으로 채워진다 */
+  runners: BotRunnerInfo[];
 
   connect(url: string, mode: "host" | "join", opts: { code?: string; maxPlayers?: number; nick: string }): Promise<void>;
   leave(): void;
@@ -62,8 +64,11 @@ export interface RoomSession {
   setRole(role: PlayerRole): void;
   setConfig(config: MatchConfig): void;
   startMatch(): void;
-  addBot(): void;
+  /** runnerId를 주면 그 러너를 지목해 부른다 */
+  addBot(runnerId?: string): void;
   kickBot(playerId: string): void;
+  /** 러너 목록 새로고침 요청 */
+  refreshRunners(): void;
   sendChat(nick: string, text: string): void;
   /** 대전 화면이 매치를 인수했을 때 — 같은 매치로 다시 소환되지 않게 비운다 */
   consumeMatchStart(): void;
@@ -100,6 +105,7 @@ export function useRoomSession(): RoomSession {
   const [countdown, setCountdown] = useState<CountdownInfo | null>(null);
   const [matchEnd, setMatchEnd] = useState<MatchEndInfo | null>(null);
   const [koed, setKoed] = useState(false);
+  const [runners, setRunners] = useState<BotRunnerInfo[]>([]);
   /** 로스터 대비 입퇴장 안내를 만들기 위한 직전 스냅샷 */
   const prevPlayers = useRef<Map<string, string>>(new Map());
 
@@ -163,6 +169,7 @@ export function useRoomSession(): RoomSession {
         pushChat({ nick: "", text: champ ? `${champ}님이 승리했습니다` : "무승부로 끝났습니다" });
       };
       net.onBotPending = (nick) => pushSystemChat(`${nick} 합류 중…`);
+      net.onRunners = (list) => setRunners(list);
       net.onGameMessage = (m: GameMessage) => {
         if (m.t === "chat") pushChat({ nick: m.nick, text: m.text });
       };
@@ -229,14 +236,16 @@ export function useRoomSession(): RoomSession {
       countdown,
       matchEnd,
       koed,
+      runners,
       connect,
       leave,
       setReady: (r) => netRef.current?.setReady(r),
       setRole: (r) => netRef.current?.setRole(r),
       setConfig: (c) => netRef.current?.setConfig(c),
       startMatch: () => netRef.current?.startMatch(),
-      addBot: () => netRef.current?.addBot(),
+      addBot: (runnerId) => netRef.current?.addBot(undefined, runnerId),
       kickBot: (id) => netRef.current?.kickBot(id),
+      refreshRunners: () => netRef.current?.listRunners(),
       sendChat: (nick, text) => {
         netRef.current?.sendGame({ t: "chat", nick, text });
         pushChat({ nick, text });
@@ -246,6 +255,6 @@ export function useRoomSession(): RoomSession {
       clearError: () => setError(""),
       pushSystemChat,
     }),
-    [state, myId, code, error, chat, matchStart, countdown, matchEnd, koed, connect, leave, pushChat, pushSystemChat],
+    [state, myId, code, error, chat, matchStart, countdown, matchEnd, koed, runners, connect, leave, pushChat, pushSystemChat],
   );
 }

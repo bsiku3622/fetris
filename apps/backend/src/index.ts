@@ -9,11 +9,15 @@ import { startServer } from "./server.js";
 
 const port = Number(process.env.PORT) || 8787;
 const botToken = process.env.FETRIS_BOT_TOKEN;
-const server = startServer(port, { botToken });
+const botTokensPath = process.env.FETRIS_BOT_TOKENS;
+const server = startServer(port, { botToken, botTokensPath });
 
-console.log(
-  `[fetris-be] relay listening on :${port} (health: /health, bots: /bot${botToken ? " — token required" : ""})`,
-);
+const auth = botTokensPath
+  ? `토큰 파일 ${botTokensPath}`
+  : botToken
+    ? "단일 토큰"
+    : "인증 없음(공개)";
+console.log(`[fetris-be] relay listening on :${port} (health: /health, bots: /bot — ${auth})`);
 
 const shutdown = (signal: string) => {
   console.log(`[fetris-be] ${signal} 수신 — 종료합니다`);
