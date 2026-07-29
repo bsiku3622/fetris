@@ -408,10 +408,13 @@ export class VersusSession {
     if (!this.spectating) {
       this.localRenderer.render(localGame, alpha, this.gfx, this.particles, this.actionText, this.damage, this.lastHud, localGame.pendingGarbage, localGame.readyGarbage);
     }
-    // 원격: 각 상대 미러 단순 렌더(이펙트 없음, 게이지는 표시)
+    // 원격: 각 상대 미러 단순 렌더(이펙트 없음, 게이지·성적은 표시)
     for (const [playerId, renderer] of this.remoteRenderers) {
       const remoteGame = this.match.remotes.get(playerId);
-      if (remoteGame) renderer.render(remoteGame, 0, this.gfx, undefined, undefined, undefined, undefined, remoteGame.pendingGarbage, remoteGame.readyGarbage);
+      if (!remoteGame) continue;
+      // 크게 뜬 보드에만 성적을 붙인다(썸네일에는 자리가 없다)
+      const hud = this.focusIds.has(playerId) ? remoteHud(remoteGame) : undefined;
+      renderer.render(remoteGame, 0, this.gfx, undefined, undefined, undefined, hud, remoteGame.pendingGarbage, remoteGame.readyGarbage);
     }
 
     // 위험 경고음 — 스택이 천장 근처면 주기적으로 삐
@@ -563,7 +566,7 @@ const REPLAY_ACTION: Partial<Record<Action, ReplayAction>> = {
   hardDrop: ReplayAction.HardDrop,
 };
 
-/** 대전 HUD — APM/PPS/VS + 현재 타깃 전략(숫자키 1~4로 전환). */
+/** 대전 HUD — PPS/APM/APP/VS + 현재 타깃 전략(숫자키 1~4로 전환). */
 function versusHud(game: Game, strategy: TargetStrategy): HudInfo {
   const s = game.stats;
   const ls = liveStats(s);
@@ -571,8 +574,27 @@ function versusHud(game: Game, strategy: TargetStrategy): HudInfo {
     left: [
       { label: "PIECES", value: String(s.piecesPlaced), sub: `, ${ls.pps.toFixed(2)}/S` },
       { label: "ATTACK", value: String(s.attack), sub: `, ${ls.apm.toFixed(0)}/M` },
+      { label: "APP", value: ls.app.toFixed(2) },
       { label: "VS", value: ls.vs.toFixed(1) },
       { label: "TARGET", value: strategy.toUpperCase() },
+    ],
+    right: [],
+  };
+}
+
+/**
+ * 상대 보드용 HUD. 스냅샷에 성적이 실려 오므로 미러에서도 같은 값을 뽑을 수 있다.
+ * 크게 떠 있는 보드에만 붙인다 — 썸네일에는 글자가 들어갈 자리가 없다.
+ */
+function remoteHud(game: Game): HudInfo {
+  const s = game.stats;
+  const ls = liveStats(s);
+  return {
+    left: [
+      { label: "PIECES", value: String(s.piecesPlaced), sub: `, ${ls.pps.toFixed(2)}/S` },
+      { label: "ATTACK", value: String(s.attack), sub: `, ${ls.apm.toFixed(0)}/M` },
+      { label: "APP", value: ls.app.toFixed(2) },
+      { label: "VS", value: ls.vs.toFixed(1) },
     ],
     right: [],
   };
