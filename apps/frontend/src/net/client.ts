@@ -52,6 +52,7 @@ export class NetClient {
     matchId: number,
     winnerId: string | null,
     standings: { playerId: string; placement: number }[],
+    seriesWinnerId?: string,
   ) => void;
   onError?: (reason: string) => void;
   onDisconnect?: () => void;
@@ -135,7 +136,7 @@ export class NetClient {
         this.onKO?.(msg.playerId, msg.placement, msg.remaining);
         break;
       case "match-end":
-        this.onMatchEnd?.(msg.matchId, msg.winnerId, msg.standings);
+        this.onMatchEnd?.(msg.matchId, msg.winnerId, msg.standings, msg.seriesWinnerId);
         break;
       case "bot-pending":
         this.onBotPending?.(msg.nick);

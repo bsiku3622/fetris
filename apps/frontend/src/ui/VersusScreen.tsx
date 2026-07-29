@@ -24,6 +24,8 @@ import { FUNKY } from "../render/theme";
 const OPP_PALETTE = [FUNKY.pink, FUNKY.orange, FUNKY.green, FUNKY.purple, FUNKY.yellow, FUNKY.danger, FUNKY.sky];
 
 type Cfg = {
+  /** 먼저 N승하면 시리즈 종료. 0 = 목표 없이 계속 */
+  firstTo: number;
   attackMul: number;
   undo: boolean;
   garbage: boolean;
@@ -46,6 +48,7 @@ type Cfg = {
 };
 
 const DEFAULT_CFG: Cfg = {
+  firstTo: 0,
   attackMul: 1,
   undo: false,
   garbage: true,
@@ -130,6 +133,7 @@ export function VersusScreen({
     sharePieces: c.sharePieces,
     undo: c.undo,
     attackMul: c.attackMul,
+    firstTo: c.firstTo,
   });
 
   /** 호스트가 설정을 만지면 서버에 밀어넣어 방 전체에 반영한다 */
@@ -160,6 +164,7 @@ export function VersusScreen({
       attackMul: remoteConfig.attackMul,
       undo: remoteConfig.undo,
       sharePieces: remoteConfig.sharePieces,
+      firstTo: remoteConfig.firstTo ?? 0,
       garbage: rule.garbageEnabled,
       kickset: rule.kickset,
       spinBonus: rule.spinBonus,
@@ -371,6 +376,7 @@ export function VersusScreen({
                   player={p}
                   color={p.id === room.myId ? FUNKY.sky : OPP_PALETTE[i % OPP_PALETTE.length]}
                   me={p.id === room.myId}
+                  firstTo={state.config?.firstTo ?? 0}
                   canKick={isHost && p.isBot}
                   onKick={() => room.kickBot(p.id)}
                 />
@@ -429,6 +435,20 @@ export function VersusScreen({
 
               <Tabs.Panel value="match">
                 <div className="fx-settings-group">
+                  <SelectField
+                    label="승부 방식"
+                    value={String(cfg.firstTo)}
+                    disabled={!isHost}
+                    options={[
+                      { value: "0", label: "계속 (목표 없음)" },
+                      { value: "1", label: "단판 (FT1)" },
+                      { value: "3", label: "3선승 (FT3)" },
+                      { value: "5", label: "5선승 (FT5)" },
+                      { value: "7", label: "7선승 (FT7)" },
+                      { value: "10", label: "10선승 (FT10)" },
+                    ]}
+                    onChange={(v) => applyEdit({ firstTo: Number(v) })}
+                  />
                   <NumField label="공격 배수" value={cfg.attackMul} min={0} step={0.1} disabled={!isHost} onChange={(v) => applyEdit({ attackMul: v })} />
                   <ToggleField label="같은 조각 순서 공유" value={cfg.sharePieces} disabled={!isHost} onChange={(v) => applyEdit({ sharePieces: v })} />
                   <ToggleField label="교육 모드 (Ctrl+Z)" value={cfg.undo} disabled={!isHost} onChange={(v) => applyEdit({ undo: v })} />
@@ -561,13 +581,28 @@ function ResultsView({ room }: { room: RoomSession }) {
   const players = room.state?.players ?? [];
   const nickOf = (id: string) => players.find((p) => p.id === id)?.nick ?? "―";
   const iWon = end.winnerId === room.myId;
+  const firstTo = room.state?.config?.firstTo ?? 0;
+  // 시리즈(FT)까지 끝난 판이면 한 판 승리보다 크게 알린다
+  const series = end.seriesWinnerId;
+  const iTookSeries = series === room.myId;
 
   return (
     <div className="fx-overlay" style={{ position: "relative", width: "100%", height: "100%" }}>
       <div className="fx-panel" style={{ minWidth: 340 }}>
-        <h2 style={{ color: iWon ? FUNKY.green : FUNKY.sky, marginBottom: 4 }}>
-          {iWon ? "WINNER!" : end.winnerId ? `${nickOf(end.winnerId)} 승리` : "무승부"}
-        </h2>
+        {series ? (
+          <>
+            <div style={{ fontSize: "0.72rem", fontWeight: 900, letterSpacing: "0.12em", color: FUNKY.yellow }}>
+              FT{firstTo} 시리즈 종료
+            </div>
+            <h2 style={{ color: iTookSeries ? FUNKY.yellow : FUNKY.sky, marginBottom: 4 }}>
+              🏆 {iTookSeries ? "시리즈 우승!" : `${nickOf(series)} 시리즈 우승`}
+            </h2>
+          </>
+        ) : (
+          <h2 style={{ color: iWon ? FUNKY.green : FUNKY.sky, marginBottom: 4 }}>
+            {iWon ? "WINNER!" : end.winnerId ? `${nickOf(end.winnerId)} 승리` : "무승부"}
+          </h2>
+        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 4, margin: "12px 0", minWidth: 260 }}>
           {end.standings.map((s) => (
             <div
@@ -612,12 +647,15 @@ function PlayerRow({
   player,
   color,
   me,
+  firstTo,
   canKick,
   onKick,
 }: {
   player: PlayerInfo;
   color: string;
   me: boolean;
+  /** 시리즈 목표 승수(0이면 목표 없음) */
+  firstTo: number;
   canKick: boolean;
   onKick: () => void;
 }) {
@@ -625,7 +663,7 @@ function PlayerRow({
     <div className="fx-player-box" style={{ opacity: player.role === "spectator" ? 0.6 : 1 }}>
       <span className="fx-player-box__swatch" style={{ background: color }} />
       <span className="fx-player-box__name">{player.nick}</span>
-      {player.wins > 0 && <Badge color="yellow">{player.wins}승</Badge>}
+      {player.wins > 0 && <Badge color="yellow">{firstTo > 0 ? `${player.wins}/${firstTo}승` : `${player.wins}승`}</Badge>}
       {player.isBot && <Badge color="purple">{player.botOwner ? `BOT · ${player.botOwner}` : "BOT"}</Badge>}
       {player.isHost && <Badge color="yellow">호스트</Badge>}
       {me && <Badge color="sky">나</Badge>}

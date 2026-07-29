@@ -61,6 +61,11 @@ export interface MatchConfig {
   undo: boolean;
   /** 참가자 공통 공격 배수 */
   attackMul: number;
+  /**
+   * 시리즈 목표 승수(먼저 N승). 0이면 목표 없이 계속 반복한다.
+   * 도달하면 match-end에 seriesWinnerId가 실리고 모두의 승수가 초기화된다.
+   */
+  firstTo: number;
 }
 
 /** 방 전체 상태 스냅샷 — 대기실 변화가 있을 때마다 브로드캐스트한다. */
@@ -132,8 +137,17 @@ export type ServerControl =
   | { t: "match-start"; matchId: number; seed: number; config: MatchConfig; players: string[] }
   /** 누군가 탈락 — placement는 확정된 순위, remaining은 남은 생존자 수 */
   | { t: "ko"; playerId: string; placement: number; remaining: number }
-  /** 매치 종료 — standings는 1위부터 정렬 */
-  | { t: "match-end"; matchId: number; winnerId: string | null; standings: { playerId: string; placement: number }[] }
+  /**
+   * 매치 종료 — standings는 1위부터 정렬.
+   * seriesWinnerId가 있으면 이번 판으로 시리즈(FT)까지 끝났다는 뜻이다.
+   */
+  | {
+      t: "match-end";
+      matchId: number;
+      winnerId: string | null;
+      standings: { playerId: string; placement: number }[];
+      seriesWinnerId?: string;
+    }
   | { t: "error"; reason: string }
   | { t: "relay"; from: string; msg: GameMessage }
   /** 러너 등록 완료 */

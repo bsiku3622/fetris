@@ -40,6 +40,8 @@ export interface MatchConfig {
   sharePieces: boolean;
   undo: boolean;
   attackMul: number;
+  /** 먼저 N승하면 시리즈 종료. 0이면 목표 없이 계속. */
+  firstTo: number;
 }
 
 export interface RoomState {
@@ -107,7 +109,14 @@ export type ServerControl =
   | { t: "state"; state: RoomState }
   | { t: "match-start"; matchId: number; seed: number; config: MatchConfig; players: string[] }
   | { t: "ko"; playerId: string; placement: number; remaining: number }
-  | { t: "match-end"; matchId: number; winnerId: string | null; standings: { playerId: string; placement: number }[] }
+  | {
+      t: "match-end";
+      matchId: number;
+      winnerId: string | null;
+      standings: { playerId: string; placement: number }[];
+      /** 있으면 시리즈(FT)까지 끝났다는 뜻 */
+      seriesWinnerId?: string;
+    }
   | { t: "error"; reason: string }
   | { t: "relay"; from: string; msg: GameMessage }
   | { t: "bot-pending"; ticket: string; nick: string; runnerId: string }

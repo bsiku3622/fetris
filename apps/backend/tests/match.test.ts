@@ -199,6 +199,57 @@ describe("매치 진행", () => {
     guests[0].close();
   });
 
+  it("FT에 도달하면 시리즈가 끝나고 승수가 초기화된다", async () => {
+    const { host, code } = await createRoom(url);
+    // 2선승
+    host.send({ t: "config", config: { ...TEST_CONFIG, firstTo: 2 } });
+    const guest = await joinRoom(url, code, "G1");
+    await host.waitState((s) => s.players.length === 2);
+    host.drain();
+    guest.drain();
+
+    // 1승째 — 아직 시리즈는 안 끝난다
+    host.send({ t: "start-match" });
+    await host.waitFor("match-start");
+    await guest.waitFor("match-start");
+    guest.send({ t: "ko" });
+    const first = await host.waitFor("match-end");
+    expect(first.seriesWinnerId).toBeUndefined();
+
+    const champ = first.winnerId as string;
+    const afterFirst = await host.waitState((s) => s.phase === "lobby");
+    expect(playerIn(afterFirst, champ)?.wins).toBe(1);
+
+    // 2승째 — 시리즈 종료
+    host.send({ t: "start-match" });
+    await host.waitFor("match-start");
+    await guest.waitFor("match-start");
+    guest.send({ t: "ko" });
+    const second = await host.waitFor("match-end");
+    expect(second.seriesWinnerId).toBe(champ);
+
+    // 다음 시리즈를 위해 전원 승수가 0으로 돌아간다
+    const afterSeries = await host.waitState((s) => s.phase === "lobby");
+    expect(afterSeries.players.every((p) => p.wins === 0)).toBe(true);
+
+    host.close();
+    guest.close();
+  });
+
+  it("FT가 0이면 시리즈 종료 없이 계속 쌓인다", async () => {
+    const { host, guests } = await readyRoom(1); // TEST_CONFIG.firstTo = 0
+    await startMatch(host, guests);
+    guests[0].send({ t: "ko" });
+    const end = await host.waitFor("match-end");
+    expect(end.seriesWinnerId).toBeUndefined();
+
+    const s = await host.waitState((st) => st.phase === "lobby");
+    expect(playerIn(s, end.winnerId as string)?.wins).toBe(1);
+
+    host.close();
+    guests[0].close();
+  });
+
   it("결과 화면이 아니면 스킵은 무시된다", async () => {
     const { host, guests } = await readyRoom(1);
     host.send({ t: "skip-results" }); // lobby에서 보냄

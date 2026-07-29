@@ -126,6 +126,7 @@ export const TEST_CONFIG: MatchConfig = {
   sharePieces: true,
   undo: false,
   attackMul: 1,
+  firstTo: 0,
 };
 
 /** 방을 만들고 호스트 클라이언트·코드·초기 상태를 돌려준다 */

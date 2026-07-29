@@ -299,12 +299,21 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       .sort((a, b) => (a.placement ?? 99) - (b.placement ?? 99))
       .map((p) => ({ playerId: p.id, placement: p.placement as number }));
 
+    // 시리즈 목표(FT)에 도달했으면 이번 판으로 시리즈가 끝난다.
+    // 다음 시리즈를 새로 시작할 수 있도록 모두의 승수를 초기화한다.
+    const firstTo = room.config?.firstTo ?? 0;
+    const seriesWinner = winner && firstTo > 0 && winner.wins >= firstTo ? winner : null;
+    if (seriesWinner) {
+      for (const p of room.players) p.wins = 0;
+    }
+
     room.phase = "results";
     broadcast(room, {
       t: "match-end",
       matchId: room.matchId,
       winnerId: winner?.id ?? null,
       standings,
+      ...(seriesWinner ? { seriesWinnerId: seriesWinner.id } : {}),
     });
     broadcastState(room);
     room.resultsTimer = setTimeout(() => returnToLobby(room), resultsMs);
