@@ -152,130 +152,151 @@ export function MatchStage({
 
   const colorOf = (idx: number) => OPP_PALETTE[idx % OPP_PALETTE.length];
 
-  // 결승 뷰 — 내가 죽었고 생존자가 둘이면 좌우로 크게 본다
+  // ---- 레이아웃 결정 -------------------------------------------------------
+  // 1대1(봇 포함)은 좌우로 나란히 크게. 내가 죽고 둘만 남은 결승도 마찬가지다.
+  // 셋 이상일 때만 "주역 하나 + 썸네일" 구성을 쓴다.
+  const duel = !iAmDead && opponents.length === 1;
   const finalTwo = iAmDead && aliveOpponents.length === 2;
-  const mainOpponent = iAmDead ? (focusId ?? aliveOpponents[0] ?? null) : null;
+  const sideBySide = duel || finalTwo;
+  // 좌우 배치에 놓일 상대들
+  const duelOpponents = duel ? opponents : finalTwo ? aliveOpponents : [];
+  // 셋 이상에서 크게 볼 상대(관전 중일 때만)
+  const mainOpponent = !sideBySide && iAmDead ? (focusId ?? aliveOpponents[0] ?? null) : null;
+  const thumbs = sideBySide ? [] : opponents.filter((id) => id !== mainOpponent);
 
-  return (
-    <div className="fx-versus" style={{ position: "relative", width: "100%", height: "100%" }}>
-      {/* 내 보드 — 살아 있으면 주역, 죽으면 사라진 자리로 남는다 */}
+  const koBadge = (id: string) => {
+    const p = byId(id);
+    if (!p || p.alive || !p.placement) return null;
+    return (
       <div
         style={{
           position: "absolute",
           inset: 0,
           display: "flex",
-          justifyContent: "center",
           alignItems: "center",
-          padding: 12,
-          boxSizing: "border-box",
-          opacity: iAmDead ? 0 : 1,
-          pointerEvents: iAmDead ? "none" : "auto",
-          transition: "opacity 0.4s",
+          justifyContent: "center",
+          fontWeight: 900,
+          fontSize: "1.1rem",
+          color: FUNKY.danger,
+          pointerEvents: "none",
         }}
       >
-        <div style={{ width: finalTwo ? "0%" : "44%", height: "94%", display: "flex" }}>
-          <BoardPane canvasRef={localCanvasRef} label={byId(myId)?.nick ?? "나"} color={FUNKY.sky} />
-        </div>
+        KO #{p.placement}
       </div>
+    );
+  };
 
-      {/* 관전 주역 — 내가 죽은 뒤 크게 보는 상대 */}
-      {iAmDead && !finalTwo && mainOpponent && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            padding: 12,
-            boxSizing: "border-box",
-          }}
-        >
-          <div style={{ width: "44%", height: "94%", display: "flex" }}>
-            <OppPane
-              id={mainOpponent}
-              label={byId(mainOpponent)?.nick ?? "상대"}
-              color={colorOf(opponents.indexOf(mainOpponent))}
-              refs={oppCanvasRefs}
-              onClick={() => {}}
-              focused
-            />
-          </div>
-        </div>
-      )}
-
-      {/* 결승 뷰 — 마지막 두 명을 좌우로 */}
-      {finalTwo && (
-        <div style={{ position: "absolute", inset: 0, display: "flex", gap: 12, padding: 12, boxSizing: "border-box" }}>
-          {aliveOpponents.map((id) => (
-            <div key={id} style={{ flex: "1 1 50%", display: "flex" }}>
+  return (
+    <div className="fx-versus" style={{ position: "relative", width: "100%", height: "100%" }}>
+      {/* 좌우 분할 — 1대1이거나 결승(둘만 생존) */}
+      {sideBySide ? (
+        <div style={{ position: "absolute", inset: 0, display: "flex", gap: 12, padding: 12, paddingBottom: 48, boxSizing: "border-box" }}>
+          {/* 내가 살아 있으면 왼쪽은 내 보드 */}
+          {duel && (
+            <div style={{ flex: "1 1 50%", display: "flex" }}>
+              <BoardPane
+                canvasRef={localCanvasRef}
+                onCanvas={(el) => sessionRef.current?.rebindLocal(el)}
+                label={byId(myId)?.nick ?? "나"}
+                color={FUNKY.sky}
+              />
+            </div>
+          )}
+          {duelOpponents.map((id) => (
+            <div key={id} style={{ flex: "1 1 50%", display: "flex", position: "relative" }}>
               <OppPane
                 id={id}
                 label={byId(id)?.nick ?? "상대"}
                 color={colorOf(opponents.indexOf(id))}
                 refs={oppCanvasRefs}
+                onCanvas={(el) => sessionRef.current?.rebindRemote(id, el)}
                 onClick={() => setFocusId(id)}
-                focused={focusId === id}
+                focused={focusId === id && finalTwo}
               />
+              {koBadge(id)}
             </div>
           ))}
         </div>
-      )}
+      ) : (
+        <>
+          {/* 주역 — 살아 있으면 내 보드, 죽었으면 포커스한 상대 */}
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              padding: 12,
+              boxSizing: "border-box",
+            }}
+          >
+            <div
+              style={{
+                width: "44%",
+                height: "94%",
+                display: "flex",
+                opacity: iAmDead ? 0 : 1,
+                pointerEvents: iAmDead ? "none" : "auto",
+                transition: "opacity 0.4s",
+                position: "absolute",
+              }}
+            >
+              <BoardPane
+                canvasRef={localCanvasRef}
+                onCanvas={(el) => sessionRef.current?.rebindLocal(el)}
+                label={byId(myId)?.nick ?? "나"}
+                color={FUNKY.sky}
+              />
+            </div>
+            {iAmDead && mainOpponent && (
+              <div style={{ width: "44%", height: "94%", display: "flex", position: "relative" }}>
+                <OppPane
+                  id={mainOpponent}
+                  label={byId(mainOpponent)?.nick ?? "상대"}
+                  color={colorOf(opponents.indexOf(mainOpponent))}
+                  refs={oppCanvasRefs}
+                  onCanvas={(el) => sessionRef.current?.rebindRemote(mainOpponent, el)}
+                  onClick={() => {}}
+                  focused
+                />
+              </div>
+            )}
+          </div>
 
-      {/* 썸네일 — 결승 뷰가 아닐 때 나머지 상대들 */}
-      {!finalTwo && (
-        <div
-          style={{
-            position: "absolute",
-            top: 10,
-            right: 10,
-            width: "46%",
-            display: "flex",
-            flexWrap: "wrap",
-            justifyContent: "flex-end",
-            alignContent: "flex-start",
-            gap: 8,
-            zIndex: 5,
-          }}
-        >
-          {opponents
-            .filter((id) => id !== mainOpponent)
-            .map((id, idx) => {
-              const p = byId(id);
-              const dead = p && !p.alive;
-              return (
-                // display:flex가 없으면 .fx-versus-pane의 flex:1이 먹지 않아
-                // 캔버스 높이가 0으로 찌그러진다(상대 보드가 안 보이던 원인)
-                <div key={id} style={{ width: 150, height: 220, flex: "0 0 auto", position: "relative", display: "flex" }}>
-                  <OppPane
-                    id={id}
-                    label={p?.nick ?? `P${idx + 2}`}
-                    color={colorOf(opponents.indexOf(id))}
-                    refs={oppCanvasRefs}
-                    onClick={() => setFocusId(id)}
-                    focused={focusId === id}
-                  />
-                  {dead && p?.placement ? (
-                    <div
-                      style={{
-                        position: "absolute",
-                        inset: 0,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontWeight: 900,
-                        fontSize: "1.1rem",
-                        color: FUNKY.danger,
-                        pointerEvents: "none",
-                      }}
-                    >
-                      KO #{p.placement}
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
-        </div>
+          {/* 썸네일 — 나머지 상대들 */}
+          <div
+            style={{
+              position: "absolute",
+              top: 10,
+              right: 10,
+              width: "46%",
+              display: "flex",
+              flexWrap: "wrap",
+              justifyContent: "flex-end",
+              alignContent: "flex-start",
+              gap: 8,
+              zIndex: 5,
+            }}
+          >
+            {thumbs.map((id, idx) => (
+              // display:flex가 없으면 .fx-versus-pane의 flex:1이 먹지 않아
+              // 캔버스 높이가 0으로 찌그러진다
+              <div key={id} style={{ width: 150, height: 220, flex: "0 0 auto", position: "relative", display: "flex" }}>
+                <OppPane
+                  id={id}
+                  label={byId(id)?.nick ?? `P${idx + 2}`}
+                  color={colorOf(opponents.indexOf(id))}
+                  refs={oppCanvasRefs}
+                  onCanvas={(el) => sessionRef.current?.rebindRemote(id, el)}
+                  onClick={() => setFocusId(id)}
+                  focused={focusId === id}
+                />
+                {koBadge(id)}
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {/* 타깃 전략 — 살아 있을 때만 의미가 있다 */}
@@ -353,10 +374,13 @@ export function MatchStage({
 
 function BoardPane({
   canvasRef,
+  onCanvas,
   label,
   color,
 }: {
-  canvasRef: React.RefObject<HTMLCanvasElement>;
+  canvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
+  /** 레이아웃이 바뀌어 캔버스가 새로 만들어지면 세션에 다시 붙인다 */
+  onCanvas: (el: HTMLCanvasElement) => void;
   label: string;
   color: string;
 }) {
@@ -366,7 +390,12 @@ function BoardPane({
         {label}
       </div>
       <div className="fx-canvas-wrap">
-        <canvas ref={canvasRef} />
+        <canvas
+          ref={(el) => {
+            canvasRef.current = el;
+            if (el) onCanvas(el);
+          }}
+        />
       </div>
     </div>
   );
@@ -377,6 +406,7 @@ function OppPane({
   label,
   color,
   refs,
+  onCanvas,
   onClick,
   focused,
 }: {
@@ -384,6 +414,7 @@ function OppPane({
   label: string;
   color: string;
   refs: React.MutableRefObject<Map<string, HTMLCanvasElement>>;
+  onCanvas: (el: HTMLCanvasElement) => void;
   onClick: () => void;
   focused: boolean;
 }) {
@@ -404,8 +435,12 @@ function OppPane({
       <div className="fx-canvas-wrap">
         <canvas
           ref={(el) => {
-            if (el) refs.current.set(id, el);
-            else refs.current.delete(id);
+            if (el) {
+              refs.current.set(id, el);
+              onCanvas(el);
+            } else {
+              refs.current.delete(id);
+            }
           }}
         />
       </div>

@@ -190,6 +190,26 @@ export class VersusSession {
   }
 
   /**
+   * 레이아웃이 바뀌면(1대1 ↔ 관전 ↔ 결승 뷰) React가 캔버스를 새로 만든다.
+   * 그때마다 렌더러를 다시 붙이지 않으면 죽은 DOM에 계속 그리게 되어
+   * 화면이 멈춘 것처럼 보인다.
+   */
+  rebindRemote(playerId: string, canvas: HTMLCanvasElement): void {
+    if (this.remoteCanvases.get(playerId) === canvas) return;
+    this.remoteCanvases.set(playerId, canvas);
+    this.remoteRenderers.delete(playerId);
+    this.bindRemoteRenderer(playerId);
+  }
+
+  /** 내 보드 캔버스가 새로 만들어졌을 때 */
+  rebindLocal(canvas: HTMLCanvasElement): void {
+    if (this.localCanvas === canvas) return;
+    this.localCanvas = canvas;
+    this.localRenderer = new Renderer(canvas);
+    this.localRenderer.resize();
+  }
+
+  /**
    * 서버가 알린 탈락을 화면에 반영한다.
    * 보드를 즉시 지우지 않고 아래로 무너뜨리며 사라지게 한 뒤 렌더러를 뗀다.
    */
