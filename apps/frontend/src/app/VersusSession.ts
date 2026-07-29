@@ -55,6 +55,11 @@ export interface VersusSessionOptions {
   strategy: TargetStrategy;
   /** 교육 모드: Ctrl+Z 되돌리기 허용 */
   undoEnabled: boolean;
+  /**
+   * 관전 모드 — 이번 매치에 참가하지 않는다.
+   * 로컬 보드를 돌리지도, 입력을 받지도 않고 남의 화면만 그린다.
+   */
+  spectating?: boolean;
 }
 
 export class VersusSession {
@@ -84,6 +89,8 @@ export class VersusSession {
   private recorder = new ReplayRecorder();
   /** 리플레이 재현에 필요 — 이 값이 다르면 같은 입력이어도 결과가 갈린다 */
   private simRate: number;
+  /** 관전 모드면 내 보드를 돌리지도 그리지도 않는다 */
+  private readonly spectating: boolean;
 
   constructor(
     localCanvas: HTMLCanvasElement,
@@ -106,6 +113,10 @@ export class VersusSession {
     this.match.local.undoEnabled = opts.undoEnabled;
     this.match.onLocalEvents = (events) => this.drainEvents(events);
     this.simRate = opts.perf.simRate;
+    this.spectating = !!opts.spectating;
+    // 관전자는 시뮬레이션을 돌리지 않는다 — tick이 바로 빠져나가고
+    // 상대 스냅샷 수신만 남는다.
+    if (this.spectating) this.match.alive = false;
     this.localCanvas = localCanvas;
     this.match.onSelfKO = () => {
       this.sound.death();
@@ -158,7 +169,8 @@ export class VersusSession {
   }
 
   start(): void {
-    this.input.attach();
+    // 관전자는 조작할 게 없다
+    if (!this.spectating) this.input.attach();
     this.sound.ensure();
     this.sound.startMusic(bgmForMode("custom"));
     this.loop.start();
@@ -322,8 +334,11 @@ export class VersusSession {
     }
 
     // 로컬: 풀 렌더(이펙트 + 가비지 게이지 + HUD 포함)
-    // KO 뒤에도 몇 프레임은 그린다 — 캔버스가 무너지는 연출 동안 보드가 남아야 한다
-    this.localRenderer.render(localGame, alpha, this.gfx, this.particles, this.actionText, this.damage, this.lastHud, localGame.pendingGarbage, localGame.readyGarbage);
+    // KO 뒤에도 몇 프레임은 그린다 — 캔버스가 무너지는 연출 동안 보드가 남아야 한다.
+    // 관전자는 애초에 자기 보드가 없으므로 건너뛴다.
+    if (!this.spectating) {
+      this.localRenderer.render(localGame, alpha, this.gfx, this.particles, this.actionText, this.damage, this.lastHud, localGame.pendingGarbage, localGame.readyGarbage);
+    }
     // 원격: 각 상대 미러 단순 렌더(이펙트 없음, 게이지는 표시)
     for (const [playerId, renderer] of this.remoteRenderers) {
       const remoteGame = this.match.remotes.get(playerId);

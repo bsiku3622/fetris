@@ -369,8 +369,9 @@ export function VersusScreen({
               </div>
             )}
 
+            {/* 뛰는 사람만 슬롯을 차지한다 — 관전자는 아래에 따로 모은다 */}
             <div className="fx-roster">
-              {roster.map((p, i) => (
+              {participants.map((p, i) => (
                 <PlayerRow
                   key={p.id}
                   player={p}
@@ -392,6 +393,39 @@ export function VersusScreen({
                 />
               ))}
             </div>
+
+            {spectators.length > 0 && (
+              <div style={{ marginTop: 14, paddingTop: 10, borderTop: "2px dashed rgba(0,0,0,0.15)" }}>
+                <div
+                  style={{
+                    fontSize: "0.68rem",
+                    fontWeight: 900,
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                    opacity: 0.5,
+                    marginBottom: 6,
+                  }}
+                >
+                  관전 {spectators.length}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, fontSize: "0.78rem", fontWeight: 800 }}>
+                  {spectators.map((p) => (
+                    <span
+                      key={p.id}
+                      style={{
+                        padding: "3px 8px",
+                        border: "2px solid var(--funky-line)",
+                        opacity: p.id === room.myId ? 1 : 0.65,
+                        background: p.id === room.myId ? FUNKY.sunken : "transparent",
+                      }}
+                    >
+                      {p.nick}
+                      {p.id === room.myId ? " (나)" : ""}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <footer className="fx-room-col__foot" style={{ gap: 8 }}>

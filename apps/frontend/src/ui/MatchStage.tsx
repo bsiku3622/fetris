@@ -43,7 +43,10 @@ export function MatchStage({
   /** 이미 KO 연출을 태운 상대 — 중복 실행 방지 */
   const koneRef = useRef<Set<string>>(new Set());
 
-  const iAmDead = room.koed;
+  /** 이번 매치에 아예 참가하지 않은 사람(관전자) */
+  const iAmSpectator = !match.players.includes(myId);
+  /** 관전 화면을 보는 상태 — 처음부터 관전이거나, 뛰다가 KO됐거나 */
+  const spectating = iAmSpectator || room.koed;
   const aliveOpponents = opponents.filter((id) => byId(id)?.alive !== false);
 
   // ---- 세션 구동 (매치당 한 번) --------------------------------------------
@@ -74,6 +77,7 @@ export function MatchStage({
         opponents,
         strategy: "random",
         undoEnabled: match.config.undo,
+        spectating: iAmSpectator,
       },
       {
         onSelfKO: () => net.reportKO(),
@@ -132,6 +136,8 @@ export function MatchStage({
     if (submittedRef.current === end.matchId) return;
     submittedRef.current = end.matchId;
 
+    if (iAmSpectator) return; // 관전자는 남길 판이 없다
+
     const payload = session.replayPayload();
     room.net.submitReplay(end.matchId, payload.frames, payload.keys, payload.fingerprint);
 
@@ -151,13 +157,14 @@ export function MatchStage({
   // ---- 레이아웃 결정 -------------------------------------------------------
   // 1대1(봇 포함)은 좌우로 나란히 크게. 내가 죽고 둘만 남은 결승도 마찬가지다.
   // 셋 이상일 때만 "주역 하나 + 썸네일" 구성을 쓴다.
-  const duel = !iAmDead && opponents.length === 1;
-  const finalTwo = iAmDead && aliveOpponents.length === 2;
+  const duel = !spectating && opponents.length === 1;
+  // 관전 중이고 둘만 남았으면 좌우로 크게 본다
+  const finalTwo = spectating && aliveOpponents.length === 2;
   const sideBySide = duel || finalTwo;
   // 좌우 배치에 놓일 상대들
   const duelOpponents = duel ? opponents : finalTwo ? aliveOpponents : [];
   // 셋 이상에서 크게 볼 상대(관전 중일 때만)
-  const mainOpponent = !sideBySide && iAmDead ? (focusId ?? aliveOpponents[0] ?? null) : null;
+  const mainOpponent = !sideBySide && spectating ? (focusId ?? aliveOpponents[0] ?? null) : null;
   const thumbs = sideBySide ? [] : opponents.filter((id) => id !== mainOpponent);
 
   const koBadge = (id: string) => {
@@ -187,17 +194,25 @@ export function MatchStage({
       {/* 좌우 분할 — 1대1이거나 결승(둘만 생존) */}
       {sideBySide ? (
         <div style={{ position: "absolute", inset: 0, display: "flex", gap: 12, padding: 12, paddingBottom: 48, boxSizing: "border-box" }}>
-          {/* 내가 살아 있으면 왼쪽은 내 보드 */}
-          {duel && (
-            <div style={{ flex: "1 1 50%", display: "flex" }}>
-              <BoardPane
-                canvasRef={localCanvasRef}
-                onCanvas={(el) => sessionRef.current?.rebindLocal(el)}
-                label={byId(myId)?.nick ?? "나"}
-                color={FUNKY.sky}
-              />
-            </div>
-          )}
+          {/*
+            내가 뛰면 왼쪽이 내 보드다. 관전 중이면 보여줄 게 없지만 캔버스는
+            남겨둔다 — 세션이 로컬 캔버스를 요구해서, 없으면 세션 자체가 안 만들어지고
+            상대 보드까지 통째로 비어버린다.
+          */}
+          <div
+            style={
+              duel
+                ? { flex: "1 1 50%", display: "flex" }
+                : { position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none", overflow: "hidden" }
+            }
+          >
+            <BoardPane
+              canvasRef={localCanvasRef}
+              onCanvas={(el) => sessionRef.current?.rebindLocal(el)}
+              label={byId(myId)?.nick ?? "나"}
+              color={FUNKY.sky}
+            />
+          </div>
           {duelOpponents.map((id) => (
             <div key={id} style={{ flex: "1 1 50%", display: "flex", position: "relative" }}>
               <OppPane
@@ -232,8 +247,8 @@ export function MatchStage({
                 width: "44%",
                 height: "94%",
                 display: "flex",
-                opacity: iAmDead ? 0 : 1,
-                pointerEvents: iAmDead ? "none" : "auto",
+                opacity: spectating ? 0 : 1,
+                pointerEvents: spectating ? "none" : "auto",
                 transition: "opacity 0.4s",
                 position: "absolute",
               }}
@@ -245,7 +260,7 @@ export function MatchStage({
                 color={FUNKY.sky}
               />
             </div>
-            {iAmDead && mainOpponent && (
+            {spectating && mainOpponent && (
               <div style={{ width: "44%", height: "94%", display: "flex", position: "relative" }}>
                 <OppPane
                   id={mainOpponent}
@@ -295,8 +310,8 @@ export function MatchStage({
         </>
       )}
 
-      {/* 타깃 전략 — 살아 있을 때만 의미가 있다 */}
-      {!iAmDead && (
+      {/* 타깃 전략 — 직접 뛰는 동안에만 의미가 있다 */}
+      {!spectating && (
         <div
           style={{
             position: "absolute",
@@ -328,7 +343,7 @@ export function MatchStage({
       )}
 
       {/* 관전 안내 */}
-      {iAmDead && (
+      {spectating && (
         <div
           style={{
             position: "absolute",
@@ -340,7 +355,7 @@ export function MatchStage({
             color: FUNKY.danger,
           }}
         >
-          KO · 관전 중 — 보드를 클릭하면 크게 봅니다
+          {iAmSpectator ? "관전 중" : "KO · 관전 중"} — 보드를 클릭하면 크게 봅니다
         </div>
       )}
 

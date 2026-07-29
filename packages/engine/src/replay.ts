@@ -56,15 +56,40 @@ const EMPTY_CMD: InputCommands = {
   softDropHeld: false,
 };
 
-/** 입력 로그를 그대로 재생해 최종 Game 상태를 만든다 */
-export function runReplay(opts: ReplayOptions): Game {
-  const game = new Game(opts.rule, opts.handling, opts.seed);
-  const dt = 60 / opts.simRate;
-  const cmd: InputCommands = { ...EMPTY_CMD };
-  let softHeld = false;
-  let ki = 0;
+/**
+ * 프레임 단위 재생기 — 뷰어가 재생/정지/탐색을 할 수 있도록 한 스텝씩 진행한다.
+ * `runReplay`는 이 클래스를 끝까지 돌리는 얇은 래퍼다.
+ */
+export class ReplayPlayer {
+  readonly game: Game;
+  /** 총 프레임 수 */
+  readonly frames: number;
+  /** 지금까지 진행한 프레임 */
+  frame = 0;
 
-  for (let f = 0; f < opts.frames; f++) {
+  private opts: ReplayOptions;
+  private dt: number;
+  private cmd: InputCommands = { ...EMPTY_CMD };
+  private softHeld = false;
+  private ki = 0;
+
+  constructor(opts: ReplayOptions) {
+    this.opts = opts;
+    this.frames = opts.frames;
+    this.dt = 60 / opts.simRate;
+    this.game = new Game(opts.rule, opts.handling, opts.seed);
+  }
+
+  get done(): boolean {
+    return this.frame >= this.frames;
+  }
+
+  /** 한 프레임 진행. 끝에 도달했으면 false */
+  step(): boolean {
+    if (this.done) return false;
+    const { keys } = this.opts;
+    const cmd = this.cmd;
+
     cmd.rotateCW = false;
     cmd.rotateCCW = false;
     cmd.rotate180 = false;
@@ -72,20 +97,20 @@ export function runReplay(opts: ReplayOptions): Game {
     cmd.hold = false;
 
     // 이번 프레임에 들어온 입력을 순서대로 적용
-    while (ki + 2 < opts.keys.length && opts.keys[ki] === f) {
-      const action = opts.keys[ki + 1];
-      const down = opts.keys[ki + 2] === 1;
+    while (this.ki + 2 < keys.length && keys[this.ki] === this.frame) {
+      const action = keys[this.ki + 1];
+      const down = keys[this.ki + 2] === 1;
       switch (action) {
         case ReplayAction.MoveLeft:
-          if (down) game.pressDir(-1);
-          else game.releaseDir(-1);
+          if (down) this.game.pressDir(-1);
+          else this.game.releaseDir(-1);
           break;
         case ReplayAction.MoveRight:
-          if (down) game.pressDir(1);
-          else game.releaseDir(1);
+          if (down) this.game.pressDir(1);
+          else this.game.releaseDir(1);
           break;
         case ReplayAction.SoftDrop:
-          softHeld = down;
+          this.softHeld = down;
           break;
         case ReplayAction.RotateCW:
           if (down) cmd.rotateCW = true;
@@ -103,15 +128,45 @@ export function runReplay(opts: ReplayOptions): Game {
           if (down) cmd.hardDrop = true;
           break;
       }
-      ki += 3;
+      this.ki += 3;
     }
 
-    cmd.softDropHeld = softHeld;
-    game.update(dt, cmd, 0);
-    game.events.length = 0;
+    cmd.softDropHeld = this.softHeld;
+    this.game.update(this.dt, cmd, 0);
+    this.frame++;
+    return true;
   }
 
-  return game;
+  /**
+   * 특정 프레임으로 이동한다. 뒤로 가려면 처음부터 다시 돌리는 수밖에 없다 —
+   * 시뮬레이션에는 되감기가 없기 때문이다(상태 스냅샷을 쌓으면 빨라지지만,
+   * 몇 천 프레임 재현은 수십 ms라 그럴 만큼 비싸지 않다).
+   */
+  seek(target: number): void {
+    const goal = Math.max(0, Math.min(this.frames, Math.floor(target)));
+    if (goal < this.frame) this.reset();
+    while (this.frame < goal && this.step()) {
+      this.game.events.length = 0;
+    }
+  }
+
+  /** 처음으로 되돌린다 */
+  reset(): void {
+    this.game.reset(this.opts.seed);
+    this.frame = 0;
+    this.ki = 0;
+    this.softHeld = false;
+    this.cmd = { ...EMPTY_CMD };
+  }
+}
+
+/** 입력 로그를 그대로 재생해 최종 Game 상태를 만든다 */
+export function runReplay(opts: ReplayOptions): Game {
+  const player = new ReplayPlayer(opts);
+  while (player.step()) {
+    player.game.events.length = 0;
+  }
+  return player.game;
 }
 
 /**
