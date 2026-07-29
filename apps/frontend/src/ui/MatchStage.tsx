@@ -47,7 +47,17 @@ export function MatchStage({
   const iAmSpectator = !match.players.includes(myId);
   /** 관전 화면을 보는 상태 — 처음부터 관전이거나, 뛰다가 KO됐거나 */
   const spectating = iAmSpectator || room.koed;
+  /**
+   * 판이 끝났다. 이때 서버는 우승자까지 alive=false로 내린다("아무도 안 뛴다"는
+   * 뜻이지 KO가 아니다). 그래서 생존자 기준으로 짜인 레이아웃이 통째로 비어버리는데,
+   * 마지막 보드는 결과와 함께 계속 보여야 하므로 여기서 화면을 얼려 둔다.
+   */
+  const ended = !!room.matchEnd;
   const aliveOpponents = opponents.filter((id) => byId(id)?.alive !== false);
+  /** 판이 끝나기 직전에 살아 있던 상대들 — 끝난 뒤 레이아웃은 이 구성을 유지한다 */
+  const lastAliveRef = useRef<string[]>(aliveOpponents);
+  if (!ended) lastAliveRef.current = aliveOpponents;
+  const stageOpponents = ended ? lastAliveRef.current : aliveOpponents;
 
   // ---- 세션 구동 (매치당 한 번) --------------------------------------------
   useEffect(() => {
@@ -109,17 +119,24 @@ export function MatchStage({
     if (!session) return;
     for (const id of opponents) {
       const p = byId(id);
-      if (p && !p.alive && !koneRef.current.has(id)) {
-        koneRef.current.add(id);
-        session.koRemote(id);
-        if (focusId === id) {
-          // 보고 있던 사람이 죽으면 다음 생존자로 옮긴다
-          const next = opponents.find((o) => o !== id && byId(o)?.alive !== false) ?? null;
-          setFocusId(next);
-        }
+      if (!p || p.alive || koneRef.current.has(id)) continue;
+      koneRef.current.add(id);
+      // 판이 끝나며 우승자의 alive도 내려간다 — 그건 KO가 아니니 떨구지 않는다
+      if (room.matchEnd?.winnerId === id) continue;
+      session.koRemote(id);
+      // 보고 있던 사람이 죽으면 다음 생존자로 옮긴다(판이 끝났으면 그대로 둔다)
+      if (focusId === id && !ended) {
+        setFocusId(opponents.find((o) => o !== id && byId(o)?.alive !== false) ?? null);
       }
     }
-  }, [players, opponents, focusId]);
+  }, [players, opponents, focusId, ended]);
+
+  // 판이 끝나면 우승자 보드를 크게 남긴다(내가 이겼으면 내 보드가 그대로 주역이다)
+  useEffect(() => {
+    const winner = room.matchEnd?.winnerId;
+    if (winner && winner !== myId && opponents.includes(winner)) setFocusId(winner);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room.matchEnd]);
 
   // 포커스가 바뀌면 세션에 알린다(고빈도 스냅샷 대상 변경)
   useEffect(() => {
@@ -165,17 +182,19 @@ export function MatchStage({
   // 셋 이상일 때만 "주역 하나 + 썸네일" 구성을 쓴다.
   const duel = !spectating && opponents.length === 1;
   // 관전 중이고 둘만 남았으면 좌우로 크게 본다
-  const finalTwo = spectating && aliveOpponents.length === 2;
+  const finalTwo = spectating && stageOpponents.length === 2;
   const sideBySide = duel || finalTwo;
   // 좌우 배치에 놓일 상대들
-  const duelOpponents = duel ? opponents : finalTwo ? aliveOpponents : [];
+  const duelOpponents = duel ? opponents : finalTwo ? stageOpponents : [];
   // 셋 이상에서 크게 볼 상대(관전 중일 때만)
-  const mainOpponent = !sideBySide && spectating ? (focusId ?? aliveOpponents[0] ?? null) : null;
+  const mainOpponent = !sideBySide && spectating ? (focusId ?? stageOpponents[0] ?? null) : null;
   const thumbs = sideBySide ? [] : opponents.filter((id) => id !== mainOpponent);
 
   const koBadge = (id: string) => {
     const p = byId(id);
     if (!p || p.alive || !p.placement) return null;
+    // 1위는 끝까지 살아남은 사람이다 — 판이 끝나며 alive가 내려갔을 뿐 KO가 아니다
+    if (p.placement === 1) return null;
     return (
       <div
         style={{

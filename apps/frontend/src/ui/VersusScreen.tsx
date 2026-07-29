@@ -98,6 +98,12 @@ export function VersusScreen({
   const state = room.state;
   const me = state?.players.find((p) => p.id === room.myId) ?? null;
   const isHost = !!me?.isHost;
+  /**
+   * 설정을 실제로 바꿀 수 있는 상태. 서버는 대기실에서만 설정을 받으므로,
+   * 그 밖에서는 입력을 잠근다 — 안 그러면 화면의 값만 바뀌고 서버는 예전 설정을
+   * 그대로 들고 있어 "골랐는데 안 먹는다"가 된다.
+   */
+  const canEdit = isHost && state?.phase === "lobby";
 
   useEffect(() => {
     return () => {
@@ -138,9 +144,10 @@ export function VersusScreen({
 
   /** 호스트가 설정을 만지면 서버에 밀어넣어 방 전체에 반영한다 */
   const applyEdit = (patch: Partial<Cfg>) => {
+    if (!canEdit) return; // 서버가 받지 않을 변경은 화면에도 반영하지 않는다
     const next = { ...cfg, ...patch };
     setCfg(next);
-    if (isHost) room.setConfig(configFrom(next));
+    room.setConfig(configFrom(next));
   };
 
   // 방을 만든 직후 기본 설정을 한 번 등록해 둔다(설정 없이는 시작할 수 없다)
@@ -237,10 +244,10 @@ export function VersusScreen({
   // 함께 사라져 리플레이를 만들 수 없고, 마지막 보드도 볼 수 없다.
   if (state && (state.phase === "playing" || state.phase === "results") && room.matchStart) {
     return (
-      <>
+      <div style={{ position: "relative", width: "100%", height: "100%" }}>
         <MatchStage settings={settings} room={room} match={room.matchStart} />
         {state.phase === "results" && room.matchEnd && <ResultsView room={room} />}
-      </>
+      </div>
     );
   }
 
@@ -428,6 +435,13 @@ export function VersusScreen({
                 </div>
               </div>
             )}
+
+            {/* 직전 판 리플레이 — 결과 화면을 놓쳐도 여기서 받을 수 있다 */}
+            {room.sharedReplays.length > 0 && (
+              <div style={{ marginTop: 14, paddingTop: 10, borderTop: "2px dashed rgba(0,0,0,0.15)" }}>
+                <ReplayList files={room.sharedReplays} align="flex-start" />
+              </div>
+            )}
           </div>
 
           <footer className="fx-room-col__foot" style={{ gap: 8 }}>
@@ -459,8 +473,9 @@ export function VersusScreen({
         {/* 가운데 — 설정 */}
         <section className="fx-room-col fx-room-col--settings">
           <div className="fx-room-col__head">Match Settings</div>
-          <div className="fx-room-col__body" style={isHost ? undefined : { opacity: 0.85 }}>
+          <div className="fx-room-col__body" style={canEdit ? undefined : { opacity: 0.85 }}>
             {!isHost && <Text variant="chrome" muted>읽기 전용 · 호스트가 설정합니다</Text>}
+            {isHost && !canEdit && <Text variant="chrome" muted>매치 중에는 설정을 바꿀 수 없어요</Text>}
             <Tabs defaultValue="match">
               <Tabs.List>
                 <Tabs.Trigger value="match">매치</Tabs.Trigger>
@@ -474,7 +489,7 @@ export function VersusScreen({
                   <SelectField
                     label="승부 방식"
                     value={String(cfg.firstTo)}
-                    disabled={!isHost}
+                    disabled={!canEdit}
                     options={[
                       { value: "0", label: "계속 (목표 없음)" },
                       { value: "1", label: "단판 (FT1)" },
@@ -485,30 +500,30 @@ export function VersusScreen({
                     ]}
                     onChange={(v) => applyEdit({ firstTo: Number(v) })}
                   />
-                  <NumField label="공격 배수" value={cfg.attackMul} min={0} step={0.1} disabled={!isHost} onChange={(v) => applyEdit({ attackMul: v })} />
-                  <ToggleField label="같은 조각 순서 공유" value={cfg.sharePieces} disabled={!isHost} onChange={(v) => applyEdit({ sharePieces: v })} />
-                  <ToggleField label="교육 모드 (Ctrl+Z)" value={cfg.undo} disabled={!isHost} onChange={(v) => applyEdit({ undo: v })} />
+                  <NumField label="공격 배수" value={cfg.attackMul} min={0} step={0.1} disabled={!canEdit} onChange={(v) => applyEdit({ attackMul: v })} />
+                  <ToggleField label="같은 조각 순서 공유" value={cfg.sharePieces} disabled={!canEdit} onChange={(v) => applyEdit({ sharePieces: v })} />
+                  <ToggleField label="교육 모드 (Ctrl+Z)" value={cfg.undo} disabled={!canEdit} onChange={(v) => applyEdit({ undo: v })} />
                 </div>
               </Tabs.Panel>
 
               <Tabs.Panel value="garbage">
                 <div className="fx-settings-group">
-                  <ToggleField label="가비지(공격) 사용" value={cfg.garbage} disabled={!isHost} onChange={(v) => applyEdit({ garbage: v })} />
-                  <NumField label="가비지 배수" value={cfg.garbageMultiplier} min={0} max={5} step={0.1} disabled={!isHost} onChange={(v) => applyEdit({ garbageMultiplier: v })} />
-                  <NumField label="가비지 혼잡도" value={cfg.garbageMessiness} min={0} max={1} step={0.05} disabled={!isHost} onChange={(v) => applyEdit({ garbageMessiness: v })} />
-                  <NumField label="가비지 캡 (한 번에, 줄)" value={cfg.garbageCap} min={1} max={40} step={1} disabled={!isHost} onChange={(v) => applyEdit({ garbageCap: Math.round(v) })} />
-                  <NumField label="가비지 속도 (프레임)" value={cfg.garbageSpeed} min={0} max={120} step={1} disabled={!isHost} onChange={(v) => applyEdit({ garbageSpeed: Math.round(v) })} />
+                  <ToggleField label="가비지(공격) 사용" value={cfg.garbage} disabled={!canEdit} onChange={(v) => applyEdit({ garbage: v })} />
+                  <NumField label="가비지 배수" value={cfg.garbageMultiplier} min={0} max={5} step={0.1} disabled={!canEdit} onChange={(v) => applyEdit({ garbageMultiplier: v })} />
+                  <NumField label="가비지 혼잡도" value={cfg.garbageMessiness} min={0} max={1} step={0.05} disabled={!canEdit} onChange={(v) => applyEdit({ garbageMessiness: v })} />
+                  <NumField label="가비지 캡 (한 번에, 줄)" value={cfg.garbageCap} min={1} max={40} step={1} disabled={!canEdit} onChange={(v) => applyEdit({ garbageCap: Math.round(v) })} />
+                  <NumField label="가비지 속도 (프레임)" value={cfg.garbageSpeed} min={0} max={120} step={1} disabled={!canEdit} onChange={(v) => applyEdit({ garbageSpeed: Math.round(v) })} />
                   <SelectField
                     label="방해줄 모양"
                     value={cfg.garbageHoleMode}
-                    disabled={!isHost}
+                    disabled={!canEdit}
                     options={[
                       { value: "clean", label: "깔끔 (한 공격=한 줄)" },
                       { value: "cheese", label: "치즈 (줄마다 랜덤)" },
                     ]}
                     onChange={(v) => applyEdit({ garbageHoleMode: v as GarbageHoleMode })}
                   />
-                  <NumField label="퍼펙트 클리어 데미지" value={cfg.perfectClearDamage} min={0} max={20} step={1} disabled={!isHost} onChange={(v) => applyEdit({ perfectClearDamage: Math.round(v) })} />
+                  <NumField label="퍼펙트 클리어 데미지" value={cfg.perfectClearDamage} min={0} max={20} step={1} disabled={!canEdit} onChange={(v) => applyEdit({ perfectClearDamage: Math.round(v) })} />
                 </div>
               </Tabs.Panel>
 
@@ -517,7 +532,7 @@ export function VersusScreen({
                   <SelectField
                     label="킥 테이블"
                     value={cfg.kickset}
-                    disabled={!isHost}
+                    disabled={!canEdit}
                     options={[
                       { value: "SRS+", label: "SRS+" },
                       { value: "SRS-X", label: "SRS-X" },
@@ -529,7 +544,7 @@ export function VersusScreen({
                   <SelectField
                     label="스핀 보너스"
                     value={cfg.spinBonus}
-                    disabled={!isHost}
+                    disabled={!canEdit}
                     options={[
                       { value: "all-mini+", label: "올스핀 (all-mini+)" },
                       { value: "all-mini", label: "올스핀 (all-mini)" },
@@ -542,7 +557,7 @@ export function VersusScreen({
                   <SelectField
                     label="B2B 모드"
                     value={cfg.b2bMode}
-                    disabled={!isHost}
+                    disabled={!canEdit}
                     options={[
                       { value: "surge", label: "Surge (시즌2)" },
                       { value: "chaining", label: "Chaining (시즌1)" },
@@ -553,7 +568,7 @@ export function VersusScreen({
                   <SelectField
                     label="조각 가방"
                     value={cfg.randomizer}
-                    disabled={!isHost}
+                    disabled={!canEdit}
                     options={[
                       { value: "7-bag", label: "7-bag (표준)" },
                       { value: "14-bag", label: "14-bag" },
@@ -563,16 +578,16 @@ export function VersusScreen({
                     ]}
                     onChange={(v) => applyEdit({ randomizer: v as RandomizerName })}
                   />
-                  <NumField label="NEXT 개수" value={cfg.nextCount} min={1} max={7} step={1} disabled={!isHost} onChange={(v) => applyEdit({ nextCount: Math.round(v) })} />
-                  <ToggleField label="180° 회전 허용" value={cfg.allow180} disabled={!isHost} onChange={(v) => applyEdit({ allow180: v })} />
+                  <NumField label="NEXT 개수" value={cfg.nextCount} min={1} max={7} step={1} disabled={!canEdit} onChange={(v) => applyEdit({ nextCount: Math.round(v) })} />
+                  <ToggleField label="180° 회전 허용" value={cfg.allow180} disabled={!canEdit} onChange={(v) => applyEdit({ allow180: v })} />
                 </div>
               </Tabs.Panel>
 
               <Tabs.Panel value="timing">
                 <div className="fx-settings-group">
-                  <NumField label="중력 (G)" value={cfg.gravity} min={0} max={20} step={0.01} disabled={!isHost} onChange={(v) => applyEdit({ gravity: v })} />
-                  <NumField label="락 딜레이 (프레임)" value={cfg.lockDelay} min={0} max={120} step={1} disabled={!isHost} onChange={(v) => applyEdit({ lockDelay: Math.round(v) })} />
-                  <NumField label="ARE / 스폰 딜레이 (프레임)" value={cfg.are} min={0} max={60} step={1} disabled={!isHost} onChange={(v) => applyEdit({ are: Math.round(v) })} />
+                  <NumField label="중력 (G)" value={cfg.gravity} min={0} max={20} step={0.01} disabled={!canEdit} onChange={(v) => applyEdit({ gravity: v })} />
+                  <NumField label="락 딜레이 (프레임)" value={cfg.lockDelay} min={0} max={120} step={1} disabled={!canEdit} onChange={(v) => applyEdit({ lockDelay: Math.round(v) })} />
+                  <NumField label="ARE / 스폰 딜레이 (프레임)" value={cfg.are} min={0} max={60} step={1} disabled={!canEdit} onChange={(v) => applyEdit({ are: Math.round(v) })} />
                 </div>
               </Tabs.Panel>
             </Tabs>
@@ -614,6 +629,58 @@ function downloadReplay(file: ReplayFile): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/**
+ * 이 방에 공유된 리플레이 목록. 참가자들이 판이 끝날 때 나눠준 것을 모은 것이라,
+ * 자기 로그가 없는 관전자도 여기서 내려받는다.
+ *
+ * 결과 화면과 대기실 양쪽에 붙는다 — 결과는 몇 초 만에 자동으로 걷히므로,
+ * 그 안에 못 누르면 영영 못 받는 상황을 만들지 않기 위해서다.
+ */
+function ReplayList({ files, align }: { files: ReplayFile[]; align: "center" | "flex-start" }) {
+  if (files.length === 0) return null;
+  return (
+    <div style={{ width: "100%", marginBottom: 4 }}>
+      <div
+        style={{
+          fontSize: "0.66rem",
+          fontWeight: 900,
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+          opacity: 0.5,
+          marginBottom: 6,
+        }}
+      >
+        리플레이
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: align }}>
+        {files.map((r) => (
+          <button
+            key={`${r.player.id ?? r.player.nick}-${r.match.matchId}`}
+            onClick={() => downloadReplay(r)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "5px 10px",
+              border: "2px solid var(--funky-line)",
+              background: "var(--funky-surface)",
+              boxShadow: "2px 2px 0 var(--funky-line)",
+              fontWeight: 800,
+              fontSize: "0.76rem",
+              cursor: "pointer",
+              font: "inherit",
+            }}
+          >
+            <span style={{ opacity: 0.55 }}>↓</span>
+            <span>{r.player.nick}</span>
+            {r.player.placement ? <span style={{ opacity: 0.5 }}>#{r.player.placement}</span> : null}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ResultsView({ room }: { room: RoomSession }) {
   const end = room.matchEnd!;
   const players = room.state?.players ?? [];
@@ -624,8 +691,10 @@ function ResultsView({ room }: { room: RoomSession }) {
   const series = end.seriesWinnerId;
   const iTookSeries = series === room.myId;
 
+  // 대전 화면 위에 겹쳐 뜬다(.fx-overlay가 absolute inset:0). 배경을 옅게 깔아
+  // 마지막 보드가 뒤로 비쳐 보이게 둔다 — 판이 어떻게 끝났는지가 결과표만큼 중요하다.
   return (
-    <div className="fx-overlay" style={{ position: "relative", width: "100%", height: "100%" }}>
+    <div className="fx-overlay" style={{ background: "rgba(12, 8, 24, 0.55)" }}>
       <div className="fx-panel" style={{ minWidth: 340 }}>
         {series ? (
           <>
@@ -663,51 +732,7 @@ function ResultsView({ room }: { room: RoomSession }) {
             </div>
           ))}
         </div>
-        {/*
-          리플레이는 참가자들이 방에 나눠준 것을 모아 보여준다.
-          관전자는 자기 입력 로그가 없으므로 이 목록으로만 내려받을 수 있다.
-        */}
-        {room.sharedReplays.length > 0 && (
-          <div style={{ width: "100%", marginBottom: 4 }}>
-            <div
-              style={{
-                fontSize: "0.66rem",
-                fontWeight: 900,
-                letterSpacing: "0.1em",
-                textTransform: "uppercase",
-                opacity: 0.5,
-                marginBottom: 6,
-              }}
-            >
-              리플레이
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center" }}>
-              {room.sharedReplays.map((r) => (
-                <button
-                  key={`${r.player.id ?? r.player.nick}-${r.match.matchId}`}
-                  onClick={() => downloadReplay(r)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "5px 10px",
-                    border: "2px solid var(--funky-line)",
-                    background: "var(--funky-surface)",
-                    boxShadow: "2px 2px 0 var(--funky-line)",
-                    fontWeight: 800,
-                    fontSize: "0.76rem",
-                    cursor: "pointer",
-                    font: "inherit",
-                  }}
-                >
-                  <span style={{ opacity: 0.55 }}>↓</span>
-                  <span>{r.player.nick}</span>
-                  {r.player.placement ? <span style={{ opacity: 0.5 }}>#{r.player.placement}</span> : null}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+        <ReplayList files={room.sharedReplays} align="center" />
 
         <Button variant="primary" size="lg" onClick={() => room.skipResults()}>
           대기실로 돌아가기
