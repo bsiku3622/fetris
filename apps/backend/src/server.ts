@@ -207,11 +207,33 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     res.end();
   });
 
-  const wss = new WebSocketServer({ server: http });
+  /*
+    보드 스냅샷이 트래픽의 대부분이고, 연달아 오는 스냅샷은 서로 거의 같다.
+    그래서 압축 컨텍스트를 연결 간에 유지하는 게 결정적이다 — 메시지별로만
+    압축하면 3배 남짓이지만, 컨텍스트를 이어가면 같은 자료가 50배 이상 줄어든다.
+    작은 제어 메시지는 압축 오버헤드가 더 크므로 threshold 아래로 흘려보낸다.
+  */
+  const wss = new WebSocketServer({
+    server: http,
+    perMessageDeflate: {
+      threshold: 256,
+      concurrencyLimit: 16,
+      zlibDeflateOptions: { level: 3, memLevel: 8, chunkSize: 16 * 1024 },
+      zlibInflateOptions: { chunkSize: 16 * 1024 },
+      // 컨텍스트 유지를 우리 쪽에서 포기하지 않는다(상대가 요구하면 따른다)
+      serverNoContextTakeover: false,
+      clientNoContextTakeover: false,
+    },
+  });
 
+  /**
+   * 방 전체에 보낸다. 직렬화는 한 번만 한다 — 같은 객체를 수신자 수만큼 다시
+   * JSON으로 만드는 건 인원이 늘수록 그대로 CPU 낭비가 된다(보드 스냅샷은 1KB가 넘는다).
+   */
   const broadcast = (room: Room, msg: ServerControl, exclude?: WebSocket): void => {
+    const data = JSON.stringify(msg);
     for (const p of room.players) {
-      if (p.ws !== exclude) send(p.ws, msg);
+      if (p.ws !== exclude && p.ws.readyState === WebSocket.OPEN) p.ws.send(data);
     }
   };
 
