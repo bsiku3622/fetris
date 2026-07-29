@@ -59,6 +59,24 @@ export function MatchStage({
   if (!ended) lastAliveRef.current = aliveOpponents;
   const stageOpponents = ended ? lastAliveRef.current : aliveOpponents;
 
+  // ---- 레이아웃 결정 -------------------------------------------------------
+  // 1대1(봇 포함)은 좌우로 나란히 크게. 내가 죽고 둘만 남은 결승도 마찬가지다.
+  // 셋 이상일 때만 "주역 하나 + 썸네일" 구성을 쓴다.
+  const duel = !spectating && opponents.length === 1;
+  // 관전 중이고 둘만 남았으면 좌우로 크게 본다
+  const finalTwo = spectating && stageOpponents.length === 2;
+  const sideBySide = duel || finalTwo;
+  // 좌우 배치에 놓일 상대들
+  const duelOpponents = duel ? opponents : finalTwo ? stageOpponents : [];
+  // 셋 이상에서 크게 볼 상대(관전 중일 때만)
+  const mainOpponent = !sideBySide && spectating ? (focusId ?? stageOpponents[0] ?? null) : null;
+  /**
+   * 지금 크게 떠 있는 보드들. 고빈도 스냅샷도 소리도 여기에 맞춘다 —
+   * 화면에 보이는 것과 들리는 것이 어긋나면 판을 읽을 수 없다.
+   */
+  const featured = sideBySide ? duelOpponents : mainOpponent ? [mainOpponent] : [];
+  const featuredKey = featured.join(",");
+
   // ---- 세션 구동 (매치당 한 번) --------------------------------------------
   useEffect(() => {
     const lc = localCanvasRef.current;
@@ -97,7 +115,7 @@ export function MatchStage({
       },
     );
     sessionRef.current = session;
-    session.setFocus(focusId);
+    session.setFocus(featured);
     session.start();
 
     const onResize = () => session.resize();
@@ -140,10 +158,10 @@ export function MatchStage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.matchEnd]);
 
-  // 포커스가 바뀌면 세션에 알린다(고빈도 스냅샷 대상 변경)
+  // 크게 뜬 보드가 바뀌면 세션에 알린다(고빈도 스냅샷·소리 대상 변경)
   useEffect(() => {
-    sessionRef.current?.setFocus(focusId);
-  }, [focusId]);
+    sessionRef.current?.setFocus(featuredKey ? featuredKey.split(",") : []);
+  }, [featuredKey]);
 
   // 매치가 끝나면 입력 로그를 서버에 제출하고(재현해 대조), 같은 기록을
   // 내려받기용으로 남긴다. storeReplay는 방에도 공유되어 관전자가 받아 간다.
@@ -180,17 +198,6 @@ export function MatchStage({
 
   const colorOf = (idx: number) => OPP_PALETTE[idx % OPP_PALETTE.length];
 
-  // ---- 레이아웃 결정 -------------------------------------------------------
-  // 1대1(봇 포함)은 좌우로 나란히 크게. 내가 죽고 둘만 남은 결승도 마찬가지다.
-  // 셋 이상일 때만 "주역 하나 + 썸네일" 구성을 쓴다.
-  const duel = !spectating && opponents.length === 1;
-  // 관전 중이고 둘만 남았으면 좌우로 크게 본다
-  const finalTwo = spectating && stageOpponents.length === 2;
-  const sideBySide = duel || finalTwo;
-  // 좌우 배치에 놓일 상대들
-  const duelOpponents = duel ? opponents : finalTwo ? stageOpponents : [];
-  // 셋 이상에서 크게 볼 상대(관전 중일 때만)
-  const mainOpponent = !sideBySide && spectating ? (focusId ?? stageOpponents[0] ?? null) : null;
   const thumbs = sideBySide ? [] : opponents.filter((id) => id !== mainOpponent);
 
   const koBadge = (id: string) => {

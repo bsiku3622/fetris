@@ -89,8 +89,8 @@ export class VersusSession {
   private recorder = new ReplayRecorder();
   /** 관전 모드면 내 보드를 돌리지도 그리지도 않는다 */
   private readonly spectating: boolean;
-  /** 지금 크게 보고 있는 상대 — 관전 사운드를 이 한 명으로 좁힌다 */
-  private focusId: string | null = null;
+  /** 지금 크게 보고 있는 상대들 — 소리를 화면에 뜬 보드로 좁힌다 */
+  private focusIds = new Set<string>();
   /** 1대1인가 — 상대가 한 명뿐이면 뛰는 중에도 그쪽 소리를 들려준다 */
   private readonly duel: boolean;
 
@@ -116,6 +116,8 @@ export class VersusSession {
     this.match.onLocalEvents = (events) => this.drainEvents(events);
     this.spectating = !!opts.spectating;
     this.duel = opts.opponents.length === 1;
+    // 1대1은 볼 상대가 정해져 있다 — 화면이 뭘 고르든 그 한 명이 대상이다
+    if (this.duel) this.focusIds = new Set(opts.opponents);
     // 관전자는 시뮬레이션을 돌리지 않는다 — tick이 바로 빠져나가고
     // 상대 스냅샷 수신만 남는다.
     if (this.spectating) this.match.alive = false;
@@ -251,20 +253,26 @@ export class VersusSession {
     }, 720);
   }
 
-  /** 크게 보고 있는 상대 — 이 사람에게서만 고빈도 스냅샷을 받는다 */
-  setFocus(playerId: string | null): void {
-    this.focusId = playerId;
-    this.match.setFocus(playerId);
+  /**
+   * 크게 보고 있는 상대들 — 이들에게서만 고빈도 스냅샷을 받고, 소리도 이들 것만 낸다.
+   * 화면에 나란히 떠 있으면(1대1 결승 등) 둘 다 들려야 판이 읽힌다.
+   */
+  setFocus(ids: readonly string[]): void {
+    if (this.duel) return; // 1대1은 상대가 고정이다
+    this.focusIds = new Set(ids);
+    this.match.setFocus(ids);
   }
 
   /**
    * 상대 보드의 변화를 소리로 옮긴다 — 관전자에게는 이게 유일한 청각 피드백이다.
    *
-   * 1대1은 상대가 한 명뿐이라 뛰는 도중에도 상대 소리가 들려야 판이 읽힌다.
-   * 대신 내 보드 소리를 덮지 않도록 한 단계 죽여 내보낸다.
+   * 소리는 화면을 따라간다 — 크게 떠 있는 보드는 전부 울린다. 관전 중 1대1을
+   * 좌우로 보고 있으면 양쪽 다 들리고, 셋 이상에서 주역 하나만 크게 보고 있으면
+   * 그 하나만 들린다. 방 전체가 소리를 내면 인원이 늘수록 뭉개져서 무슨 일이
+   * 일어나는지 오히려 알 수 없다.
    *
-   * 셋 이상이면 지금 크게 보고 있는 한 명만 울린다. 방 전체가 소리를 내면
-   * 인원이 늘수록 뭉개져서 무슨 일이 일어나는지 오히려 알 수 없다.
+   * 내가 아직 뛰는 중이라면 1대1에서만 상대 소리를 얹되, 내 보드 소리를 덮지
+   * 않도록 한 단계 죽여 내보낸다.
    */
   private playRemoteBeat(
     playerId: string,
@@ -273,7 +281,7 @@ export class VersusSession {
     const watching = this.spectating || !this.match.alive;
     // 뛰는 중에 들리는 건 1대1일 때뿐이다
     if (!watching && !this.duel) return;
-    if (playerId !== this.focusId) return;
+    if (!this.focusIds.has(playerId)) return;
 
     const ring = () => {
       if (beat.cleared > 0) {

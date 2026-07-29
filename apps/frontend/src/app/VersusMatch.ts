@@ -56,10 +56,12 @@ export class VersusMatch {
 
   /** 공격 타깃 전략 */
   strategy: TargetStrategy;
-  /** 지금 이 사람의 보드를 크게 보고 있다(고빈도 스냅샷 요청 대상) */
-  private focusId: string | null = null;
+  /** 지금 크게 보고 있는 상대들 — 이들에게서만 고빈도 스냅샷을 받는다 */
+  private focusIds = new Set<string>();
   /** 나를 보고 있는 사람들 — 이들에게만 고빈도로 보낸다 */
   private watchers = new Set<string>();
+  /** 1대1인가 — 포커스 장치를 통째로 끈다 */
+  private readonly duel: boolean;
 
   /** even 전략용 — 상대별로 내가 보낸 누적 공격량 */
   private sentTo = new Map<string, number>();
@@ -99,6 +101,7 @@ export class VersusMatch {
     this.local.attackMultiplier = opts.myAttackMul;
     this.transport = opts.transport;
 
+    this.duel = opts.opponents.length === 1;
     for (const id of opts.opponents) this.ensureRemote(id);
     this.aliveIds = [...opts.opponents];
 
@@ -124,7 +127,9 @@ export class VersusMatch {
   /** 서버가 알려준 탈락을 반영한다. 내 화면에서는 보드가 남아 연출된 뒤 사라진다. */
   applyKO(playerId: string): void {
     this.aliveIds = this.aliveIds.filter((id) => id !== playerId);
-    if (this.focusId === playerId) this.setFocus(null);
+    if (this.focusIds.has(playerId)) {
+      this.setFocus([...this.focusIds].filter((id) => id !== playerId));
+    }
     this.watchers.delete(playerId);
   }
 
@@ -134,16 +139,24 @@ export class VersusMatch {
     this.remotes.delete(playerId);
   }
 
-  /** 크게 보고 있는 상대를 바꾼다. 상대에게 알려 고빈도 스냅샷을 받는다. */
-  setFocus(playerId: string | null): void {
-    if (this.focusId === playerId) return;
-    if (this.focusId) this.transport.sendTo(this.focusId, { t: "focus", watching: false });
-    this.focusId = playerId;
-    if (playerId) this.transport.sendTo(playerId, { t: "focus", watching: true });
+  /**
+   * 크게 보고 있는 상대들을 바꾼다. 화면에 여럿이 떠 있으면(1대1 결승 등)
+   * 그 전부에게 알려 고빈도 스냅샷을 받는다.
+   */
+  setFocus(ids: readonly string[]): void {
+    if (this.duel) return; // 볼 사람이 하나뿐이라 알릴 것도 없다
+    const next = new Set(ids);
+    for (const id of this.focusIds) {
+      if (!next.has(id)) this.transport.sendTo(id, { t: "focus", watching: false });
+    }
+    for (const id of next) {
+      if (!this.focusIds.has(id)) this.transport.sendTo(id, { t: "focus", watching: true });
+    }
+    this.focusIds = next;
   }
 
-  get focus(): string | null {
-    return this.focusId;
+  get focus(): ReadonlySet<string> {
+    return this.focusIds;
   }
 
   // ---- 타깃 선택 -----------------------------------------------------------
@@ -237,7 +250,19 @@ export class VersusMatch {
       return;
     }
 
-    // 스냅샷 — 나를 보고 있는 사람에게는 자주, 나머지에게는 드물게
+    // 1대1은 포커스라는 개념이 없다 — 상대가 한 명뿐이라 서로를 늘 크게 본다.
+    // 포커스는 인원이 늘 때 트래픽이 제곱으로 붇는 걸 막으려고 만든 장치이므로,
+    // 둘뿐일 때는 그냥 끄고 방 전체에 고빈도로 보낸다(관전자도 같이 잘 본다).
+    if (this.duel) {
+      this.focusAccum += dtFrames;
+      if (this.focusAccum >= SNAP_FOCUS_FRAMES) {
+        this.focusAccum = 0;
+        this.transport.send({ t: "board", snap: this.local.serialize() });
+      }
+      return;
+    }
+
+    // 셋 이상 — 나를 보고 있는 사람에게는 자주, 나머지에게는 드물게
     this.focusAccum += dtFrames;
     if (this.focusAccum >= SNAP_FOCUS_FRAMES && this.watchers.size > 0) {
       this.focusAccum = 0;

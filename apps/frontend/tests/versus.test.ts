@@ -121,22 +121,52 @@ describe("VersusMatch 공격 라우팅", () => {
     expect(filled).toBeGreaterThan(0);
   });
 
-  it("포커스를 걸면 상대가 나를 watcher로 등록해 고빈도로 보낸다", () => {
+  it("1대1은 포커스 없이 항상 고빈도로 보낸다", () => {
+    // 상대가 한 명뿐이면 "누구를 크게 보는가"라는 질문 자체가 없다.
+    // 포커스는 인원이 늘 때 트래픽을 줄이려는 장치이므로 여기선 꺼져 있어야 한다.
     const [a, b] = makePair();
     bothToPlaying(a, b);
-    // b가 a를 크게 보기 시작 → a는 b에게만 자주 보낸다
-    b.setFocus("A");
-    expect(b.focus).toBe("A");
+    b.setFocus(["A"]);
+    expect([...b.focus]).toEqual([]);
 
     setupQuad(a, 4);
-    // focus 주기(3프레임)만 지나도 스냅샷이 도착해야 한다
+    // 아무도 포커스를 걸지 않았는데도 고빈도 주기(3프레임)만에 도착한다
     for (let i = 0; i < 4; i++) a.tick(1, CMD());
 
-    const remote = b.remotes.get("A");
+    const grid = b.remotes.get("A")!.board.grid;
     let filled = 0;
-    const grid = remote!.board.grid;
     for (let i = 0; i < grid.length; i++) if (grid[i] !== 0) filled++;
     expect(filled).toBeGreaterThan(0);
+  });
+
+  it("셋 이상이면 포커스를 건 사람에게만 고빈도로 보낸다", () => {
+    const sent: { target: string; t: string }[] = [];
+    const transport = {
+      myId: "A",
+      send: () => {},
+      sendTo: (targetId: string, msg: { t: string }) => sent.push({ target: targetId, t: msg.t }),
+      onMessage: () => {},
+      onClose: () => {},
+      onPlayerLeft: () => {},
+      onPlayerJoined: () => {},
+      close: () => {},
+    };
+    const m = new VersusMatch({
+      rule: { ...RULE }, handling: DEFAULT_HANDLING, seed: 9, myAttackMul: 1,
+      transport, opponents: ["X", "Y", "Z"],
+    });
+
+    m.setFocus(["Y"]);
+    expect([...m.focus]).toEqual(["Y"]);
+    expect(sent.filter((s) => s.t === "focus")).toEqual([{ target: "Y", t: "focus" }]);
+
+    // 보는 대상을 둘로 늘리면 새로 본 쪽에만 알린다
+    m.setFocus(["Y", "Z"]);
+    expect(sent.filter((s) => s.t === "focus").map((s) => s.target)).toEqual(["Y", "Z"]);
+    // 다시 좁히면 빠진 쪽에 해제를 알린다
+    m.setFocus(["Z"]);
+    expect(sent.filter((s) => s.t === "focus").map((s) => s.target)).toEqual(["Y", "Z", "Y"]);
+    expect([...m.focus]).toEqual(["Z"]);
   });
 });
 
