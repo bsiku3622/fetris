@@ -80,6 +80,15 @@ export class VersusMatch {
   onRemoteAdded?: (playerId: string) => void;
   /** 가비지를 받았다 — 리플레이 기록기가 같이 남겨야 재현이 성립한다 */
   onGarbage?: (holes: number[]) => void;
+  /**
+   * 상대 보드에서 한 박자(조각 착지·라인 클리어)가 일어났다.
+   * 스냅샷 차이로 되짚은 것이라 이벤트만큼 정밀하진 않지만, 관전자에게
+   * 소리를 들려주는 데는 충분하다.
+   */
+  onRemoteBeat?: (
+    playerId: string,
+    beat: { cleared: number; locked: number; attacked: number; b2b: number; combo: number },
+  ) => void;
 
   constructor(opts: VersusOptions) {
     this.rule = opts.rule;
@@ -259,7 +268,26 @@ export class VersusMatch {
       case "board": {
         if (!from) break;
         const g = this.ensureRemote(from);
+        // 스냅샷에는 이벤트가 실려 오지 않는다. 관전자에게 소리를 들려주려면
+        // 적용 전후의 성적을 견줘 무슨 일이 있었는지 되짚는 수밖에 없다.
+        const before = this.onRemoteBeat
+          ? { lines: g.stats.lines, pieces: g.stats.piecesPlaced, attack: g.stats.attack, b2b: g.scoring.b2b, combo: g.scoring.combo }
+          : null;
         g.deserialize(m.snap);
+        if (before && this.onRemoteBeat) {
+          const cleared = g.stats.lines - before.lines;
+          const locked = g.stats.piecesPlaced - before.pieces;
+          const attacked = g.stats.attack - before.attack;
+          if (cleared > 0 || locked > 0) {
+            this.onRemoteBeat(from, {
+              cleared,
+              locked,
+              attacked,
+              b2b: g.scoring.b2b,
+              combo: g.scoring.combo,
+            });
+          }
+        }
         this.onRemoteUpdate?.(from);
         break;
       }

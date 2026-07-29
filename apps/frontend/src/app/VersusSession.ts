@@ -91,6 +91,8 @@ export class VersusSession {
   private simRate: number;
   /** 관전 모드면 내 보드를 돌리지도 그리지도 않는다 */
   private readonly spectating: boolean;
+  /** 지금 크게 보고 있는 상대 — 관전 사운드를 이 한 명으로 좁힌다 */
+  private focusId: string | null = null;
 
   constructor(
     localCanvas: HTMLCanvasElement,
@@ -117,6 +119,9 @@ export class VersusSession {
     // 관전자는 시뮬레이션을 돌리지 않는다 — tick이 바로 빠져나가고
     // 상대 스냅샷 수신만 남는다.
     if (this.spectating) this.match.alive = false;
+    // 내 보드가 없으면 이벤트도 없어 화면이 무음이 된다.
+    // 보고 있는 상대의 보드 변화를 소리로 옮겨 준다.
+    this.match.onRemoteBeat = (playerId, beat) => this.playRemoteBeat(playerId, beat);
     this.localCanvas = localCanvas;
     this.match.onSelfKO = () => {
       this.sound.death();
@@ -248,7 +253,31 @@ export class VersusSession {
 
   /** 크게 보고 있는 상대 — 이 사람에게서만 고빈도 스냅샷을 받는다 */
   setFocus(playerId: string | null): void {
+    this.focusId = playerId;
     this.match.setFocus(playerId);
+  }
+
+  /**
+   * 상대 보드의 변화를 소리로 옮긴다 — 관전자에게는 이게 유일한 청각 피드백이다.
+   *
+   * 지금 크게 보고 있는 한 명만 울린다. 방 전체가 소리를 내면 인원이 늘수록
+   * 뭉개져서 무슨 일이 일어나는지 오히려 알 수 없다. 내가 아직 뛰는 중이라면
+   * 내 보드 이벤트가 이미 소리를 내므로 상대 것은 섞지 않는다(KO된 뒤부터 들린다).
+   */
+  private playRemoteBeat(
+    playerId: string,
+    beat: { cleared: number; locked: number; attacked: number; b2b: number; combo: number },
+  ): void {
+    if (!this.spectating && this.match.alive) return;
+    if (playerId !== this.focusId) return;
+    if (beat.cleared > 0) {
+      // 스냅샷만으로는 스핀 여부를 알 수 없다 — 줄 수·B2B·콤보까지만 살린다
+      this.sound.clear(Math.min(4, beat.cleared), false, beat.b2b > 1, Math.max(1, beat.combo));
+      this.localRenderer.flash = Math.min(1, 0.3 + beat.cleared * 0.12);
+    } else if (beat.locked > 0) {
+      this.sound.play("harddrop");
+    }
+    if (beat.attacked > 0) this.sound.spike(beat.attacked);
   }
 
   /**
