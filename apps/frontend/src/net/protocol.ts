@@ -106,10 +106,15 @@ export type ClientControl =
   | {
       t: "replay";
       matchId: number;
+      /** 이 판에서 실제로 쓴 시드(sharePieces가 꺼져 있으면 각자 다르다) */
+      seed: number;
+      /** 내가 쓴 감도 — 사람마다 다르므로 재현에 반드시 필요하다 */
+      handling: Handling;
       frames: number;
       keys: number[];
       garbage: number[];
       fingerprint: string;
+      stats?: { piecesPlaced: number; lines: number; attack: number };
     }
   /** runnerId를 주면 그 러너를 지목, 없으면 서버가 여유 있는 러너를 고른다 */
   | { t: "add-bot"; nick?: string; runnerId?: string }
@@ -133,6 +138,19 @@ export type ServerControl =
       nextRound?: boolean;
       /** 있으면 시리즈(FT)까지 끝났다는 뜻 */
       seriesWinnerId?: string;
+    }
+  /** 다른 참가자가 제출한 판 기록 — 서버가 방에 흘려준다 */
+  | {
+      t: "replay-record";
+      matchId: number;
+      playerId: string;
+      seed: number;
+      handling?: Handling;
+      frames: number;
+      keys: number[];
+      garbage: number[];
+      fingerprint: string;
+      stats?: { piecesPlaced: number; lines: number; attack: number };
     }
   | { t: "error"; reason: string }
   | { t: "relay"; from: string; msg: GameMessage }

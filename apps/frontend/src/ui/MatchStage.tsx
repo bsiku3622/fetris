@@ -76,7 +76,9 @@ export function MatchStage({
       remoteCanvases,
       {
         rule: match.config.rule,
-        handling: match.config.handling ?? settings.handling,
+        // 감도는 개인 설정이다 — 방이 정한 값이 아니라 내 값으로 뛴다.
+        // (룰·simRate는 방이 정한 대로 따라야 판이 공평하다)
+        handling: settings.handling,
         keymap: settings.keymap,
         gfx: { ...settings.gfx, nextCount: match.config.rule.nextCount },
         audio: settings.audio,
@@ -157,16 +159,17 @@ export function MatchStage({
     const payload = session.replayPayload();
     room.net.submitReplay(
       end.matchId,
+      payload.seed,
+      payload.handling,
       payload.frames,
       payload.keys,
       payload.garbage,
       payload.fingerprint,
+      payload.stats,
     );
 
     room.storeReplay(
-      session.replayFile({
-        code: room.code,
-        matchId: end.matchId,
+      session.replayEntry({
         playerId: myId,
         nick: byId(myId)?.nick ?? "player",
         placement: end.standings.find((s) => s.playerId === myId)?.placement,

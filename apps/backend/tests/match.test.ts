@@ -365,6 +365,55 @@ describe("매치 진행", () => {
     guests[0].close();
   });
 
+  it("제출한 리플레이가 방 전체에 배포된다", async () => {
+    // 관전자는 자기 로그가 없다. 참가자가 검증용으로 낸 제출을 서버가 그대로
+    // 흘려줘야만 그 경기를 내려받을 수 있다 — 특히 따로 공유하지 않는 봇의 판.
+    const { host, code, state } = await createRoom(url);
+    const hostId = state.players[0].id;
+    host.send({ t: "config", config: TEST_CONFIG });
+    const guest = await joinRoom(url, code, "G1");
+    const watcher = await joinRoom(url, code, "관전자");
+    watcher.send({ t: "set-role", role: "spectator" });
+    await host.waitState((st) => st.players.filter((p) => p.role === "player").length === 2);
+    host.drain();
+    guest.drain();
+    watcher.drain();
+
+    host.send({ t: "start-match" });
+    const start = await host.waitFor("match-start");
+    await guest.waitFor("match-start");
+    // 참가자 두 명 중 호스트가 아닌 쪽이 게스트다
+    const guestId = start.players.find((id) => id !== hostId) as string;
+
+    const keys = [0, 7, 1, 30, 7, 1];
+    const garbage = [10, 2, 3, 3];
+    guest.send({
+      t: "replay",
+      matchId: start.matchId,
+      seed: 4242,
+      frames: 90,
+      keys,
+      garbage,
+      fingerprint: "abcd1234",
+    });
+
+    // 관전자와 다른 참가자 모두 그 기록을 받는다
+    for (const c of [watcher, host]) {
+      const rec = await c.waitFor("replay-record");
+      expect(rec.matchId).toBe(start.matchId);
+      expect(rec.playerId).toBe(guestId);
+      expect(rec.seed).toBe(4242);
+      expect(rec.frames).toBe(90);
+      expect(rec.keys).toEqual(keys);
+      expect(rec.garbage).toEqual(garbage);
+      expect(rec.fingerprint).toBe("abcd1234");
+    }
+
+    host.close();
+    guest.close();
+    watcher.close();
+  });
+
   it("lobby가 아니면 봇을 추가할 수 없다", async () => {
     const { host, guests } = await readyRoom(1);
     await startMatch(host, guests);

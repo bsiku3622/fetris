@@ -8,6 +8,7 @@ import type {
   PlayerRole,
   BotRunnerInfo,
 } from "./protocol";
+import type { Handling } from "@fetris/engine/types";
 
 // ============================================================================
 // NetClient — 릴레이 서버와의 연결을 감싸고, 방 상태를 하나의 진실로 들고 있다.
@@ -55,6 +56,18 @@ export class NetClient {
     seriesWinnerId?: string,
     nextRound?: boolean,
   ) => void;
+  /** 다른 참가자가 제출한 판 기록이 도착했다(서버가 흘려준 것) */
+  onReplayRecord?: (r: {
+    matchId: number;
+    playerId: string;
+    seed: number;
+    handling?: Handling;
+    frames: number;
+    keys: number[];
+    garbage: number[];
+    fingerprint: string;
+    stats?: { piecesPlaced: number; lines: number; attack: number };
+  }) => void;
   onError?: (reason: string) => void;
   onDisconnect?: () => void;
   onBotPending?: (nick: string) => void;
@@ -139,6 +152,9 @@ export class NetClient {
       case "match-end":
         this.onMatchEnd?.(msg.matchId, msg.winnerId, msg.standings, msg.seriesWinnerId, msg.nextRound);
         break;
+      case "replay-record":
+        this.onReplayRecord?.(msg);
+        break;
       case "bot-pending":
         this.onBotPending?.(msg.nick);
         break;
@@ -196,12 +212,15 @@ export class NetClient {
   }
   submitReplay(
     matchId: number,
+    seed: number,
+    handling: Handling,
     frames: number,
     keys: number[],
     garbage: number[],
     fingerprint: string,
+    stats?: { piecesPlaced: number; lines: number; attack: number },
   ): void {
-    this.sendControl({ t: "replay", matchId, frames, keys, garbage, fingerprint });
+    this.sendControl({ t: "replay", matchId, seed, handling, frames, keys, garbage, fingerprint, stats });
   }
 
   // ---- 봇 ------------------------------------------------------------------

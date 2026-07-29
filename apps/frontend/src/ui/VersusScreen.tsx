@@ -6,8 +6,10 @@ import { isTauri, lanStart, lanStop, lanDiscover } from "../net/lan";
 import type { LanInfo } from "../net/lan";
 import type { BotRunnerInfo, MatchConfig, PlayerInfo } from "../net/protocol";
 import type { RoomSession } from "../app/roomSession";
-import type { ReplayFile } from "@fetris/engine/replay";
+import type { MatchReplayFile } from "@fetris/engine/replay";
 import { MatchStage } from "./MatchStage";
+import { Row, Slider, Toggle } from "./controls";
+import type { Handling } from "@fetris/engine/types";
 import { FUNKY } from "../render/theme";
 
 // ============================================================================
@@ -20,6 +22,8 @@ import { FUNKY } from "../render/theme";
 // 매치 진행은 서버가 소유한다. 이 화면은 서버가 알려준 phase를 그대로 따를 뿐
 // 스스로 판을 시작하거나 승패를 정하지 않는다.
 // ============================================================================
+
+const fmtFrameMs = (f: number) => `${f}f / ${Math.round((f * 1000) / 60)}ms`;
 
 const OPP_PALETTE = [FUNKY.pink, FUNKY.orange, FUNKY.green, FUNKY.purple, FUNKY.yellow, FUNKY.danger, FUNKY.sky];
 
@@ -72,11 +76,13 @@ const DEFAULT_CFG: Cfg = {
 
 export function VersusScreen({
   settings,
+  updateSettings,
   room,
   onExit,
   onPlayZen,
 }: {
   settings: Settings;
+  updateSettings: (fn: (s: Settings) => Settings) => void;
   room: RoomSession;
   onExit: () => void;
   onPlayZen: () => void;
@@ -104,6 +110,16 @@ export function VersusScreen({
    * 그대로 들고 있어 "골랐는데 안 먹는다"가 된다.
    */
   const canEdit = isHost && state?.phase === "lobby";
+
+  /**
+   * 감도는 방 설정이 아니라 개인 설정이다 — 마우스 감도를 남이 정해주지 않는 것과
+   * 같다. 그래서 호스트 여부와 무관하게 언제든 바꿀 수 있고, 방 전체가 아니라
+   * 내 저장된 설정에 남는다. 다만 판이 도는 중에 바꾸면 그 판의 재현이 어긋나므로
+   * 다음 판부터 적용한다.
+   */
+  const h = settings.handling;
+  const setHandling = (patch: Partial<Handling>) =>
+    updateSettings((s) => ({ ...s, handling: { ...s.handling, ...patch } }));
 
   useEffect(() => {
     return () => {
@@ -437,9 +453,9 @@ export function VersusScreen({
             )}
 
             {/* 직전 판 리플레이 — 결과 화면을 놓쳐도 여기서 받을 수 있다 */}
-            {room.sharedReplays.length > 0 && (
+            {room.matchReplay && (
               <div style={{ marginTop: 14, paddingTop: 10, borderTop: "2px dashed rgba(0,0,0,0.15)" }}>
-                <ReplayList files={room.sharedReplays} align="flex-start" />
+                <MatchReplayButton file={room.matchReplay} align="flex-start" />
               </div>
             )}
           </div>
@@ -482,6 +498,7 @@ export function VersusScreen({
                 <Tabs.Trigger value="garbage">가비지</Tabs.Trigger>
                 <Tabs.Trigger value="rule">규칙</Tabs.Trigger>
                 <Tabs.Trigger value="timing">타이밍</Tabs.Trigger>
+                <Tabs.Trigger value="feel">감도</Tabs.Trigger>
               </Tabs.List>
 
               <Tabs.Panel value="match">
@@ -590,6 +607,44 @@ export function VersusScreen({
                   <NumField label="ARE / 스폰 딜레이 (프레임)" value={cfg.are} min={0} max={60} step={1} disabled={!canEdit} onChange={(v) => applyEdit({ are: Math.round(v) })} />
                 </div>
               </Tabs.Panel>
+
+              {/* 감도 — 방 설정이 아니라 내 개인 설정이다 */}
+              <Tabs.Panel value="feel">
+                <div className="fx-settings-group">
+                  <Text variant="chrome" muted>
+                    내 조작 감도예요. 방 전체가 아니라 나에게만 적용되고, 진행 중인 판이 아니라
+                    다음 판부터 반영됩니다.
+                  </Text>
+                  <Row label="DAS" desc="좌우 자동 이동 시작 지연 (낮을수록 빠름)">
+                    <Slider value={h.das} min={0} max={20} step={0.5} onChange={(v) => setHandling({ das: v })} format={fmtFrameMs} />
+                  </Row>
+                  <Row label="ARR" desc="자동 이동 간격 (0 = 즉시 벽까지)">
+                    <Slider value={h.arr} min={0} max={5} step={0.5} onChange={(v) => setHandling({ arr: v })} format={fmtFrameMs} />
+                  </Row>
+                  <Row label="DCD" desc="회전/스폰 시 DAS 컷 (0 = 비활성)">
+                    <Slider value={h.dcd} min={0} max={5} step={0.5} onChange={(v) => setHandling({ dcd: v })} format={fmtFrameMs} />
+                  </Row>
+                  <Row label="SDF" desc="소프트드롭 배속 (41 = 즉시)">
+                    <Slider
+                      value={h.sdf == null || h.sdf > 41 ? 41 : h.sdf}
+                      min={5}
+                      max={41}
+                      step={1}
+                      onChange={(v) => setHandling({ sdf: v })}
+                      format={(v) => (v >= 41 ? "∞" : `${v}×`)}
+                    />
+                  </Row>
+                  <Row label="하드드롭 실수 방지" desc="하드드롭 후 키를 떼야 다시 발동">
+                    <Toggle value={h.safelock} onChange={(v) => setHandling({ safelock: v })} />
+                  </Row>
+                  <Row label="방향 전환 시 DAS 리셋" desc="반대로 꺾을 때 DAS를 다시 채운다">
+                    <Toggle value={h.cancelDas} onChange={(v) => setHandling({ cancelDas: v })} />
+                  </Row>
+                  <Row label="소프트드롭 우선" desc="같은 프레임에 소프트드롭을 좌우 이동보다 먼저">
+                    <Toggle value={h.preferSoftDrop} onChange={(v) => setHandling({ preferSoftDrop: v })} />
+                  </Row>
+                </div>
+              </Tabs.Panel>
             </Tabs>
           </div>
         </section>
@@ -607,15 +662,12 @@ export function VersusScreen({
 // ---- 결과 ------------------------------------------------------------------
 
 /**
- * 리플레이를 JSON 파일로 내려받는다.
- * 시드·룰·핸들링·simRate가 모두 들어 있어 나중에 그대로 재생할 수 있다.
+ * 매치 리플레이를 JSON 파일로 내려받는다 — 판 하나가 통째로 들어 있다.
+ * 참가자별 입력 로그를 다 담고 있어, 뷰어에서 모든 보드를 나란히 다시 볼 수 있다.
  */
-function downloadReplay(file: ReplayFile): void {
+function downloadMatchReplay(file: MatchReplayFile): void {
   const stamp = file.recordedAt.slice(0, 19).replace(/[:T]/g, "-");
-  const safeNick = file.player.nick.replace(/[^\w가-힣-]/g, "_").slice(0, 20);
-  // 순위를 넣어 같은 닉이 둘일 때도 파일이 서로 덮이지 않게 한다
-  const rank = file.player.placement ? `-${file.player.placement}위` : "";
-  const name = `fetris-${file.match.code ?? "local"}-${safeNick}${rank}-${stamp}.json`;
+  const name = `fetris-${file.match.code ?? "local"}-match${file.match.matchId}-${stamp}.json`;
 
   const blob = new Blob([JSON.stringify(file)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -630,53 +682,41 @@ function downloadReplay(file: ReplayFile): void {
 }
 
 /**
- * 이 방에 공유된 리플레이 목록. 참가자들이 판이 끝날 때 나눠준 것을 모은 것이라,
- * 자기 로그가 없는 관전자도 여기서 내려받는다.
+ * 방금 끝난 판을 내려받는 버튼.
  *
  * 결과 화면과 대기실 양쪽에 붙는다 — 결과는 몇 초 만에 자동으로 걷히므로,
  * 그 안에 못 누르면 영영 못 받는 상황을 만들지 않기 위해서다.
  */
-function ReplayList({ files, align }: { files: ReplayFile[]; align: "center" | "flex-start" }) {
-  if (files.length === 0) return null;
+function MatchReplayButton({
+  file,
+  align,
+}: {
+  file: MatchReplayFile | null;
+  align: "center" | "flex-start";
+}) {
+  if (!file) return null;
   return (
-    <div style={{ width: "100%", marginBottom: 4 }}>
-      <div
+    <div style={{ width: "100%", marginBottom: 4, display: "flex", justifyContent: align }}>
+      <button
+        onClick={() => downloadMatchReplay(file)}
         style={{
-          fontSize: "0.66rem",
-          fontWeight: 900,
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-          opacity: 0.5,
-          marginBottom: 6,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "6px 12px",
+          border: "2px solid var(--funky-line)",
+          background: "var(--funky-surface)",
+          boxShadow: "2px 2px 0 var(--funky-line)",
+          fontWeight: 800,
+          fontSize: "0.78rem",
+          cursor: "pointer",
+          font: "inherit",
         }}
       >
-        리플레이
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: align }}>
-        {files.map((r) => (
-          <button
-            key={`${r.player.id ?? r.player.nick}-${r.match.matchId}`}
-            onClick={() => downloadReplay(r)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "5px 10px",
-              border: "2px solid var(--funky-line)",
-              background: "var(--funky-surface)",
-              boxShadow: "2px 2px 0 var(--funky-line)",
-              fontWeight: 800,
-              fontSize: "0.76rem",
-              cursor: "pointer",
-              font: "inherit",
-            }}
-          >
-            <span style={{ opacity: 0.55 }}>↓</span>
-            <span>{r.player.nick}</span>
-            {r.player.placement ? <span style={{ opacity: 0.5 }}>#{r.player.placement}</span> : null}
-          </button>
-        ))}
-      </div>
+        <span style={{ opacity: 0.55 }}>↓</span>
+        <span>매치 리플레이</span>
+        <span style={{ opacity: 0.5 }}>{file.players.length}명</span>
+      </button>
     </div>
   );
 }
@@ -739,7 +779,7 @@ function ResultsView({ room }: { room: RoomSession }) {
             </div>
           ))}
         </div>
-        <ReplayList files={room.sharedReplays} align="center" />
+        <MatchReplayButton file={room.matchReplay} align="center" />
 
         {end.nextRound ? (
           <>

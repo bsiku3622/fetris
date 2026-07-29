@@ -429,7 +429,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     raw: Extract<ClientControl, { t: "replay" }>,
   ): void => {
     const config = room.config;
-    if (!config || !config.sharePieces) return;
+    if (!config) return;
     if (raw.matchId !== room.matchId) return;
     if (!Array.isArray(raw.keys) || typeof raw.fingerprint !== "string") return;
     const frames = Math.floor(Number(raw.frames));
@@ -437,6 +437,35 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     if (raw.keys.length > MAX_REPLAY_KEYS) return;
     const garbage = Array.isArray(raw.garbage) ? raw.garbage : [];
     if (garbage.length > MAX_REPLAY_KEYS) return;
+
+    // 제출된 기록을 방에 그대로 흘려준다. 관전자는 자기 로그가 없어 남이 남긴
+    // 것으로만 그 경기를 볼 수 있는데, 참가자가 검증 제출과 별개로 한 번 더
+    // 나눠주기를 기다리면 그렇게 하지 않는 봇의 판은 영영 사라진다.
+    // 검증에 이미 필요한 제출 하나로 배포까지 끝낸다.
+    const submittedSeed = Math.floor(Number(raw.seed));
+    // 감도는 개인 설정이므로 제출자가 실제로 쓴 값을 그대로 쓴다. 자기 신고이긴
+    // 하지만 어차피 전부 정상 범위의 설정값이라 이걸로 얻는 이득은 없다.
+    const handling = (raw.handling ?? config.handling) as Handling;
+    broadcast(
+      room,
+      {
+        t: "replay-record",
+        matchId: raw.matchId,
+        playerId: player.id,
+        seed: Number.isFinite(submittedSeed) ? submittedSeed >>> 0 : room.seed,
+        handling,
+        frames,
+        keys: raw.keys,
+        garbage,
+        fingerprint: raw.fingerprint,
+        stats: raw.stats,
+      },
+      player.ws,
+    );
+
+    // 재현 대조는 모두가 같은 조각 순서를 받았을 때만 가능하다 —
+    // 시드가 각자 다르면 서버에는 맞춰볼 근거가 없다.
+    if (!config.sharePieces) return;
 
     const seed = room.seed;
     const nick = player.nick;
@@ -446,7 +475,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
         const { ok, actual } = verifyReplay(
           {
             rule: config.rule as RuleSet,
-            handling: config.handling as Handling,
+            handling,
             seed,
             keys: raw.keys,
             garbage,

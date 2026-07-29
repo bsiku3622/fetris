@@ -120,10 +120,16 @@ export type ClientControl =
   | {
       t: "replay";
       matchId: number;
+      /** 이 판에서 실제로 쓴 시드. sharePieces가 꺼져 있으면 참가자마다 다르다. */
+      seed?: number;
+      /** 제출자가 쓴 감도. 감도는 개인 설정이라 방 설정으로 재현하면 어긋난다. */
+      handling?: unknown;
       frames: number;
       keys: number[];
       garbage?: number[];
       fingerprint: string;
+      /** 참고용 최종 성적(재생에는 쓰이지 않는다) */
+      stats?: { piecesPlaced: number; lines: number; attack: number };
     }
   /**
    * 호스트 전용: 봇 한 명을 이 방으로 초대 요청.
@@ -159,6 +165,23 @@ export type ServerControl =
       /** 결과 화면이 걷히면 서버가 다음 판을 이어 연다(FT 시리즈 진행 중) */
       nextRound?: boolean;
       seriesWinnerId?: string;
+    }
+  /**
+   * 누군가 제출한 판 기록 — 검증용 제출을 방에 그대로 흘려준 것이다.
+   * 관전자는 자기 로그가 없으므로 이걸로만 그 경기를 내려받을 수 있다.
+   */
+  | {
+      t: "replay-record";
+      matchId: number;
+      playerId: string;
+      seed: number;
+      handling?: unknown;
+      frames: number;
+      keys: number[];
+      garbage: number[];
+      fingerprint: string;
+      /** 참고용 최종 성적(재생에는 쓰이지 않는다) */
+      stats?: { piecesPlaced: number; lines: number; attack: number };
     }
   | { t: "error"; reason: string }
   | { t: "relay"; from: string; msg: GameMessage }

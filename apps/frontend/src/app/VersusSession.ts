@@ -10,8 +10,8 @@ import { SoundEngine, bgmForMode } from "../audio/sound";
 import type { AudioOptions } from "../audio/sound";
 import { InputManager } from "@fetris/engine/input";
 import type { KeyMap, Action } from "@fetris/engine/input";
-import { ReplayRecorder, ReplayAction, fingerprint, REPLAY_FORMAT } from "@fetris/engine/replay";
-import type { ReplayFile } from "@fetris/engine/replay";
+import { ReplayRecorder, ReplayAction, fingerprint } from "@fetris/engine/replay";
+import type { MatchReplayPlayerEntry } from "@fetris/engine/replay";
 import { VersusMatch } from "./VersusMatch";
 import { liveStats } from "@fetris/engine/modes";
 import type { HudInfo } from "@fetris/engine/modes";
@@ -87,8 +87,6 @@ export class VersusSession {
   private localCanvas: HTMLCanvasElement;
   /** 서버 검증용 입력 기록 — 매치가 끝나면 통째로 제출한다 */
   private recorder = new ReplayRecorder();
-  /** 리플레이 재현에 필요 — 이 값이 다르면 같은 입력이어도 결과가 갈린다 */
-  private simRate: number;
   /** 관전 모드면 내 보드를 돌리지도 그리지도 않는다 */
   private readonly spectating: boolean;
   /** 지금 크게 보고 있는 상대 — 관전 사운드를 이 한 명으로 좁힌다 */
@@ -114,7 +112,6 @@ export class VersusSession {
     });
     this.match.local.undoEnabled = opts.undoEnabled;
     this.match.onLocalEvents = (events) => this.drainEvents(events);
-    this.simRate = opts.perf.simRate;
     this.spectating = !!opts.spectating;
     // 관전자는 시뮬레이션을 돌리지 않는다 — tick이 바로 빠져나가고
     // 상대 스냅샷 수신만 남는다.
@@ -284,34 +281,42 @@ export class VersusSession {
    * 서버 검증에 제출할 리플레이. 입력 로그와 최종 상태 지문을 함께 넘긴다 —
    * 서버가 같은 시드·핸들링·simRate로 재현해 지문을 대조한다.
    */
-  replayPayload(): { frames: number; keys: number[]; garbage: number[]; fingerprint: string } {
+  replayPayload(): {
+    seed: number;
+    handling: Handling;
+    frames: number;
+    keys: number[];
+    garbage: number[];
+    fingerprint: string;
+    stats: { piecesPlaced: number; lines: number; attack: number };
+  } {
     return {
+      // sharePieces가 꺼져 있으면 내 시드는 서버가 모른다 — 같이 올려야
+      // 남들이 이 판을 재생할 수 있다
+      seed: this.match.local.seed,
+      // 감도도 사람마다 다르다 — 방 설정으로 재현하면 어긋난다
+      handling: this.match.local.handling.h,
       frames: this.recorder.frame,
       keys: this.recorder.keys.slice(),
       garbage: this.recorder.garbage.slice(),
       fingerprint: fingerprint(this.match.local),
+      stats: {
+        piecesPlaced: this.match.local.stats.piecesPlaced,
+        lines: this.match.local.stats.lines,
+        attack: this.match.local.stats.attack,
+      },
     };
   }
 
-  /** 내려받기용 리플레이 — 재생에 필요한 조건을 전부 담는다 */
-  replayFile(meta: {
-    code?: string;
-    matchId: number;
-    playerId: string;
-    nick: string;
-    placement?: number;
-  }): ReplayFile {
+  /** 매치 리플레이에 들어갈 내 몫 — 방이 이걸 모아 판 하나로 묶는다 */
+  replayEntry(meta: { playerId: string; nick: string; placement?: number }): MatchReplayPlayerEntry {
     const g = this.match.local;
     return {
-      format: REPLAY_FORMAT,
-      game: "fetris",
-      recordedAt: new Date().toISOString(),
-      match: { code: meta.code, matchId: meta.matchId },
-      player: { id: meta.playerId, nick: meta.nick, placement: meta.placement },
-      rule: g.rule,
-      handling: g.handling.h,
-      simRate: this.simRate,
+      id: meta.playerId,
+      nick: meta.nick,
+      placement: meta.placement,
       seed: g.seed,
+      handling: g.handling.h,
       frames: this.recorder.frame,
       keys: this.recorder.keys.slice(),
       garbage: this.recorder.garbage.slice(),

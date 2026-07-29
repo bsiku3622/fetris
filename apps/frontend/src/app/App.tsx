@@ -55,6 +55,7 @@ export function App() {
       {screen.name === "versus" && (
         <VersusScreen
           settings={settings}
+          updateSettings={updateSettings}
           room={room}
           onExit={() => setScreen({ name: "menu" })}
           // 대기 중에는 Zen만 할 수 있다(기록 모드는 소환당하면 판이 날아간다)

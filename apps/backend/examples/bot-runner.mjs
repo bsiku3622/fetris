@@ -205,7 +205,7 @@ function joinAsBot({ code, ticket, nick }) {
         break;
       case "match-end":
         stopMatch();
-        submitReplay(msg);
+        submitReplay();
         break;
       case "relay":
         onGameMessage(msg.from, msg.msg);
@@ -356,25 +356,25 @@ function joinAsBot({ code, ticket, nick }) {
   }
 
   /**
-   * 판이 끝나면 기록을 서버에 제출하고(재현해 대조) 방에도 나눠준다.
-   * 관전자는 자기 로그가 없어 이 공유로만 봇의 판을 내려받을 수 있다.
+   * 판이 끝나면 기록을 서버에 제출한다. 서버가 재현해 대조하는 동시에 방에도
+   * 흘려주므로, 관전자는 이걸로 봇의 판을 내려받는다. 제출하지 않으면 구경한
+   * 사람에게는 그 경기가 아무것도 남지 않는다.
    */
-  function submitReplay(end) {
+  function submitReplay() {
     const r = pendingReplay;
     pendingReplay = null;
     if (!r) return;
-    const placement = end.standings?.find((s) => s.playerId === myId)?.placement;
+    // 제출 하나면 된다 — 서버가 이 기록을 방에 흘려주므로 관전자도 받아 간다
     send({
       t: "replay",
       matchId: r.match.matchId,
+      seed: r.seed,
+      handling: r.handling,
       frames: r.frames,
       keys: r.keys,
       garbage: r.garbage,
       fingerprint: r.fingerprint,
-    });
-    sendGame({
-      t: "replay-share",
-      file: { ...r, recordedAt: new Date().toISOString(), player: { id: myId, nick, placement } },
+      stats: r.stats,
     });
   }
 

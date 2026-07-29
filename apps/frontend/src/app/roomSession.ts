@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NetClient } from "../net/client";
 import type { BotRunnerInfo, GameMessage, MatchConfig, PlayerRole, RoomState } from "../net/protocol";
-import type { ReplayFile } from "@fetris/engine/replay";
+import { MATCH_REPLAY_FORMAT } from "@fetris/engine/replay";
+import type { MatchReplayFile, MatchReplayPlayerEntry } from "@fetris/engine/replay";
 
 // ============================================================================
 // useRoomSession — 방 연결을 화면보다 위층에서 유지하는 훅.
@@ -55,15 +56,11 @@ export interface RoomSession {
   /** 부를 수 있는 봇 러너 — list-runners 응답으로 채워진다 */
   runners: BotRunnerInfo[];
   /**
-   * 방금 끝난 판의 리플레이. 대전 화면이 사라져도 결과 화면에서 내려받을 수
-   * 있도록 세션이 정리되기 전에 여기로 옮겨 둔다.
+   * 방금 끝난 판 하나를 통째로 담은 리플레이. 참가자들이 검증용으로 낸 로그를
+   * 모아 조립한 것이라, 관전자도 이걸 받아 모든 보드를 다시 볼 수 있다.
+   * 아직 아무 기록도 안 모였으면 null.
    */
-  lastReplay: ReplayFile | null;
-  /**
-   * 참가자들이 나눠준 이번 판 기록(내 것 포함, 순위 순).
-   * 관전자도 여기서 내려받는다.
-   */
-  sharedReplays: ReplayFile[];
+  matchReplay: MatchReplayFile | null;
 
   connect(url: string, mode: "host" | "join", opts: { code?: string; maxPlayers?: number; nick: string }): Promise<void>;
   leave(): void;
@@ -79,8 +76,8 @@ export interface RoomSession {
   kickBot(playerId: string): void;
   /** 러너 목록 새로고침 요청 */
   refreshRunners(): void;
-  /** 매치가 끝날 때 대전 화면이 리플레이를 넘겨준다(방에도 공유된다) */
-  storeReplay(file: ReplayFile): void;
+  /** 매치가 끝날 때 대전 화면이 내 기록을 넘겨준다 */
+  storeReplay(entry: MatchReplayPlayerEntry): void;
   sendChat(nick: string, text: string): void;
   /** 대전 화면이 매치를 인수했을 때 — 같은 매치로 다시 소환되지 않게 비운다 */
   consumeMatchStart(): void;
@@ -104,14 +101,6 @@ export function humanError(reason: string): string {
   }
 }
 
-/**
- * 리플레이 목록에 같은 판을 두 번 넣지 않기 위한 키. 닉은 방 안에서 겹칠 수
- * 있으므로(기본 닉 그대로 여럿 들어오면 실제로 겹친다) 사람은 id로 구분한다.
- */
-function replayKey(r: ReplayFile): string {
-  return `${r.player.id ?? r.player.nick}@${r.match.matchId}`;
-}
-
 export function useRoomSession(): RoomSession {
   const netRef = useRef<NetClient | null>(null);
   const [state, setState] = useState<RoomState | null>(null);
@@ -123,10 +112,12 @@ export function useRoomSession(): RoomSession {
   const [matchEnd, setMatchEnd] = useState<MatchEndInfo | null>(null);
   const [koed, setKoed] = useState(false);
   const [runners, setRunners] = useState<BotRunnerInfo[]>([]);
-  const [lastReplay, setLastReplay] = useState<ReplayFile | null>(null);
-  const [sharedReplays, setSharedReplays] = useState<ReplayFile[]>([]);
+  /** 참가자별 원시 기록 — 여기서 매치 리플레이 한 벌을 조립한다 */
+  const [records, setRecords] = useState<MatchReplayPlayerEntry[]>([]);
   /** 로스터 대비 입퇴장 안내를 만들기 위한 직전 스냅샷 */
   const prevPlayers = useRef<Map<string, string>>(new Map());
+  /** 콜백 안에서 최신 매치 정보를 보기 위한 사본(state는 클로저에 갇힌다) */
+  const matchStartRef = useRef<MatchStartInfo | null>(null);
   /** 재연결에 필요한 마지막 접속 정보 */
   const lastConnect = useRef<{ url: string; code: string; nick: string } | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -179,10 +170,10 @@ export function useRoomSession(): RoomSession {
         if (s.phase === "lobby") setKoed(false);
       };
       net.onMatchStart = (matchId, seed, config, players) => {
+        matchStartRef.current = { matchId, seed, config, players };
         setKoed(false);
         setMatchEnd(null);
-        setLastReplay(null);
-        setSharedReplays([]);
+        setRecords([]);
         setMatchStart({ matchId, seed, config, players });
       };
       net.onKO = (playerId) => {
@@ -199,17 +190,49 @@ export function useRoomSession(): RoomSession {
           if (series) pushChat({ nick: "", text: `🏆 ${series}님이 시리즈를 가져갔습니다` });
         }
       };
+      /*
+        참가자들이 검증용으로 낸 로그를 모은다. 이건 아직 재료다 —
+        내려받는 산출물은 이걸 한데 묶은 "판 하나"이고, 조립은 아래 useMemo에서 한다.
+      */
+      net.onReplayRecord = (r) => {
+        const who = net.room?.players.find((p) => p.id === r.playerId);
+        setRecords((prev) => {
+          const entry: MatchReplayPlayerEntry = {
+            id: r.playerId,
+            nick: who?.nick ?? "player",
+            placement: who?.placement ?? undefined,
+            seed: r.seed,
+            handling: r.handling,
+            frames: r.frames,
+            keys: r.keys,
+            garbage: r.garbage,
+            fingerprint: r.fingerprint,
+            stats: r.stats,
+          };
+          return prev.some((x) => x.id === entry.id)
+            ? prev.map((x) => (x.id === entry.id ? entry : x))
+            : [...prev, entry];
+        });
+      };
       net.onBotPending = (nick) => pushSystemChat(`${nick} 합류 중…`);
       net.onRunners = (list) => setRunners(list);
       net.onGameMessage = (m: GameMessage) => {
         if (m.t === "chat") pushChat({ nick: m.nick, text: m.text });
         else if (m.t === "replay-share") {
-          // 같은 사람이 두 번 보내도 하나만 남긴다
-          setSharedReplays((prev) =>
-            prev.some((r) => replayKey(r) === replayKey(m.file))
-              ? prev
-              : [...prev, m.file].sort((a, b) => (a.player.placement ?? 99) - (b.player.placement ?? 99)),
-          );
+          // 옛 방식으로 파일째 나눠주는 러너 호환 — 참가자 항목으로 풀어 담는다
+          const f = m.file;
+          const entry: MatchReplayPlayerEntry = {
+            id: f.player.id ?? f.player.nick,
+            nick: f.player.nick,
+            placement: f.player.placement,
+            seed: f.seed,
+            frames: f.frames,
+            keys: f.keys,
+            garbage: f.garbage,
+            fingerprint: f.fingerprint,
+            stats: f.stats,
+          };
+          setRecords((prev) => (prev.some((x) => x.id === entry.id) ? prev : [...prev, entry]));
         }
       };
     },
@@ -303,10 +326,39 @@ export function useRoomSession(): RoomSession {
     setMatchStart(null);
     setMatchEnd(null);
     setKoed(false);
-    setLastReplay(null);
-    setSharedReplays([]);
+    setRecords([]);
     prevPlayers.current = new Map();
   }, []);
+
+  /**
+   * 모인 참가자 기록을 판 하나로 묶는다. 산출물은 사람이 다시 보고 싶어 하는
+   * 단위 — "그 판" — 이지 개별 입력 로그가 아니다.
+   *
+   * 아직 안 낸 사람이 있어도 있는 만큼으로 만든다. 제출은 각자 따로 도착하고,
+   * 아예 안 내는 참가자(리플레이를 지원하지 않는 봇)도 있기 때문이다.
+   */
+  const matchReplay = useMemo<MatchReplayFile | null>(() => {
+    if (records.length === 0) return null;
+    const config = matchStart?.config ?? state?.config;
+    if (!config) return null;
+    const players = [...records].sort(
+      (a, b) => (a.placement ?? 99) - (b.placement ?? 99),
+    );
+    return {
+      format: MATCH_REPLAY_FORMAT,
+      game: "fetris",
+      recordedAt: new Date().toISOString(),
+      match: {
+        code: code || undefined,
+        matchId: matchEnd?.matchId ?? matchStart?.matchId ?? 0,
+        winnerId: matchEnd?.winnerId ?? undefined,
+      },
+      rule: config.rule,
+      handling: config.handling,
+      simRate: config.simRate,
+      players,
+    };
+  }, [records, matchStart, matchEnd, state?.config, code]);
 
   return useMemo<RoomSession>(
     () => ({
@@ -320,8 +372,7 @@ export function useRoomSession(): RoomSession {
       matchEnd,
       koed,
       runners,
-      lastReplay,
-      sharedReplays,
+      matchReplay,
       connect,
       leave,
       setRole: (r) => netRef.current?.setRole(r),
@@ -332,15 +383,13 @@ export function useRoomSession(): RoomSession {
       addBot: (runnerId) => netRef.current?.addBot(undefined, runnerId),
       kickBot: (id) => netRef.current?.kickBot(id),
       refreshRunners: () => netRef.current?.listRunners(),
-      storeReplay: (file) => {
-        setLastReplay(file);
-        // 관전자와 다른 참가자도 이 판을 내려받을 수 있도록 방에 나눠준다
-        setSharedReplays((prev) =>
-          prev.some((r) => replayKey(r) === replayKey(file))
-            ? prev
-            : [...prev, file].sort((a, b) => (a.player.placement ?? 99) - (b.player.placement ?? 99)),
+      storeReplay: (entry) => {
+        // 내 몫도 남들 것과 같은 자료로 모은다(서버가 나에게는 되돌려주지 않는다)
+        setRecords((prev) =>
+          prev.some((x) => x.id === entry.id)
+            ? prev.map((x) => (x.id === entry.id ? entry : x))
+            : [...prev, entry],
         );
-        netRef.current?.sendGame({ t: "replay-share", file });
       },
       sendChat: (nick, text) => {
         netRef.current?.sendGame({ t: "chat", nick, text });
@@ -351,6 +400,6 @@ export function useRoomSession(): RoomSession {
       clearError: () => setError(""),
       pushSystemChat,
     }),
-    [state, myId, code, error, chat, matchStart, matchEnd, koed, runners, lastReplay, sharedReplays, connect, leave, pushChat, pushSystemChat],
+    [state, myId, code, error, chat, matchStart, matchEnd, koed, runners, matchReplay, connect, leave, pushChat, pushSystemChat],
   );
 }
