@@ -55,12 +55,8 @@ export interface RoomSession {
   koed: boolean;
   /** 부를 수 있는 봇 러너 — list-runners 응답으로 채워진다 */
   runners: BotRunnerInfo[];
-  /**
-   * 방금 끝난 판 하나를 통째로 담은 리플레이. 참가자들이 검증용으로 낸 로그를
-   * 모아 조립한 것이라, 관전자도 이걸 받아 모든 보드를 다시 볼 수 있다.
-   * 아직 아무 기록도 안 모였으면 null.
-   */
-  matchReplay: MatchReplayFile | null;
+/** 방금 끝난 판을 내려받을 수 있는지 */
+  canDownloadMatch: boolean;
 
   connect(url: string, mode: "host" | "join", opts: { code?: string; maxPlayers?: number; nick: string }): Promise<void>;
   leave(): void;
@@ -78,6 +74,11 @@ export interface RoomSession {
   refreshRunners(): void;
   /** 매치가 끝날 때 대전 화면이 내 기록을 넘겨준다 */
   storeReplay(entry: MatchReplayPlayerEntry): void;
+  /**
+   * 방금 끝난 판을 통째로 만들어 돌려준다. 서버가 중계하며 받아 적은 녹화를
+   * 받아오고, 입력 로그를 낸 참가자는 그걸로 승급시킨다.
+   */
+  buildMatchReplay(): Promise<MatchReplayFile>;
   sendChat(nick: string, text: string): void;
   /** 대전 화면이 매치를 인수했을 때 — 같은 매치로 다시 소환되지 않게 비운다 */
   consumeMatchStart(): void;
@@ -337,28 +338,47 @@ export function useRoomSession(): RoomSession {
    * 아직 안 낸 사람이 있어도 있는 만큼으로 만든다. 제출은 각자 따로 도착하고,
    * 아예 안 내는 참가자(리플레이를 지원하지 않는 봇)도 있기 때문이다.
    */
-  const matchReplay = useMemo<MatchReplayFile | null>(() => {
-    if (records.length === 0) return null;
-    const config = matchStart?.config ?? state?.config;
-    if (!config) return null;
-    const players = [...records].sort(
-      (a, b) => (a.placement ?? 99) - (b.placement ?? 99),
-    );
+  /**
+   * 판 하나를 통째로 만든다.
+   *
+   * 바닥은 서버 녹화다 — 서버가 중계하면서 받아 적은 것이라 참가자가 아무것도
+   * 내주지 않아도(리플레이를 지원하지 않는 봇이라도) 판 전체가 남는다.
+   * 그 위에, 검증용 입력 로그를 낸 참가자는 60Hz 정밀 재현으로 승급시킨다.
+   */
+  const buildMatchReplay = useCallback(async (): Promise<MatchReplayFile> => {
+    const net = netRef.current;
+    if (!net) throw new Error("방에 연결돼 있지 않아요");
+    const config = matchStartRef.current?.config ?? net.room?.config;
+    if (!config) throw new Error("매치 설정을 알 수 없어요");
+
+    const rec = await net.fetchRecording();
+    const logged = new Map(records.map((r) => [r.id, r]));
+    const players: MatchReplayPlayerEntry[] = rec.players
+      .map((p) => {
+        const log = logged.get(p.id);
+        return log
+          ? { ...log, nick: p.nick, placement: p.placement ?? undefined }
+          : { id: p.id, nick: p.nick, placement: p.placement ?? undefined };
+      })
+      .sort((a, b) => (a.placement ?? 99) - (b.placement ?? 99));
+
     return {
       format: MATCH_REPLAY_FORMAT,
       game: "fetris",
-      recordedAt: new Date().toISOString(),
+      recordedAt: new Date(rec.startedAt).toISOString(),
       match: {
-        code: code || undefined,
-        matchId: matchEnd?.matchId ?? matchStart?.matchId ?? 0,
-        winnerId: matchEnd?.winnerId ?? undefined,
+        code: rec.code,
+        matchId: rec.matchId,
+        winnerId: rec.winnerId ?? undefined,
       },
       rule: config.rule,
       handling: config.handling,
       simRate: config.simRate,
       players,
+      timeline: rec.frames,
+      truncated: rec.truncated || undefined,
     };
-  }, [records, matchStart, matchEnd, state?.config, code]);
+  }, [records]);
 
   return useMemo<RoomSession>(
     () => ({
@@ -372,7 +392,8 @@ export function useRoomSession(): RoomSession {
       matchEnd,
       koed,
       runners,
-      matchReplay,
+      canDownloadMatch: !!matchEnd,
+      buildMatchReplay,
       connect,
       leave,
       setRole: (r) => netRef.current?.setRole(r),
@@ -400,6 +421,6 @@ export function useRoomSession(): RoomSession {
       clearError: () => setError(""),
       pushSystemChat,
     }),
-    [state, myId, code, error, chat, matchStart, matchEnd, koed, runners, matchReplay, connect, leave, pushChat, pushSystemChat],
+    [state, myId, code, error, chat, matchStart, matchEnd, koed, runners, buildMatchReplay, connect, leave, pushChat, pushSystemChat],
   );
 }

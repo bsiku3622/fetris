@@ -414,6 +414,63 @@ describe("매치 진행", () => {
     watcher.close();
   });
 
+  it("서버가 판을 직접 녹화해 누구에게나 내준다", async () => {
+    // 참가자가 아무것도 제출하지 않아도 판이 남아야 한다 — 리플레이를 지원하지
+    // 않는 봇만 뛰는 방이 정확히 이 경우다.
+    const { host, code, state } = await createRoom(url);
+    const hostId = state.players[0].id;
+    host.send({ t: "config", config: TEST_CONFIG });
+    const guest = await joinRoom(url, code, "G1");
+    const watcher = await joinRoom(url, code, "관전자");
+    watcher.send({ t: "set-role", role: "spectator" });
+    await host.waitState((st) => st.players.filter((p) => p.role === "player").length === 2);
+    host.drain();
+    guest.drain();
+    watcher.drain();
+
+    host.send({ t: "start-match" });
+    const start = await host.waitFor("match-start");
+    await guest.waitFor("match-start");
+    const guestId = start.players.find((id) => id !== hostId) as string;
+
+    // 대전 중 보드가 오가는 상황을 흉내낸다(서버는 내용을 해석하지 않는다)
+    for (let i = 0; i < 5; i++) {
+      host.send({ t: "relay", msg: { t: "board", snap: { grid: [0, 0, 1], tick: i } } });
+      guest.send({ t: "relay", msg: { t: "board", snap: { grid: [2, 0, 0], tick: i } } });
+    }
+    await new Promise((r) => setTimeout(r, 60));
+
+    guest.send({ t: "ko" });
+    await host.waitFor("match-end");
+
+    // 뛰지 않은 관전자도 판 전체를 받아 갈 수 있다
+    watcher.send({ t: "get-recording" });
+    const rec = await watcher.waitFor("recording");
+    expect(rec.matchId).toBe(start.matchId);
+    expect(rec.code).toBe(code);
+    expect(rec.truncated).toBe(false);
+    expect(rec.players.map((p) => p.id).sort()).toEqual([hostId, guestId].sort());
+    expect(rec.frames.length).toBe(10);
+    // 누구 보드인지 붙어 있고, 시간축은 단조 증가한다
+    expect(new Set(rec.frames.map((f) => f.id))).toEqual(new Set([hostId, guestId]));
+    for (let i = 1; i < rec.frames.length; i++) {
+      expect(rec.frames[i].ms).toBeGreaterThanOrEqual(rec.frames[i - 1].ms);
+    }
+
+    host.close();
+    guest.close();
+    watcher.close();
+  });
+
+  it("녹화가 없으면 그렇다고 알려준다", async () => {
+    const { host, guests } = await readyRoom(1);
+    host.send({ t: "get-recording" });
+    const err = await host.waitFor("error");
+    expect(err.reason).toBe("no-recording");
+    host.close();
+    guests[0].close();
+  });
+
   it("lobby가 아니면 봇을 추가할 수 없다", async () => {
     const { host, guests } = await readyRoom(1);
     await startMatch(host, guests);

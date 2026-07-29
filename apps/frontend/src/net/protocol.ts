@@ -120,7 +120,9 @@ export type ClientControl =
   | { t: "add-bot"; nick?: string; runnerId?: string }
   | { t: "kick-bot"; playerId: string }
   /** 대기 중인 봇 러너 목록 요청 */
-  | { t: "list-runners" };
+  | { t: "list-runners" }
+  /** 방금 끝난 판의 서버 녹화 요청(용량이 커서 필요할 때만 받는다) */
+  | { t: "get-recording" };
 
 /** 서버 → 클라이언트 제어 메시지 */
 export type ServerControl =
@@ -151,6 +153,17 @@ export type ServerControl =
       garbage: number[];
       fingerprint: string;
       stats?: { piecesPlaced: number; lines: number; attack: number };
+    }
+  /** get-recording 응답 — 서버가 중계하며 받아 적은 판 전체 */
+  | {
+      t: "recording";
+      matchId: number;
+      code: string;
+      startedAt: number;
+      winnerId: string | null;
+      players: { id: string; nick: string; placement: number | null; isBot: boolean }[];
+      truncated: boolean;
+      frames: { ms: number; id: string; snap: GameSnapshot }[];
     }
   | { t: "error"; reason: string }
   | { t: "relay"; from: string; msg: GameMessage }

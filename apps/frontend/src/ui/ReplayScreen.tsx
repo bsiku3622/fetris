@@ -227,7 +227,12 @@ export function ReplayScreen({ settings, onExit }: { settings: Settings; onExit:
   const winner = file.players.find((p) => p.id === file.match.winnerId);
   // 보드가 늘어날수록 한 칸을 좁게 — 2명까지는 크게, 그 이상은 격자로 채운다
   const cols = Math.min(file.players.length, file.players.length <= 2 ? 2 : 3);
-  const frames = file.players.reduce((m, p) => Math.max(m, p.frames), 0);
+  // 길이는 입력 로그와 서버 녹화 중 더 긴 쪽을 따른다
+  const lastMs = file.timeline?.length ? file.timeline[file.timeline.length - 1].ms : 0;
+  const frames = Math.max(
+    file.players.reduce((m, p) => Math.max(m, p.frames ?? 0), 0),
+    Math.ceil((lastMs / 1000) * 60),
+  );
   const paneWidth = `calc(${(100 / cols).toFixed(2)}% - ${((cols - 1) * 10) / cols}px)`;
   // 세션은 effect에서 만들어지므로 렌더 시점 값을 굳혀두면 항상 null이다.
   // 컨트롤은 누를 때마다 ref에서 최신 세션을 읽는다.
@@ -330,7 +335,8 @@ export function ReplayScreen({ settings, onExit }: { settings: Settings; onExit:
 
           <InfoCard title="조건">
             <Row k="simRate" v={`${file.simRate}Hz`} />
-            <Row k="입력" v={`${file.players.reduce((n, p) => n + Math.floor(p.keys.length / 3), 0)}회`} />
+            <Row k="입력" v={`${file.players.reduce((n, p) => n + Math.floor((p.keys?.length ?? 0) / 3), 0)}회`} />
+            {file.timeline?.length ? <Row k="녹화" v={`${file.timeline.length}장`} /> : null}
             <div style={{ marginTop: 6 }}>
               {intact ? <Badge color="green">검증됨</Badge> : <Badge color="pink">불일치</Badge>}
             </div>

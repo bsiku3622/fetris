@@ -41,6 +41,12 @@ export class NetClient {
   private playerJoinedCb: ((id: string, isHost: boolean) => void) | null = null;
   /** 직전 로스터 — state 변화에서 입퇴장을 뽑아내기 위해 들고 있는다 */
   private lastRoster = new Set<string>();
+  /** get-recording 응답을 기다리는 쪽 */
+  private recordingWaiter: {
+    resolve: (r: Extract<ServerControl, { t: "recording" }>) => void;
+    reject: (e: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  } | null = null;
 
   // 제어 이벤트
   onCreated?: (code: string) => void;
@@ -155,15 +161,33 @@ export class NetClient {
       case "replay-record":
         this.onReplayRecord?.(msg);
         break;
+      case "recording": {
+        const w = this.recordingWaiter;
+        this.recordingWaiter = null;
+        if (w) {
+          clearTimeout(w.timer);
+          w.resolve(msg);
+        }
+        break;
+      }
       case "bot-pending":
         this.onBotPending?.(msg.nick);
         break;
       case "runners":
         this.onRunners?.(msg.runners);
         break;
-      case "error":
+      case "error": {
+        // 녹화 요청에 대한 실패는 기다리는 쪽에 돌려준다
+        const w = this.recordingWaiter;
+        if (w && msg.reason === "no-recording") {
+          this.recordingWaiter = null;
+          clearTimeout(w.timer);
+          w.reject(new Error("no-recording"));
+          break;
+        }
         this.onError?.(msg.reason);
         break;
+      }
       case "relay":
         this.onGameMessage?.(msg.msg, msg.from);
         this.msgCb?.(msg.msg, msg.from);
@@ -234,6 +258,21 @@ export class NetClient {
   }
   listRunners(): void {
     this.sendControl({ t: "list-runners" });
+  }
+
+  /**
+   * 방금 끝난 판의 서버 녹화를 받아온다. 몇 MB가 될 수 있어 자동으로 뿌리지
+   * 않고 필요할 때만 요청한다.
+   */
+  fetchRecording(timeoutMs = 15_000): Promise<Extract<ServerControl, { t: "recording" }>> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.recordingWaiter = null;
+        reject(new Error("녹화 응답 시간 초과"));
+      }, timeoutMs);
+      this.recordingWaiter = { resolve, reject, timer };
+      this.sendControl({ t: "get-recording" });
+    });
   }
 
   // ---- 게임 메시지 ---------------------------------------------------------

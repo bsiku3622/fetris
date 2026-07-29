@@ -453,9 +453,9 @@ export function VersusScreen({
             )}
 
             {/* 직전 판 리플레이 — 결과 화면을 놓쳐도 여기서 받을 수 있다 */}
-            {room.matchReplay && (
+            {room.canDownloadMatch && (
               <div style={{ marginTop: 14, paddingTop: 10, borderTop: "2px dashed rgba(0,0,0,0.15)" }}>
-                <MatchReplayButton file={room.matchReplay} align="flex-start" />
+                <MatchReplayButton room={room} align="flex-start" />
               </div>
             )}
           </div>
@@ -687,18 +687,28 @@ function downloadMatchReplay(file: MatchReplayFile): void {
  * 결과 화면과 대기실 양쪽에 붙는다 — 결과는 몇 초 만에 자동으로 걷히므로,
  * 그 안에 못 누르면 영영 못 받는 상황을 만들지 않기 위해서다.
  */
-function MatchReplayButton({
-  file,
-  align,
-}: {
-  file: MatchReplayFile | null;
-  align: "center" | "flex-start";
-}) {
-  if (!file) return null;
+function MatchReplayButton({ room, align }: { room: RoomSession; align: "center" | "flex-start" }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  if (!room.canDownloadMatch) return null;
+
+  const save = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      downloadMatchReplay(await room.buildMatchReplay());
+    } catch (e) {
+      setErr(e instanceof Error && e.message === "no-recording" ? "남은 녹화가 없어요" : "받지 못했어요");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div style={{ width: "100%", marginBottom: 4, display: "flex", justifyContent: align }}>
+    <div style={{ width: "100%", marginBottom: 4, display: "flex", justifyContent: align, gap: 8, alignItems: "center" }}>
       <button
-        onClick={() => downloadMatchReplay(file)}
+        onClick={save}
+        disabled={busy}
         style={{
           display: "flex",
           alignItems: "center",
@@ -709,14 +719,15 @@ function MatchReplayButton({
           boxShadow: "2px 2px 0 var(--funky-line)",
           fontWeight: 800,
           fontSize: "0.78rem",
-          cursor: "pointer",
+          cursor: busy ? "progress" : "pointer",
+          opacity: busy ? 0.6 : 1,
           font: "inherit",
         }}
       >
         <span style={{ opacity: 0.55 }}>↓</span>
-        <span>매치 리플레이</span>
-        <span style={{ opacity: 0.5 }}>{file.players.length}명</span>
+        <span>{busy ? "받는 중…" : "매치 리플레이"}</span>
       </button>
+      {err && <span style={{ fontSize: "0.72rem", fontWeight: 800, color: FUNKY.danger }}>{err}</span>}
     </div>
   );
 }
@@ -779,7 +790,7 @@ function ResultsView({ room }: { room: RoomSession }) {
             </div>
           ))}
         </div>
-        <MatchReplayButton file={room.matchReplay} align="center" />
+        <MatchReplayButton room={room} align="center" />
 
         {end.nextRound ? (
           <>

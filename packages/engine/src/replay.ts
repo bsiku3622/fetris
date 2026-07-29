@@ -1,5 +1,5 @@
 import { Game } from "./game.js";
-import type { InputCommands } from "./game.js";
+import type { GameSnapshot, InputCommands } from "./game.js";
 import type { Handling, RuleSet } from "./types.js";
 
 // ============================================================================
@@ -277,16 +277,28 @@ export interface ReplayFile {
 // ============================================================================
 // 매치 리플레이 — 판 하나를 통째로.
 //
-// 검증용 제출(참가자별 입력 로그)은 어디까지나 재료다. 사람이 다시 보고 싶은
-// 것은 "그 판"이지 한 사람의 키 로그가 아니므로, 참가자들의 로그를 한 파일로
-// 묶어 모든 보드를 나란히 재생할 수 있게 한다.
+// 판을 다시 보는 근거는 두 가지고, 둘 다 담는다.
 //
-// 각 참가자의 보드는 자기 시드·키·받은 가비지만으로 독립적으로 재현되므로,
-// 재생기는 N개를 같은 프레임으로 함께 진행하기만 하면 된다.
+//  1. 서버 녹화(timeline) — 서버가 중계하면서 받아 적은 보드 스냅샷들.
+//     참가자가 아무것도 내주지 않아도 남으므로 이게 바닥이다. 매끄러움은
+//     스냅샷 주기만큼이라, 관전자가 실시간으로 보던 것과 같은 수준이다.
+//
+//  2. 입력 로그(keys) — 낸 참가자에 한해 60Hz로 정확히 다시 돌릴 수 있다.
+//     검증에 쓰는 그 로그이고, 있으면 재생이 매끄러워진다.
+//
+// 그래서 재생기는 참가자마다 둘 중 가능한 쪽을 골라 같은 시계 위에서 굴린다.
 // ============================================================================
 
 /** 매치 리플레이 포맷 버전 */
-export const MATCH_REPLAY_FORMAT = 2;
+export const MATCH_REPLAY_FORMAT = 3;
+
+/** 서버 녹화의 한 장면 — 어느 시점에 누구 보드가 어떠했는지 */
+export interface MatchReplayFrame {
+  /** 판 시작 후 경과 ms */
+  ms: number;
+  id: string;
+  snap: GameSnapshot;
+}
 
 /** 매치 리플레이 안의 참가자 한 명 */
 export interface MatchReplayPlayerEntry {
@@ -294,17 +306,18 @@ export interface MatchReplayPlayerEntry {
   nick: string;
   /** 이 판에서의 순위(1 = 우승). 미확정이면 없음 */
   placement?: number;
-  seed: number;
+  /** 입력 로그가 있을 때만 — 없으면 서버 녹화로 재생한다 */
+  seed?: number;
   /**
    * 이 사람이 쓴 핸들링(DAS/ARR 등). 감도는 마우스 감도처럼 개인 설정이라
    * 참가자마다 다를 수 있고, 다르면 같은 키 로그도 다르게 전개된다.
    * 없으면 파일 공통값을 쓴다(옛 기록 호환).
    */
   handling?: Handling;
-  frames: number;
-  keys: ReplayKeys;
+  frames?: number;
+  keys?: ReplayKeys;
   garbage?: ReplayGarbage;
-  fingerprint: string;
+  fingerprint?: string;
   /** 참고용 최종 성적(재생에는 쓰이지 않는다) */
   stats?: { piecesPlaced: number; lines: number; attack: number };
 }
@@ -327,19 +340,69 @@ export interface MatchReplayFile {
   simRate: number;
   /** 순위 순으로 담는다(1위가 앞) */
   players: MatchReplayPlayerEntry[];
+  /** 서버 녹화 — 입력 로그가 없는 참가자는 이걸로 재생한다 */
+  timeline?: MatchReplayFrame[];
+  /** 녹화가 상한에 걸려 뒷부분이 잘렸는지 */
+  truncated?: boolean;
 }
 
-/** 여러 보드를 같은 프레임으로 함께 돌리는 재생기 */
+/**
+ * 입력 로그가 없는 참가자의 보드 — 서버가 남긴 스냅샷을 시간에 맞춰 얹는다.
+ * 시뮬레이션이 아니라 재생이므로 스냅샷 사이는 그대로 멈춰 있다.
+ */
+class SnapshotBoard {
+  readonly game: Game;
+  /** 이 사람 몫만 시간순으로 추린 스냅샷 */
+  private shots: MatchReplayFrame[];
+  private idx = 0;
+
+  constructor(rule: RuleSet, handling: Handling, shots: MatchReplayFrame[]) {
+    this.game = new Game(rule, handling, 0);
+    this.shots = shots;
+  }
+
+  /** 경과 ms 시점의 상태로 맞춘다 */
+  applyAt(ms: number): void {
+    // 뒤로 갔으면 처음부터 다시 훑는다(스냅샷은 상태 그 자체라 되감기가 싸다)
+    if (this.idx > 0 && this.shots[this.idx - 1].ms > ms) this.idx = 0;
+    let applied = -1;
+    while (this.idx < this.shots.length && this.shots[this.idx].ms <= ms) {
+      applied = this.idx;
+      this.idx++;
+    }
+    if (applied >= 0) this.game.deserialize(this.shots[applied].snap);
+  }
+
+  reset(): void {
+    this.idx = 0;
+  }
+}
+
+/**
+ * 여러 보드를 같은 시계 위에서 함께 돌리는 재생기.
+ *
+ * 입력 로그가 있는 참가자는 60Hz로 다시 시뮬레이션하고, 없는 참가자는 서버
+ * 녹화 스냅샷을 시간에 맞춰 얹는다. 둘이 섞여 있어도 같은 프레임으로 흐른다.
+ */
 export class MatchReplayPlayer {
-  /** 참가자별 재생기 — players와 같은 순서 */
-  readonly boards: ReplayPlayer[];
-  /** 가장 오래 버틴 사람 기준 총 프레임 */
+  /** 참가자별 보드(players와 같은 순서) */
+  readonly boards: { game: Game }[];
+  /** 판 전체 길이(프레임) */
   readonly frames: number;
+  /** 지금까지 진행한 프레임 */
+  frame = 0;
+
+  private sims: (ReplayPlayer | null)[];
+  private shots: (SnapshotBoard | null)[];
 
   constructor(file: MatchReplayFile) {
-    this.boards = file.players.map(
-      (p) =>
-        new ReplayPlayer({
+    const timeline = file.timeline ?? [];
+    this.sims = [];
+    this.shots = [];
+    this.boards = file.players.map((p) => {
+      // 입력 로그가 있으면 정확히 다시 돌린다
+      if (p.keys && p.frames && p.seed !== undefined) {
+        const sim = new ReplayPlayer({
           rule: file.rule,
           handling: p.handling ?? file.handling,
           seed: p.seed,
@@ -347,37 +410,53 @@ export class MatchReplayPlayer {
           garbage: p.garbage,
           frames: p.frames,
           simRate: file.simRate,
-        }),
-    );
-    this.frames = this.boards.reduce((m, b) => Math.max(m, b.frames), 0);
-  }
+        });
+        this.sims.push(sim);
+        this.shots.push(null);
+        return sim;
+      }
+      const board = new SnapshotBoard(
+        file.rule,
+        p.handling ?? file.handling,
+        timeline.filter((f) => f.id === p.id),
+      );
+      this.sims.push(null);
+      this.shots.push(board);
+      return board;
+    });
 
-  get frame(): number {
-    return this.boards.reduce((m, b) => Math.max(m, b.frame), 0);
+    const simFrames = this.sims.reduce((m, s) => Math.max(m, s?.frames ?? 0), 0);
+    const lastMs = timeline.length > 0 ? timeline[timeline.length - 1].ms : 0;
+    this.frames = Math.max(simFrames, Math.ceil((lastMs / 1000) * 60));
   }
 
   get done(): boolean {
-    return this.boards.every((b) => b.done);
+    return this.frame >= this.frames;
   }
 
   /** 한 프레임 진행. 이미 끝난 보드는 그 자리에 멈춰 있다 */
   step(): boolean {
-    let moved = false;
-    for (const b of this.boards) {
-      if (b.step()) {
-        b.game.events.length = 0;
-        moved = true;
-      }
+    if (this.done) return false;
+    this.frame++;
+    for (const sim of this.sims) {
+      if (sim && sim.step()) sim.game.events.length = 0;
     }
-    return moved;
+    const ms = (this.frame / 60) * 1000;
+    for (const shot of this.shots) shot?.applyAt(ms);
+    return true;
   }
 
   seek(target: number): void {
-    for (const b of this.boards) b.seek(target);
+    const goal = Math.max(0, Math.min(this.frames, Math.floor(target)));
+    for (const sim of this.sims) sim?.seek(goal);
+    for (const shot of this.shots) shot?.applyAt((goal / 60) * 1000);
+    this.frame = goal;
   }
 
   reset(): void {
-    for (const b of this.boards) b.reset();
+    for (const sim of this.sims) sim?.reset();
+    for (const shot of this.shots) shot?.reset();
+    this.frame = 0;
   }
 }
 
@@ -385,21 +464,25 @@ export class MatchReplayPlayer {
 export function verifyMatchReplayFile(
   file: MatchReplayFile,
 ): { id: string; nick: string; ok: boolean; actual: string }[] {
-  return file.players.map((p) => {
-    const { ok, actual } = verifyReplay(
-      {
-        rule: file.rule,
-        handling: p.handling ?? file.handling,
-        seed: p.seed,
-        keys: p.keys,
-        garbage: p.garbage,
-        frames: p.frames,
-        simRate: file.simRate,
-      },
-      p.fingerprint,
-    );
-    return { id: p.id, nick: p.nick, ok, actual };
-  });
+  // 입력 로그를 낸 사람만 대조할 수 있다. 서버 녹화만 있는 참가자는 상태를
+  // 그대로 받아 적은 것이라 "재현해서 맞춰본다"는 개념 자체가 없다.
+  return file.players
+    .filter((p) => p.keys && p.frames && p.seed !== undefined && p.fingerprint)
+    .map((p) => {
+      const { ok, actual } = verifyReplay(
+        {
+          rule: file.rule,
+          handling: p.handling ?? file.handling,
+          seed: p.seed as number,
+          keys: p.keys as ReplayKeys,
+          garbage: p.garbage,
+          frames: p.frames as number,
+          simRate: file.simRate,
+        },
+        p.fingerprint as string,
+      );
+      return { id: p.id, nick: p.nick, ok, actual };
+    });
 }
 
 /** 파일을 재생해 지문이 맞는지 확인한다(열어볼 때 무결성 검사) */

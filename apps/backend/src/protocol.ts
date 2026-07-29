@@ -140,6 +140,11 @@ export type ClientControl =
   | { t: "kick-bot"; playerId: string }
   /** 대기 중인 봇 러너 목록 요청(누구 봇을 부를지 고르기 위해) */
   | { t: "list-runners" }
+  /**
+   * 방금 끝난 판의 녹화 요청. 서버가 중계하며 직접 받아 적은 것이라 참가자의
+   * 협조와 무관하게 존재한다. 용량이 크므로 필요할 때만 보낸다.
+   */
+  | { t: "get-recording" }
   /** 봇 러너 등록(봇 경로 전용) */
   | { t: "bot-hello"; name?: string; capacity?: number };
 
@@ -182,6 +187,19 @@ export type ServerControl =
       fingerprint: string;
       /** 참고용 최종 성적(재생에는 쓰이지 않는다) */
       stats?: { piecesPlaced: number; lines: number; attack: number };
+    }
+  /** get-recording 응답 — 요청한 사람에게만 보낸다 */
+  | {
+      t: "recording";
+      matchId: number;
+      code: string;
+      startedAt: number;
+      winnerId: string | null;
+      players: { id: string; nick: string; placement: number | null; isBot: boolean }[];
+      /** 상한에 걸려 뒷부분이 잘렸는지 */
+      truncated: boolean;
+      /** 시간축 위의 보드들 — [{ ms, id, snap }] */
+      frames: { ms: number; id: string; snap: unknown }[];
     }
   | { t: "error"; reason: string }
   | { t: "relay"; from: string; msg: GameMessage }

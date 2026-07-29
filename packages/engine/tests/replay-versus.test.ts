@@ -11,7 +11,7 @@ import {
   verifyMatchReplayFile,
   MATCH_REPLAY_FORMAT,
 } from "../src/replay.js";
-import type { MatchReplayFile } from "../src/replay.js";
+import type { MatchReplayFile, MatchReplayFrame } from "../src/replay.js";
 
 // ============================================================================
 // 대전 리플레이 — 키 입력만으로는 판이 결정되지 않는다.
@@ -240,5 +240,129 @@ describe("매치 리플레이", () => {
     while (base.step()) { /* 끝까지 */ }
     while (shifted.step()) { /* 끝까지 */ }
     expect(fingerprint(shifted.boards[0].game)).not.toBe(fingerprint(base.boards[0].game));
+  });
+});
+
+// ============================================================================
+// 서버 녹화 재생 — 입력 로그를 안 낸 참가자도 판에 남아야 한다.
+// ============================================================================
+
+describe("서버 녹화", () => {
+  /** 한 사람 몫의 스냅샷 타임라인을 만든다(서버가 중계하며 받아 적은 모양) */
+  function recordTimeline(id: string, seed: number): { frames: MatchReplayFrame[]; game: Game } {
+    const game = new Game(RULE, HANDLING, seed);
+    const cmd = {
+      rotateCW: false, rotateCCW: false, rotate180: false,
+      hardDrop: false, hold: false, softDropHeld: false,
+    };
+    const frames: MatchReplayFrame[] = [];
+    for (let f = 0; f < FRAMES; f++) {
+      cmd.hardDrop = f % 14 === 3;
+      game.update(1, cmd, 0);
+      game.events.length = 0;
+      // 방 전체 브로드캐스트 주기(12프레임 = 5Hz)와 같게
+      if (f % 12 === 0) frames.push({ ms: Math.round((f / 60) * 1000), id, snap: game.serialize() });
+    }
+    return { frames, game };
+  }
+
+  it("입력 로그가 없어도 스냅샷으로 재생된다", () => {
+    const { frames, game } = recordTimeline("bot", 31337);
+    const file: MatchReplayFile = {
+      format: MATCH_REPLAY_FORMAT,
+      game: "fetris",
+      recordedAt: "2026-07-30T00:00:00.000Z",
+      match: { code: "REC", matchId: 1 },
+      rule: RULE,
+      handling: HANDLING,
+      simRate: 60,
+      players: [{ id: "bot", nick: "Bot", placement: 1 }],
+      timeline: frames,
+    };
+
+    const player = new MatchReplayPlayer(file);
+    expect(player.frames).toBeGreaterThan(0);
+    while (player.step()) { /* 끝까지 */ }
+
+    // 마지막 스냅샷 시점의 상태가 얹혀 있어야 한다
+    const last = frames[frames.length - 1];
+    expect(player.boards[0].game.stats.piecesPlaced).toBe(last.snap.stats.piecesPlaced);
+    expect(player.boards[0].game.stats.piecesPlaced).toBeGreaterThan(0);
+    // 녹화는 상태를 받아 적은 것이라 마지막 조각 수가 실제 판과 어긋나지 않는다
+    expect(last.snap.stats.piecesPlaced).toBeLessThanOrEqual(game.stats.piecesPlaced);
+  });
+
+  it("녹화만 있는 참가자는 검증 대상이 아니다", () => {
+    const { frames } = recordTimeline("bot", 5);
+    const file: MatchReplayFile = {
+      format: MATCH_REPLAY_FORMAT,
+      game: "fetris",
+      recordedAt: "2026-07-30T00:00:00.000Z",
+      match: { code: "REC", matchId: 1 },
+      rule: RULE,
+      handling: HANDLING,
+      simRate: 60,
+      players: [{ id: "bot", nick: "Bot" }],
+      timeline: frames,
+    };
+    // 재현해 맞춰볼 근거가 없으므로 조용히 비워둔다(불일치로 잡지 않는다)
+    expect(verifyMatchReplayFile(file)).toEqual([]);
+  });
+
+  it("입력 로그를 낸 사람과 녹화만 있는 사람이 한 판에 섞인다", () => {
+    const logged = playVersus();
+    const { frames } = recordTimeline("bot", 4242);
+    const file: MatchReplayFile = {
+      format: MATCH_REPLAY_FORMAT,
+      game: "fetris",
+      recordedAt: "2026-07-30T00:00:00.000Z",
+      match: { code: "MIX", matchId: 2 },
+      rule: RULE,
+      handling: HANDLING,
+      simRate: 60,
+      players: [
+        {
+          id: "me", nick: "나", placement: 1, seed: SEED,
+          frames: logged.recorder.frame, keys: logged.recorder.keys.slice(),
+          garbage: logged.recorder.garbage.slice(), fingerprint: fingerprint(logged.game),
+        },
+        { id: "bot", nick: "Bot", placement: 2 },
+      ],
+      timeline: frames,
+    };
+
+    const player = new MatchReplayPlayer(file);
+    while (player.step()) { /* 끝까지 */ }
+
+    // 로그를 낸 쪽은 정확히 재현되고, 녹화 쪽도 함께 채워진다
+    expect(fingerprint(player.boards[0].game)).toBe(fingerprint(logged.game));
+    expect(player.boards[1].game.stats.piecesPlaced).toBeGreaterThan(0);
+    // 검증은 로그를 낸 사람만 대상으로 한다
+    expect(verifyMatchReplayFile(file).map((r) => r.nick)).toEqual(["나"]);
+  });
+
+  it("되감아도 스냅샷 보드가 어긋나지 않는다", () => {
+    const { frames } = recordTimeline("bot", 77);
+    const file: MatchReplayFile = {
+      format: MATCH_REPLAY_FORMAT,
+      game: "fetris",
+      recordedAt: "2026-07-30T00:00:00.000Z",
+      match: { code: "REC", matchId: 1 },
+      rule: RULE,
+      handling: HANDLING,
+      simRate: 60,
+      players: [{ id: "bot", nick: "Bot" }],
+      timeline: frames,
+    };
+    const player = new MatchReplayPlayer(file);
+
+    player.seek(200);
+    const at200 = player.boards[0].game.stats.piecesPlaced;
+    player.seek(60);
+    const at60 = player.boards[0].game.stats.piecesPlaced;
+    player.seek(200);
+
+    expect(at60).toBeLessThanOrEqual(at200);
+    expect(player.boards[0].game.stats.piecesPlaced).toBe(at200);
   });
 });
