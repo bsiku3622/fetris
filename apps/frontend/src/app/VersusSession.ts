@@ -91,6 +91,8 @@ export class VersusSession {
   private readonly spectating: boolean;
   /** 지금 크게 보고 있는 상대 — 관전 사운드를 이 한 명으로 좁힌다 */
   private focusId: string | null = null;
+  /** 1대1인가 — 상대가 한 명뿐이면 뛰는 중에도 그쪽 소리를 들려준다 */
+  private readonly duel: boolean;
 
   constructor(
     localCanvas: HTMLCanvasElement,
@@ -113,6 +115,7 @@ export class VersusSession {
     this.match.local.undoEnabled = opts.undoEnabled;
     this.match.onLocalEvents = (events) => this.drainEvents(events);
     this.spectating = !!opts.spectating;
+    this.duel = opts.opponents.length === 1;
     // 관전자는 시뮬레이션을 돌리지 않는다 — tick이 바로 빠져나가고
     // 상대 스냅샷 수신만 남는다.
     if (this.spectating) this.match.alive = false;
@@ -257,24 +260,38 @@ export class VersusSession {
   /**
    * 상대 보드의 변화를 소리로 옮긴다 — 관전자에게는 이게 유일한 청각 피드백이다.
    *
-   * 지금 크게 보고 있는 한 명만 울린다. 방 전체가 소리를 내면 인원이 늘수록
-   * 뭉개져서 무슨 일이 일어나는지 오히려 알 수 없다. 내가 아직 뛰는 중이라면
-   * 내 보드 이벤트가 이미 소리를 내므로 상대 것은 섞지 않는다(KO된 뒤부터 들린다).
+   * 1대1은 상대가 한 명뿐이라 뛰는 도중에도 상대 소리가 들려야 판이 읽힌다.
+   * 대신 내 보드 소리를 덮지 않도록 한 단계 죽여 내보낸다.
+   *
+   * 셋 이상이면 지금 크게 보고 있는 한 명만 울린다. 방 전체가 소리를 내면
+   * 인원이 늘수록 뭉개져서 무슨 일이 일어나는지 오히려 알 수 없다.
    */
   private playRemoteBeat(
     playerId: string,
     beat: { cleared: number; locked: number; attacked: number; b2b: number; combo: number },
   ): void {
-    if (!this.spectating && this.match.alive) return;
+    const watching = this.spectating || !this.match.alive;
+    // 뛰는 중에 들리는 건 1대1일 때뿐이다
+    if (!watching && !this.duel) return;
     if (playerId !== this.focusId) return;
-    if (beat.cleared > 0) {
-      // 스냅샷만으로는 스핀 여부를 알 수 없다 — 줄 수·B2B·콤보까지만 살린다
-      this.sound.clear(Math.min(4, beat.cleared), false, beat.b2b > 1, Math.max(1, beat.combo));
-      this.localRenderer.flash = Math.min(1, 0.3 + beat.cleared * 0.12);
-    } else if (beat.locked > 0) {
-      this.sound.play("harddrop");
+
+    const ring = () => {
+      if (beat.cleared > 0) {
+        // 스냅샷만으로는 스핀 여부를 알 수 없다 — 줄 수·B2B·콤보까지만 살린다
+        this.sound.clear(Math.min(4, beat.cleared), false, beat.b2b > 1, Math.max(1, beat.combo));
+      } else if (beat.locked > 0) {
+        this.sound.play("harddrop");
+      }
+      if (beat.attacked > 0) this.sound.spike(beat.attacked);
+    };
+
+    // 내가 뛰는 중이면 상대 소리는 뒤로 물린다(관전 중엔 그게 유일한 소리라 그대로)
+    if (watching) {
+      ring();
+      if (beat.cleared > 0) this.localRenderer.flash = Math.min(1, 0.3 + beat.cleared * 0.12);
+    } else {
+      this.sound.asOpponent(ring);
     }
-    if (beat.attacked > 0) this.sound.spike(beat.attacked);
   }
 
   /**

@@ -374,7 +374,11 @@ describe("매치 진행", () => {
     const guest = await joinRoom(url, code, "G1");
     const watcher = await joinRoom(url, code, "관전자");
     watcher.send({ t: "set-role", role: "spectator" });
-    await host.waitState((st) => st.players.filter((p) => p.role === "player").length === 2);
+    // 관전자가 실제로 자리를 옮긴 뒤에 진행한다. 참가자 수만 보면 게스트가
+    // 막 들어온 시점(관전자 입장 전)에도 2명이라 그냥 통과해버린다.
+    await host.waitState(
+      (st) => st.players.length === 3 && st.players.filter((p) => p.role === "player").length === 2,
+    );
     host.drain();
     guest.drain();
     watcher.drain();
@@ -423,7 +427,11 @@ describe("매치 진행", () => {
     const guest = await joinRoom(url, code, "G1");
     const watcher = await joinRoom(url, code, "관전자");
     watcher.send({ t: "set-role", role: "spectator" });
-    await host.waitState((st) => st.players.filter((p) => p.role === "player").length === 2);
+    // 관전자가 실제로 자리를 옮긴 뒤에 진행한다. 참가자 수만 보면 게스트가
+    // 막 들어온 시점(관전자 입장 전)에도 2명이라 그냥 통과해버린다.
+    await host.waitState(
+      (st) => st.players.length === 3 && st.players.filter((p) => p.role === "player").length === 2,
+    );
     host.drain();
     guest.drain();
     watcher.drain();
@@ -438,7 +446,12 @@ describe("매치 진행", () => {
       host.send({ t: "relay", msg: { t: "board", snap: { grid: [0, 0, 1], tick: i } } });
       guest.send({ t: "relay", msg: { t: "board", snap: { grid: [2, 0, 0], tick: i } } });
     }
-    await new Promise((r) => setTimeout(r, 60));
+    // 소켓마다 왕복을 한 번 돌려 서버가 위 보드들을 다 처리했음을 보장한다.
+    // 그냥 기다리면 KO가 먼저 처리돼 뒤쪽 보드가 녹화에서 빠질 수 있다.
+    host.send({ t: "list-runners" });
+    await host.waitFor("runners");
+    guest.send({ t: "list-runners" });
+    await guest.waitFor("runners");
 
     guest.send({ t: "ko" });
     await host.waitFor("match-end");

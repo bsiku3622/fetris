@@ -44,6 +44,8 @@ export class SoundEngine {
   private eq: BiquadFilterNode | null = null;
   private sfxGain: GainNode | null = null;
   private musicGain: GainNode | null = null;
+  /** 상대 보드 소리를 흘리는 버스(sfx보다 낮게) */
+  private oppGain: GainNode | null = null;
   private convolver: ConvolverNode | null = null;
   private dryGain: GainNode | null = null;
   private wetGain: GainNode | null = null;
@@ -113,6 +115,10 @@ export class SoundEngine {
 
     this.sfxGain = ctx.createGain();
     this.musicGain = ctx.createGain();
+    // 상대 보드 전용 버스 — 같은 체인을 타되 한 단계 죽여서 내 소리를 덮지 않는다
+    this.oppGain = ctx.createGain();
+    this.oppGain.gain.value = 0.45;
+    this.oppGain.connect(this.sfxGain);
 
     // 리버브 버스(공간감): sfx → dry → master, sfx → convolver → wet → master
     this.convolver = ctx.createConvolver();
@@ -129,6 +135,24 @@ export class SoundEngine {
     this.musicGain.connect(this.master); // 음악은 드라이
 
     this.applyVolumes();
+  }
+
+  /**
+   * 이 안에서 낸 소리는 상대 보드 몫으로 한 단계 죽여 나간다.
+   * 소리 만드는 쪽은 sfxGain을 보고 노드를 붙이므로, 잠깐 갈아 끼우면 된다.
+   */
+  asOpponent(fn: () => void): void {
+    if (!this.sfxGain || !this.oppGain) {
+      fn();
+      return;
+    }
+    const real = this.sfxGain;
+    this.sfxGain = this.oppGain;
+    try {
+      fn();
+    } finally {
+      this.sfxGain = real;
+    }
   }
 
   setOptions(o: Partial<AudioOptions>): void {
