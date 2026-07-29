@@ -28,12 +28,17 @@ function load() {
 }
 
 function save(data) {
+  // 새로 만들 때만 잠근다. 기존 파일의 권한은 건드리지 않는다 —
+  // 서버가 www-data 같은 다른 사용자로 돌면 640으로 열어둬야 읽을 수 있고,
+  // 저장할 때마다 600으로 되돌리면 발급하는 순간 서비스가 눈이 먼다.
+  const isNew = !existsSync(FILE);
   writeFileSync(FILE, JSON.stringify(data, null, 2) + "\n", "utf8");
-  // 토큰은 비밀이다 — 소유자만 읽도록 잠근다
-  try {
-    chmodSync(FILE, 0o600);
-  } catch {
-    /* 파일시스템이 지원하지 않으면 넘어간다 */
+  if (isNew) {
+    try {
+      chmodSync(FILE, 0o600);
+    } catch {
+      /* 파일시스템이 지원하지 않으면 넘어간다 */
+    }
   }
 }
 
