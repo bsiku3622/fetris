@@ -29,6 +29,8 @@ export interface MatchEndInfo {
   standings: { playerId: string; placement: number }[];
   /** 있으면 시리즈(FT)까지 끝났다는 뜻 */
   seriesWinnerId?: string;
+  /** 결과 화면이 걷히면 서버가 다음 판을 이어 연다 */
+  nextRound?: boolean;
 }
 
 export interface ChatLine {
@@ -70,6 +72,8 @@ export interface RoomSession {
   startMatch(): void;
   /** 결과 대기시간을 건너뛰고 대기실로 */
   skipResults(): void;
+  /** 호스트 전용: 진행 중인 FT 시리즈를 접고 대기실로 */
+  abortSeries(): void;
   /** runnerId를 주면 그 러너를 지목해 부른다 */
   addBot(runnerId?: string): void;
   kickBot(playerId: string): void;
@@ -186,8 +190,8 @@ export function useRoomSession(): RoomSession {
         const nick = net.room?.players.find((p) => p.id === playerId)?.nick ?? "누군가";
         pushChat({ nick: "", text: `${nick}님이 KO됐습니다` });
       };
-      net.onMatchEnd = (matchId, winnerId, standings, seriesWinnerId) => {
-        setMatchEnd({ matchId, winnerId, standings, seriesWinnerId });
+      net.onMatchEnd = (matchId, winnerId, standings, seriesWinnerId, nextRound) => {
+        setMatchEnd({ matchId, winnerId, standings, seriesWinnerId, nextRound });
         const champ = net.room?.players.find((p) => p.id === winnerId)?.nick;
         pushChat({ nick: "", text: champ ? `${champ}님이 승리했습니다` : "무승부로 끝났습니다" });
         if (seriesWinnerId) {
@@ -324,6 +328,7 @@ export function useRoomSession(): RoomSession {
       setConfig: (c) => netRef.current?.setConfig(c),
       startMatch: () => netRef.current?.startMatch(),
       skipResults: () => netRef.current?.skipResults(),
+      abortSeries: () => netRef.current?.abortSeries(),
       addBot: (runnerId) => netRef.current?.addBot(undefined, runnerId),
       kickBot: (id) => netRef.current?.kickBot(id),
       refreshRunners: () => netRef.current?.listRunners(),

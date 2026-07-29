@@ -96,8 +96,10 @@ export type ClientControl =
   | { t: "set-role"; role: PlayerRole }
   | { t: "config"; config: MatchConfig }
   | { t: "start-match" }
-  /** 결과 대기시간을 건너뛰고 대기실로 */
+  /** 결과 대기시간을 건너뛴다 — 시리즈 도중이면 곧바로 다음 판 */
   | { t: "skip-results" }
+  /** 호스트 전용: 진행 중인 FT 시리즈를 접고 대기실로 */
+  | { t: "abort-series" }
   /** 내가 탈락했다는 자기 신고 */
   | { t: "ko" }
   /** 매치 종료 후 리플레이 제출(검증용) */
@@ -127,6 +129,8 @@ export type ServerControl =
       matchId: number;
       winnerId: string | null;
       standings: { playerId: string; placement: number }[];
+      /** 결과 화면이 걷히면 서버가 다음 판을 이어 연다(FT 시리즈 진행 중) */
+      nextRound?: boolean;
       /** 있으면 시리즈(FT)까지 끝났다는 뜻 */
       seriesWinnerId?: string;
     }

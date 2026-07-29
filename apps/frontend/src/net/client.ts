@@ -53,6 +53,7 @@ export class NetClient {
     winnerId: string | null,
     standings: { playerId: string; placement: number }[],
     seriesWinnerId?: string,
+    nextRound?: boolean,
   ) => void;
   onError?: (reason: string) => void;
   onDisconnect?: () => void;
@@ -136,7 +137,7 @@ export class NetClient {
         this.onKO?.(msg.playerId, msg.placement, msg.remaining);
         break;
       case "match-end":
-        this.onMatchEnd?.(msg.matchId, msg.winnerId, msg.standings, msg.seriesWinnerId);
+        this.onMatchEnd?.(msg.matchId, msg.winnerId, msg.standings, msg.seriesWinnerId, msg.nextRound);
         break;
       case "bot-pending":
         this.onBotPending?.(msg.nick);
@@ -184,6 +185,10 @@ export class NetClient {
   /** 결과 화면 대기시간을 건너뛴다 */
   skipResults(): void {
     this.sendControl({ t: "skip-results" });
+  }
+  /** 호스트 전용: 진행 중인 FT 시리즈를 접는다 */
+  abortSeries(): void {
+    this.sendControl({ t: "abort-series" });
   }
   /** 내가 톱아웃했다고 서버에 알린다 */
   reportKO(): void {

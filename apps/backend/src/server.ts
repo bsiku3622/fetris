@@ -72,6 +72,10 @@ interface Room {
   /** 이번 매치 시드 — 리플레이 검증에 쓴다 */
   seed: number;
   resultsTimer: ReturnType<typeof setTimeout> | null;
+  /** 결과 화면이 끝나면 다음 판으로 이어갈지(FT 시리즈 진행 중) */
+  nextRound: boolean;
+  /** 시리즈가 끝났다 — 대기실로 돌아갈 때 승수를 지운다 */
+  resetWins: boolean;
 }
 
 /** `/bot`에 붙어 초대를 기다리는 봇 러너(control-plane 연결) */
@@ -279,11 +283,15 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
   const returnToLobby = (room: Room): void => {
     clearTimers(room);
     room.phase = "lobby";
+    room.nextRound = false;
     room.participants = [];
     for (const p of room.players) {
       p.alive = true;
       p.placement = null;
+      // 시리즈가 끝났으면 다음 시리즈를 0승부터 다시 시작한다
+      if (room.resetWins) p.wins = 0;
     }
+    room.resetWins = false;
     broadcastState(room);
   };
 
@@ -303,9 +311,16 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     // 다음 시리즈를 새로 시작할 수 있도록 모두의 승수를 초기화한다.
     const firstTo = room.config?.firstTo ?? 0;
     const seriesWinner = winner && firstTo > 0 && winner.wins >= firstTo ? winner : null;
-    if (seriesWinner) {
-      for (const p of room.players) p.wins = 0;
-    }
+    // 초기화는 대기실로 돌아갈 때 한다 — 여기서 지워버리면 결과 화면의 승수가
+    // 이미 0이라 "3/3으로 이겼다"가 보이지 않는다.
+    if (seriesWinner) room.resetWins = true;
+
+    // 시리즈가 아직 끝나지 않았으면 다음 판을 서버가 이어서 연다.
+    // FT는 "몇 판을 치른다"는 약속이므로, 매 판 호스트가 다시 시작을 눌러야
+    // 한다면 목표를 걸어둔 의미가 없다.
+    const nextRound =
+      firstTo > 0 && !seriesWinner && rosterOf(room).length >= MIN_PARTICIPANTS;
+    room.nextRound = nextRound;
 
     room.phase = "results";
     broadcast(room, {
@@ -313,11 +328,24 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       matchId: room.matchId,
       winnerId: winner?.id ?? null,
       standings,
+      nextRound,
       ...(seriesWinner ? { seriesWinnerId: seriesWinner.id } : {}),
     });
     broadcastState(room);
-    room.resultsTimer = setTimeout(() => returnToLobby(room), resultsMs);
+    room.resultsTimer = setTimeout(() => afterResults(room), resultsMs);
     room.resultsTimer.unref?.();
+  };
+
+  /**
+   * 결과 화면이 끝났을 때 — 시리즈 도중이면 다음 판으로, 아니면 대기실로.
+   * 그 사이 참가자가 빠져 인원이 모자라면 대기실로 떨어진다.
+   */
+  const afterResults = (room: Room): void => {
+    if (room.nextRound && room.config && rosterOf(room).length >= MIN_PARTICIPANTS) {
+      startMatch(room);
+      return;
+    }
+    returnToLobby(room);
   };
 
   /**
@@ -577,6 +605,8 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           participants: [],
           seed: 0,
           resultsTimer: null,
+          nextRound: false,
+          resetWins: false,
         };
         rooms.set(code, room);
         sockToPlayer.set(ws, { room, player });
@@ -642,6 +672,20 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
         if (!entry) return;
         // 결과 화면을 다 본 사람이 있으면 굳이 타이머를 기다리지 않는다
         if (entry.room.phase !== "results") return;
+        clearTimers(entry.room);
+        afterResults(entry.room);
+        break;
+      }
+      case "abort-series": {
+        // 호스트가 FT 시리즈를 중간에 접는다 — 승수를 지우고 대기실로 돌아간다
+        const entry = sockToPlayer.get(ws);
+        if (!entry) return;
+        if (!entry.player.isHost) {
+          send(ws, { t: "error", reason: "not-host" });
+          return;
+        }
+        entry.room.nextRound = false;
+        entry.room.resetWins = true;
         returnToLobby(entry.room);
         break;
       }

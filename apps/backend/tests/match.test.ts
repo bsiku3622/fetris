@@ -199,7 +199,7 @@ describe("매치 진행", () => {
     guests[0].close();
   });
 
-  it("FT에 도달하면 시리즈가 끝나고 승수가 초기화된다", async () => {
+  it("시리즈 도중에는 다음 판이 자동으로 이어진다", async () => {
     const { host, code } = await createRoom(url);
     // 2선승
     host.send({ t: "config", config: { ...TEST_CONFIG, firstTo: 2 } });
@@ -215,25 +215,69 @@ describe("매치 진행", () => {
     guest.send({ t: "ko" });
     const first = await host.waitFor("match-end");
     expect(first.seriesWinnerId).toBeUndefined();
+    // 목표에 못 미쳤으니 서버가 다음 판을 이어 연다고 알린다
+    expect(first.nextRound).toBe(true);
 
     const champ = first.winnerId as string;
-    const afterFirst = await host.waitState((s) => s.phase === "lobby");
-    expect(playerIn(afterFirst, champ)?.wins).toBe(1);
+
+    // 아무도 다시 시작을 누르지 않아도 2판째가 열린다
+    const second = await host.waitFor("match-start", 3000);
+    await guest.waitFor("match-start");
+    expect(second.matchId).toBe(first.matchId + 1);
+    const playing = await host.waitState((s) => s.phase === "playing");
+    expect(playerIn(playing, champ)?.wins).toBe(1);
 
     // 2승째 — 시리즈 종료
-    host.send({ t: "start-match" });
-    await host.waitFor("match-start");
-    await guest.waitFor("match-start");
     guest.send({ t: "ko" });
-    const second = await host.waitFor("match-end");
-    expect(second.seriesWinnerId).toBe(champ);
+    const end = await host.waitFor("match-end");
+    expect(end.seriesWinnerId).toBe(champ);
+    expect(end.nextRound).toBe(false);
 
-    // 다음 시리즈를 위해 전원 승수가 0으로 돌아간다
+    // 결과 화면에는 아직 최종 전적이 남아 있어야 한다(2/2로 이겼다는 표시)
+    const onResults = await host.waitState((s) => s.phase === "results");
+    expect(playerIn(onResults, champ)?.wins).toBe(2);
+
+    // 시리즈가 끝나면 대기실로 돌아가고, 다음 시리즈를 위해 승수가 0이 된다
     const afterSeries = await host.waitState((s) => s.phase === "lobby");
     expect(afterSeries.players.every((p) => p.wins === 0)).toBe(true);
 
     host.close();
     guest.close();
+  });
+
+  it("호스트는 시리즈를 중간에 접을 수 있다", async () => {
+    const { host, code } = await createRoom(url);
+    host.send({ t: "config", config: { ...TEST_CONFIG, firstTo: 3 } });
+    const guest = await joinRoom(url, code, "G1");
+    await host.waitState((s) => s.players.length === 2);
+    host.drain();
+    guest.drain();
+
+    host.send({ t: "start-match" });
+    await host.waitFor("match-start");
+    await guest.waitFor("match-start");
+    guest.send({ t: "ko" });
+    const first = await host.waitFor("match-end");
+    expect(first.nextRound).toBe(true);
+
+    // 다음 판이 열리기 전에 접는다 — 승수까지 지우고 대기실로
+    host.send({ t: "abort-series" });
+    const s = await host.waitState((st) => st.phase === "lobby");
+    expect(s.players.every((p) => p.wins === 0)).toBe(true);
+    // 접었으니 자동으로 다음 판이 열리지 않는다
+    await expect(host.waitFor("match-start", 400)).rejects.toThrow();
+
+    host.close();
+    guest.close();
+  });
+
+  it("게스트는 시리즈를 접을 수 없다", async () => {
+    const { host, guests } = await readyRoom(1);
+    guests[0].send({ t: "abort-series" });
+    const err = await guests[0].waitFor("error");
+    expect(err.reason).toBe("not-host");
+    host.close();
+    guests[0].close();
   });
 
   it("FT가 0이면 시리즈 종료 없이 계속 쌓인다", async () => {

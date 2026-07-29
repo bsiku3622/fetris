@@ -686,6 +686,7 @@ function ResultsView({ room }: { room: RoomSession }) {
   const players = room.state?.players ?? [];
   const nickOf = (id: string) => players.find((p) => p.id === id)?.nick ?? "―";
   const iWon = end.winnerId === room.myId;
+  const isHost = !!players.find((p) => p.id === room.myId)?.isHost;
   const firstTo = room.state?.config?.firstTo ?? 0;
   // 시리즈(FT)까지 끝난 판이면 한 판 승리보다 크게 알린다
   const series = end.seriesWinnerId;
@@ -728,18 +729,42 @@ function ResultsView({ room }: { room: RoomSession }) {
                 #{s.placement}
               </span>
               <span style={{ flex: 1 }}>{nickOf(s.playerId)}</span>
+              {/* 시리즈 중이면 몇 승째인지가 순위보다 중요하다 */}
+              {firstTo > 0 && (
+                <Badge color="yellow">
+                  {players.find((p) => p.id === s.playerId)?.wins ?? 0}/{firstTo}승
+                </Badge>
+              )}
               {s.playerId === room.myId && <Badge color="sky">나</Badge>}
             </div>
           ))}
         </div>
         <ReplayList files={room.sharedReplays} align="center" />
 
-        <Button variant="primary" size="lg" onClick={() => room.skipResults()}>
-          대기실로 돌아가기
-        </Button>
-        <Text variant="chrome" muted style={{ fontSize: "0.78rem" }}>
-          누르지 않아도 잠시 후 자동으로 돌아갑니다
-        </Text>
+        {end.nextRound ? (
+          <>
+            <Button variant="primary" size="lg" onClick={() => room.skipResults()}>
+              바로 다음 판
+            </Button>
+            {isHost && (
+              <Button variant="neutral" size="md" onClick={() => room.abortSeries()}>
+                시리즈 그만두기
+              </Button>
+            )}
+            <Text variant="chrome" muted style={{ fontSize: "0.78rem" }}>
+              FT{firstTo} 진행 중 — 누르지 않아도 잠시 후 다음 판이 시작됩니다
+            </Text>
+          </>
+        ) : (
+          <>
+            <Button variant="primary" size="lg" onClick={() => room.skipResults()}>
+              대기실로 돌아가기
+            </Button>
+            <Text variant="chrome" muted style={{ fontSize: "0.78rem" }}>
+              누르지 않아도 잠시 후 자동으로 돌아갑니다
+            </Text>
+          </>
+        )}
       </div>
     </div>
   );
