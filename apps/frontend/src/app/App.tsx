@@ -7,9 +7,15 @@ import { MenuScreen } from "../ui/MenuScreen";
 import { GameScreen } from "../ui/GameScreen";
 import { SettingsScreen } from "../ui/SettingsScreen";
 import { VersusScreen } from "../ui/VersusScreen";
+import { ReplayScreen } from "../ui/ReplayScreen";
 import { RoomBanner } from "../ui/RoomBanner";
 
-type Screen = { name: "menu" } | { name: "game"; mode: GameModeName } | { name: "settings" } | { name: "versus" };
+type Screen =
+  | { name: "menu" }
+  | { name: "game"; mode: GameModeName }
+  | { name: "settings" }
+  | { name: "versus" }
+  | { name: "replay" };
 
 export function App() {
   const [settings, setSettings] = useState<Settings>(() => loadSettings());
@@ -42,6 +48,7 @@ export function App() {
           settings={settings}
           onPlay={(mode) => setScreen({ name: "game", mode })}
           onPlayVersus={() => setScreen({ name: "versus" })}
+          onReplays={() => setScreen({ name: "replay" })}
           onSettings={() => setScreen({ name: "settings" })}
         />
       )}
@@ -56,6 +63,9 @@ export function App() {
       )}
       {screen.name === "game" && (
         <GameScreen mode={screen.mode} settings={settings} onExit={() => setScreen({ name: "menu" })} updateSettings={updateSettings} />
+      )}
+      {screen.name === "replay" && (
+        <ReplayScreen settings={settings} onExit={() => setScreen({ name: "menu" })} />
       )}
       {screen.name === "settings" && (
         <SettingsScreen settings={settings} updateSettings={updateSettings} onReset={reset} onBack={() => setScreen({ name: "menu" })} />

@@ -13,7 +13,7 @@ const MODES: { mode: GameModeName; name: string; desc: string }[] = [
   { mode: "marathon", name: "Marathon", desc: "중력이 점점 빨라진다" },
   { mode: "fourwide", name: "4-Wide", desc: "4칸 좁은 보드 Zen" },
   { mode: "combo", name: "Combo", desc: "4칸 보드 · 가비지 보충 콤보 연습" },
-  { mode: "custom", name: "Custom Room", desc: "온라인 커스텀 방 대전 (최대 8인)" },
+  { mode: "custom", name: "Custom Room", desc: "온라인 커스텀 방 라스트맨 스탠딩" },
 ];
 
 const SHAPES = [
@@ -29,11 +29,13 @@ export function MenuScreen({
   settings,
   onPlay,
   onPlayVersus,
+  onReplays,
   onSettings,
 }: {
   settings: Settings;
   onPlay: (m: GameModeName) => void;
   onPlayVersus: () => void;
+  onReplays: () => void;
   onSettings: () => void;
 }) {
   const records = loadRecords();
@@ -88,6 +90,9 @@ export function MenuScreen({
       </div>
 
       <div style={{ zIndex: 2 }}>
+        <Button variant="neutral" size="lg" onClick={onReplays}>
+          ▶ 리플레이
+        </Button>
         <Button variant="neutral" size="lg" onClick={onSettings}>
           ⚙ 설정
         </Button>
