@@ -138,9 +138,22 @@ npm test         # vitest — 방 생성/입장/중계/이탈 검증
 
 ## 우분투 배포
 
-### 1) systemd (권장)
+서버는 이 패키지만이 아니라 **워크스페이스 저장소 전체**를 받아야 합니다 — 릴레이가 리플레이 검증에 `@fetris/engine`을 쓰기 때문입니다.
 
-빌드 후 `dist/`를 서버에 두고:
+### 1) 저장소 배치와 빌드
+
+```bash
+sudo git clone https://github.com/bsiku3622/fetris.git /srv/fetris
+sudo chown -R $USER:$USER /srv/fetris
+cd /srv/fetris
+npm install                      # 워크스페이스 전체(node_modules는 루트에 호이스팅)
+npm run build:engine             # backend가 dist를 참조하므로 반드시 선행
+npm run build -w fetris-be
+```
+
+엔진을 고친 뒤에는 **`build:engine`을 다시 돌려야** 릴레이에 반영됩니다.
+
+### 2) systemd
 
 ```ini
 # /etc/systemd/system/fetris-be.service
@@ -150,8 +163,11 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/fetris-be
+# node_modules는 /srv/fetris에 호이스팅되어 있고 @fetris/engine은 심볼릭 링크다
+WorkingDirectory=/srv/fetris/apps/backend
 Environment=PORT=8787
+# 공개 서버라면 봇 경로를 잠근다
+# Environment=FETRIS_BOT_TOKEN=...
 ExecStart=/usr/bin/node dist/index.js
 Restart=always
 User=www-data
@@ -161,21 +177,42 @@ WantedBy=multi-user.target
 ```
 
 ```bash
+sudo systemctl daemon-reload
 sudo systemctl enable --now fetris-be
 ```
 
-### 2) TLS + wss 프록시 (Caddy 예시)
+### 3) TLS + wss 프록시
 
-브라우저에서 `wss://`로 붙으려면 앞단에서 TLS 종단이 필요합니다.
+브라우저에서 `wss://`로 붙으려면 앞단에서 TLS 종단이 필요합니다. nginx 예시:
 
-```
-# Caddyfile
-fetris-ws.example.com {
-    reverse_proxy 127.0.0.1:8787
+```nginx
+server {
+    listen 443 ssl;
+    server_name fetris-be.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8787;
+        # WebSocket 업그레이드에 필요 — 빠지면 연결이 즉시 끊긴다
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+    }
+
+    ssl_certificate     /etc/letsencrypt/live/fetris-be.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/fetris-be.example.com/privkey.pem;
 }
 ```
 
-Caddy는 Let's Encrypt 인증서를 자동 발급/갱신합니다. 이후 프론트는 `wss://fetris-ws.example.com`으로 연결합니다.
+Caddy를 쓴다면 `fetris-be.example.com { reverse_proxy 127.0.0.1:8787 }` 한 줄로 끝나고 인증서도 자동입니다.
+
+### 4) 갱신
+
+```bash
+cd /srv/fetris && git pull
+npm install && npm run build:engine && npm run build -w fetris-be
+sudo systemctl restart fetris-be
+```
 
 ### 3) Docker (대안)
 

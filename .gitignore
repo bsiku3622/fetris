@@ -5,3 +5,4 @@ node_modules/
 
 # Claude Code 세션 상태
 .claude/
+.vercel
