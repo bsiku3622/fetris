@@ -274,6 +274,134 @@ export interface ReplayFile {
   };
 }
 
+// ============================================================================
+// 매치 리플레이 — 판 하나를 통째로.
+//
+// 검증용 제출(참가자별 입력 로그)은 어디까지나 재료다. 사람이 다시 보고 싶은
+// 것은 "그 판"이지 한 사람의 키 로그가 아니므로, 참가자들의 로그를 한 파일로
+// 묶어 모든 보드를 나란히 재생할 수 있게 한다.
+//
+// 각 참가자의 보드는 자기 시드·키·받은 가비지만으로 독립적으로 재현되므로,
+// 재생기는 N개를 같은 프레임으로 함께 진행하기만 하면 된다.
+// ============================================================================
+
+/** 매치 리플레이 포맷 버전 */
+export const MATCH_REPLAY_FORMAT = 2;
+
+/** 매치 리플레이 안의 참가자 한 명 */
+export interface MatchReplayPlayerEntry {
+  id: string;
+  nick: string;
+  /** 이 판에서의 순위(1 = 우승). 미확정이면 없음 */
+  placement?: number;
+  seed: number;
+  /**
+   * 이 사람이 쓴 핸들링(DAS/ARR 등). 감도는 마우스 감도처럼 개인 설정이라
+   * 참가자마다 다를 수 있고, 다르면 같은 키 로그도 다르게 전개된다.
+   * 없으면 파일 공통값을 쓴다(옛 기록 호환).
+   */
+  handling?: Handling;
+  frames: number;
+  keys: ReplayKeys;
+  garbage?: ReplayGarbage;
+  fingerprint: string;
+  /** 참고용 최종 성적(재생에는 쓰이지 않는다) */
+  stats?: { piecesPlaced: number; lines: number; attack: number };
+}
+
+export interface MatchReplayFile {
+  format: typeof MATCH_REPLAY_FORMAT;
+  game: "fetris";
+  /** ISO 8601 */
+  recordedAt: string;
+  match: {
+    code?: string;
+    matchId: number;
+    /** 우승자 id(무승부면 없음) */
+    winnerId?: string;
+  };
+  /** 방이 정한 공통 조건 */
+  rule: RuleSet;
+  /** 핸들링을 따로 남기지 않은 참가자에게 쓰는 기본값 */
+  handling: Handling;
+  simRate: number;
+  /** 순위 순으로 담는다(1위가 앞) */
+  players: MatchReplayPlayerEntry[];
+}
+
+/** 여러 보드를 같은 프레임으로 함께 돌리는 재생기 */
+export class MatchReplayPlayer {
+  /** 참가자별 재생기 — players와 같은 순서 */
+  readonly boards: ReplayPlayer[];
+  /** 가장 오래 버틴 사람 기준 총 프레임 */
+  readonly frames: number;
+
+  constructor(file: MatchReplayFile) {
+    this.boards = file.players.map(
+      (p) =>
+        new ReplayPlayer({
+          rule: file.rule,
+          handling: p.handling ?? file.handling,
+          seed: p.seed,
+          keys: p.keys,
+          garbage: p.garbage,
+          frames: p.frames,
+          simRate: file.simRate,
+        }),
+    );
+    this.frames = this.boards.reduce((m, b) => Math.max(m, b.frames), 0);
+  }
+
+  get frame(): number {
+    return this.boards.reduce((m, b) => Math.max(m, b.frame), 0);
+  }
+
+  get done(): boolean {
+    return this.boards.every((b) => b.done);
+  }
+
+  /** 한 프레임 진행. 이미 끝난 보드는 그 자리에 멈춰 있다 */
+  step(): boolean {
+    let moved = false;
+    for (const b of this.boards) {
+      if (b.step()) {
+        b.game.events.length = 0;
+        moved = true;
+      }
+    }
+    return moved;
+  }
+
+  seek(target: number): void {
+    for (const b of this.boards) b.seek(target);
+  }
+
+  reset(): void {
+    for (const b of this.boards) b.reset();
+  }
+}
+
+/** 매치 파일의 참가자별 무결성 검사 */
+export function verifyMatchReplayFile(
+  file: MatchReplayFile,
+): { id: string; nick: string; ok: boolean; actual: string }[] {
+  return file.players.map((p) => {
+    const { ok, actual } = verifyReplay(
+      {
+        rule: file.rule,
+        handling: p.handling ?? file.handling,
+        seed: p.seed,
+        keys: p.keys,
+        garbage: p.garbage,
+        frames: p.frames,
+        simRate: file.simRate,
+      },
+      p.fingerprint,
+    );
+    return { id: p.id, nick: p.nick, ok, actual };
+  });
+}
+
 /** 파일을 재생해 지문이 맞는지 확인한다(열어볼 때 무결성 검사) */
 export function verifyReplayFile(file: ReplayFile): { ok: boolean; actual: string } {
   return verifyReplay(

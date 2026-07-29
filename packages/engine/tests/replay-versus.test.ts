@@ -2,7 +2,16 @@ import { describe, it, expect } from "vitest";
 import { Game } from "../src/game.js";
 import type { InputCommands } from "../src/game.js";
 import { STANDARD_RULESET, DEFAULT_HANDLING } from "../src/config.js";
-import { runReplay, fingerprint, ReplayRecorder, ReplayAction } from "../src/replay.js";
+import {
+  runReplay,
+  fingerprint,
+  ReplayRecorder,
+  ReplayAction,
+  MatchReplayPlayer,
+  verifyMatchReplayFile,
+  MATCH_REPLAY_FORMAT,
+} from "../src/replay.js";
+import type { MatchReplayFile } from "../src/replay.js";
 
 // ============================================================================
 // 대전 리플레이 — 키 입력만으로는 판이 결정되지 않는다.
@@ -125,5 +134,111 @@ describe("대전 리플레이", () => {
     // 길이 필드가 남은 배열보다 큰 경우 — 무한 루프나 예외 없이 끝나야 한다
     const broken = [10, 999, 1, 2, 3];
     expect(() => runReplay(opts(recorder, broken))).not.toThrow();
+  });
+});
+
+// ============================================================================
+// 매치 리플레이 — 판 하나에 참가자 전원을 담고 함께 되돌린다.
+// ============================================================================
+
+describe("매치 리플레이", () => {
+  /** 서로 다른 시드로 둔 두 사람의 기록을 한 판으로 묶는다 */
+  function buildMatch() {
+    const a = playVersus();
+    const b = (() => {
+      // 두 번째 참가자는 다른 시드 — sharePieces가 꺼진 방을 흉내낸다
+      const game = new Game(RULE, HANDLING, SEED + 1);
+      const rec = new ReplayRecorder();
+      const cmd = {
+        rotateCW: false, rotateCCW: false, rotate180: false,
+        hardDrop: false, hold: false, softDropHeld: false,
+      };
+      for (let f = 0; f < FRAMES; f++) {
+        cmd.rotateCW = false;
+        cmd.hardDrop = false;
+        if (f % 9 === 4) { rec.push(ReplayAction.RotateCW, true); cmd.rotateCW = true; }
+        if (f % 21 === 5) { rec.push(ReplayAction.HardDrop, true); cmd.hardDrop = true; }
+        rec.commitFrame();
+        game.update(1, cmd, 55.5);
+        game.events.length = 0;
+      }
+      return { game, recorder: rec };
+    })();
+
+    const file: MatchReplayFile = {
+      format: MATCH_REPLAY_FORMAT,
+      game: "fetris",
+      recordedAt: "2026-07-30T00:00:00.000Z",
+      match: { code: "TEST", matchId: 7, winnerId: "p1" },
+      rule: RULE,
+      handling: HANDLING,
+      simRate: 60,
+      players: [
+        {
+          id: "p1", nick: "가", placement: 1, seed: SEED,
+          frames: a.recorder.frame, keys: a.recorder.keys.slice(),
+          garbage: a.recorder.garbage.slice(), fingerprint: fingerprint(a.game),
+        },
+        {
+          id: "p2", nick: "나", placement: 2, seed: SEED + 1,
+          frames: b.recorder.frame, keys: b.recorder.keys.slice(),
+          fingerprint: fingerprint(b.game),
+        },
+      ],
+    };
+    return { file, a, b };
+  }
+
+  it("참가자 전원이 각자 조건으로 함께 재현된다", () => {
+    const { file, a, b } = buildMatch();
+    const player = new MatchReplayPlayer(file);
+    expect(player.boards).toHaveLength(2);
+
+    while (player.step()) { /* 끝까지 */ }
+
+    expect(fingerprint(player.boards[0].game)).toBe(fingerprint(a.game));
+    expect(fingerprint(player.boards[1].game)).toBe(fingerprint(b.game));
+  });
+
+  it("무결성 검사는 어긋난 사람만 짚어낸다", () => {
+    const { file } = buildMatch();
+    expect(verifyMatchReplayFile(file).every((r) => r.ok)).toBe(true);
+
+    const tampered: MatchReplayFile = {
+      ...file,
+      players: [file.players[0], { ...file.players[1], fingerprint: "deadbeef" }],
+    };
+    const result = verifyMatchReplayFile(tampered);
+    expect(result[0].ok).toBe(true);
+    expect(result[1].ok).toBe(false);
+    expect(result[1].nick).toBe("나");
+  });
+
+  it("탐색은 모든 보드를 같은 프레임으로 맞춘다", () => {
+    const { file } = buildMatch();
+    const player = new MatchReplayPlayer(file);
+    player.seek(120);
+    expect(player.frame).toBe(120);
+    for (const b of player.boards) expect(b.frame).toBe(120);
+
+    // 뒤로 감아도 어긋나지 않는다(처음부터 다시 돌린다)
+    player.seek(40);
+    for (const b of player.boards) expect(b.frame).toBe(40);
+  });
+
+  it("참가자마다 다른 핸들링을 쓸 수 있다", () => {
+    const { file } = buildMatch();
+    // 감도는 개인 설정이다 — 같은 키 로그라도 DAS/ARR가 다르면 다르게 전개된다.
+    // 기본값에서는 눌린 시간이 짧아 자동 반복이 안 걸리므로, 확실히 갈리도록
+    // DAS를 최소로 낮춘 참가자를 만든다.
+    const solo: MatchReplayFile = {
+      ...file,
+      players: [{ ...file.players[0], handling: { ...HANDLING, das: 1, arr: 0 } }],
+    };
+    const base = new MatchReplayPlayer({ ...file, players: [file.players[0]] });
+    const shifted = new MatchReplayPlayer(solo);
+    while (base.step()) { /* 끝까지 */ }
+    while (shifted.step()) { /* 끝까지 */ }
+    expect(fingerprint(shifted.boards[0].game)).not.toBe(fingerprint(base.boards[0].game));
   });
 });
