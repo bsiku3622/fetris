@@ -22,13 +22,6 @@ export interface MatchStartInfo {
   players: string[];
 }
 
-export interface CountdownInfo {
-  matchId: number;
-  /** 서버 기준 epoch ms */
-  startsAt: number;
-  seconds: number;
-}
-
 export interface MatchEndInfo {
   matchId: number;
   winnerId: string | null;
@@ -51,7 +44,6 @@ export interface RoomSession {
   chat: ChatLine[];
   /** 서버가 보낸 마지막 매치 시작 정보(대전 화면이 소비) */
   matchStart: MatchStartInfo | null;
-  countdown: CountdownInfo | null;
   matchEnd: MatchEndInfo | null;
   /** 이번 매치에서 내가 탈락했는지 */
   koed: boolean;
@@ -60,10 +52,11 @@ export interface RoomSession {
 
   connect(url: string, mode: "host" | "join", opts: { code?: string; maxPlayers?: number; nick: string }): Promise<void>;
   leave(): void;
-  setReady(ready: boolean): void;
   setRole(role: PlayerRole): void;
   setConfig(config: MatchConfig): void;
   startMatch(): void;
+  /** 결과 대기시간을 건너뛰고 대기실로 */
+  skipResults(): void;
   /** runnerId를 주면 그 러너를 지목해 부른다 */
   addBot(runnerId?: string): void;
   kickBot(playerId: string): void;
@@ -84,11 +77,9 @@ export function humanError(reason: string): string {
     case "not-host": return "호스트만 할 수 있는 동작이에요.";
     case "not-in-lobby": return "매치가 진행 중이라 지금은 할 수 없어요.";
     case "not-enough-players": return "최소 2명이 참가해야 시작할 수 있어요.";
-    case "not-everyone-ready": return "아직 준비하지 않은 참가자가 있어요.";
     case "no-config": return "매치 설정을 먼저 저장해주세요.";
     case "no-bot-available": return "대기 중인 봇 러너가 없어요.";
     case "bot-join-timeout": return "봇이 제때 들어오지 못했어요.";
-    case "spectator-cannot-ready": return "관전자는 준비할 수 없어요.";
     case "not-a-bot": return "봇만 내보낼 수 있어요.";
     default: return "오류가 발생했어요: " + reason;
   }
@@ -102,7 +93,6 @@ export function useRoomSession(): RoomSession {
   const [error, setError] = useState("");
   const [chat, setChat] = useState<ChatLine[]>([]);
   const [matchStart, setMatchStart] = useState<MatchStartInfo | null>(null);
-  const [countdown, setCountdown] = useState<CountdownInfo | null>(null);
   const [matchEnd, setMatchEnd] = useState<MatchEndInfo | null>(null);
   const [koed, setKoed] = useState(false);
   const [runners, setRunners] = useState<BotRunnerInfo[]>([]);
@@ -157,18 +147,11 @@ export function useRoomSession(): RoomSession {
         }
         prevPlayers.current = now;
         setState(s);
-        if (s.phase === "lobby") {
-          setKoed(false);
-          setCountdown(null);
-        }
-      };
-      net.onCountdown = (matchId, startsAt, seconds) => {
-        setCountdown({ matchId, startsAt, seconds });
-        setMatchEnd(null);
+        if (s.phase === "lobby") setKoed(false);
       };
       net.onMatchStart = (matchId, seed, config, players) => {
-        setCountdown(null);
         setKoed(false);
+        setMatchEnd(null);
         setMatchStart({ matchId, seed, config, players });
       };
       net.onKO = (playerId) => {
@@ -275,7 +258,6 @@ export function useRoomSession(): RoomSession {
     setCode("");
     setChat([]);
     setMatchStart(null);
-    setCountdown(null);
     setMatchEnd(null);
     setKoed(false);
     prevPlayers.current = new Map();
@@ -290,16 +272,15 @@ export function useRoomSession(): RoomSession {
       error,
       chat,
       matchStart,
-      countdown,
       matchEnd,
       koed,
       runners,
       connect,
       leave,
-      setReady: (r) => netRef.current?.setReady(r),
       setRole: (r) => netRef.current?.setRole(r),
       setConfig: (c) => netRef.current?.setConfig(c),
       startMatch: () => netRef.current?.startMatch(),
+      skipResults: () => netRef.current?.skipResults(),
       addBot: (runnerId) => netRef.current?.addBot(undefined, runnerId),
       kickBot: (id) => netRef.current?.kickBot(id),
       refreshRunners: () => netRef.current?.listRunners(),
@@ -312,6 +293,6 @@ export function useRoomSession(): RoomSession {
       clearError: () => setError(""),
       pushSystemChat,
     }),
-    [state, myId, code, error, chat, matchStart, countdown, matchEnd, koed, runners, connect, leave, pushChat, pushSystemChat],
+    [state, myId, code, error, chat, matchStart, matchEnd, koed, runners, connect, leave, pushChat, pushSystemChat],
   );
 }

@@ -9,7 +9,8 @@ import type { GameSnapshot } from "@fetris/engine/game";
 // 서버 쪽 정의는 apps/backend/src/protocol.ts — 변경 시 함께 맞춰야 한다.
 // ============================================================================
 
-export type RoomPhase = "lobby" | "countdown" | "playing" | "results";
+/** 시작 카운트다운은 엔진이 자체 Ready로 처리하므로 별도 페이즈가 없다 */
+export type RoomPhase = "lobby" | "playing" | "results";
 export type PlayerRole = "player" | "spectator";
 
 export interface PlayerInfo {
@@ -20,7 +21,6 @@ export interface PlayerInfo {
   /** 봇이라면 이 봇을 올린 사람(토큰 소유자) */
   botOwner?: string;
   role: PlayerRole;
-  ready: boolean;
   /** 이번 매치 생존 여부(playing 중에만 의미 있음) */
   alive: boolean;
   /** 확정된 순위. 1 = 우승. null = 미확정 */
@@ -85,10 +85,11 @@ export type ClientControl =
   | { t: "leave" }
   | { t: "relay"; msg: GameMessage }
   | { t: "relay-to"; targetId: string; msg: GameMessage }
-  | { t: "ready"; ready: boolean }
   | { t: "set-role"; role: PlayerRole }
   | { t: "config"; config: MatchConfig }
   | { t: "start-match" }
+  /** 결과 대기시간을 건너뛰고 대기실로 */
+  | { t: "skip-results" }
   /** 내가 탈락했다는 자기 신고 */
   | { t: "ko" }
   /** 매치 종료 후 리플레이 제출(검증용) */
@@ -104,7 +105,6 @@ export type ServerControl =
   | { t: "created"; code: string; myId: string; state: RoomState }
   | { t: "joined"; code: string; myId: string; state: RoomState }
   | { t: "state"; state: RoomState }
-  | { t: "countdown"; matchId: number; startsAt: number; seconds: number }
   | { t: "match-start"; matchId: number; seed: number; config: MatchConfig; players: string[] }
   | { t: "ko"; playerId: string; placement: number; remaining: number }
   | { t: "match-end"; matchId: number; winnerId: string | null; standings: { playerId: string; placement: number }[] }

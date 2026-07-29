@@ -21,8 +21,8 @@ export function App() {
     saveSettings(settings);
   }, [settings]);
 
-  // 매치가 시작되거나 카운트다운이 걸리면 어디에 있든 대전 화면으로 소환한다
-  const pending = room.matchStart || room.countdown;
+  // 매치가 시작되면 어디에 있든 대전 화면으로 소환한다
+  const pending = room.matchStart;
   useEffect(() => {
     if (pending && screen.name !== "versus") setScreen({ name: "versus" });
   }, [pending, screen.name]);

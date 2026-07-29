@@ -19,8 +19,8 @@ import type {
 // Fetris 릴레이 서버 — 방 관리 + 서버 권위 매치 진행.
 //
 // 서버가 소유하는 것
-//  - 방 상태 머신: lobby → countdown → playing → results → lobby
-//  - 참가자 명단·역할(참가/관전)·준비 상태
+//  - 방 상태 머신: lobby → playing → results → lobby
+//  - 참가자 명단·역할(참가/관전)
 //  - 라스트맨 스탠딩 판정: KO 순서로 순위를 매기고 마지막 1인이 우승
 //  - 방에 머무는 동안의 누적 승수
 //
@@ -53,7 +53,6 @@ interface Player {
   /** 이 봇을 보낸 러너(초대로 앉은 경우) — 이탈 시 점유 해제용 */
   runner?: BotRunner;
   role: PlayerRole;
-  ready: boolean;
   alive: boolean;
   placement: number | null;
   wins: number;
@@ -72,7 +71,6 @@ interface Room {
   participants: string[];
   /** 이번 매치 시드 — 리플레이 검증에 쓴다 */
   seed: number;
-  countdownTimer: ReturnType<typeof setTimeout> | null;
   resultsTimer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -111,8 +109,6 @@ const BOT_PATH = "/bot";
 /** 초대 후 이 시간 안에 봇이 착석하지 않으면 예약을 해제한다 */
 const BOT_JOIN_TIMEOUT_MS = 15_000;
 const MAX_BOT_CAPACITY = 16;
-/** 카운트다운 길이 — 클라는 이 시간 동안 보드를 띄우고 입력만 잠근다 */
-const COUNTDOWN_SECONDS = 3;
 /** 순위표를 보여주고 대기실로 돌아가기까지 */
 const RESULTS_MS = 6000;
 const MIN_PARTICIPANTS = 2;
@@ -139,8 +135,6 @@ export interface RelayServerOptions {
    * 형식: { "tokens": [{ "token": "...", "owner": "이름", "label": "메모" }] }
    */
   botTokensPath?: string;
-  /** 카운트다운 길이(초). 테스트에서 줄여 쓴다. */
-  countdownSeconds?: number;
   /** 순위표 표시 시간(ms). 테스트에서 줄여 쓴다. */
   resultsMs?: number;
 }
@@ -159,7 +153,6 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     path: opts.botTokensPath,
     legacyToken: opts.botToken,
   });
-  const countdownSeconds = opts.countdownSeconds ?? COUNTDOWN_SECONDS;
   const resultsMs = opts.resultsMs ?? RESULTS_MS;
 
   const rooms = new Map<string, Room>();
@@ -225,7 +218,6 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     isBot: p.isBot,
     botOwner: p.runner?.owner ?? (p.isBot ? socketOwner.get(p.ws)?.owner : undefined),
     role: p.role,
-    ready: p.ready,
     alive: p.alive,
     placement: p.placement,
     wins: p.wins,
@@ -270,9 +262,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
   // ---- 매치 상태 머신 -------------------------------------------------------
 
   const clearTimers = (room: Room): void => {
-    if (room.countdownTimer) clearTimeout(room.countdownTimer);
     if (room.resultsTimer) clearTimeout(room.resultsTimer);
-    room.countdownTimer = null;
     room.resultsTimer = null;
   };
 
@@ -293,8 +283,6 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     for (const p of room.players) {
       p.alive = true;
       p.placement = null;
-      // 봇은 언제나 준비됨. 사람은 매 판 다시 눌러야 한다.
-      p.ready = p.isBot;
     }
     broadcastState(room);
   };
@@ -328,7 +316,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
    * 0명이면(동시 탈락) 승자 없이 끝난다.
    */
   const eliminate = (room: Room, player: Player): void => {
-    if (room.phase !== "playing" && room.phase !== "countdown") return;
+    if (room.phase !== "playing") return;
     if (!room.participants.includes(player.id)) return;
     if (!player.alive) return;
 
@@ -353,10 +341,21 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     }
   };
 
+  /**
+   * 매치를 연다. 카운트다운은 서버가 세지 않는다 — 엔진이 판을 열면서 자체
+   * Ready 카운트다운을 돌리므로(보드는 떠 있고 입력만 잠긴다) 여기서 또 세면
+   * 이중이 되고, 그동안 클라이언트는 보여줄 게 없어 화면이 멈춘 것처럼 보인다.
+   */
   const startMatch = (room: Room): void => {
     clearTimers(room);
+    room.matchId++;
+    // 참가자 확정 — 이후 들어오는 사람은 관전자가 된다
+    room.participants = rosterOf(room).map((p) => p.id);
+    for (const p of room.players) {
+      p.alive = room.participants.includes(p.id);
+      p.placement = null;
+    }
     const roster = participantsOf(room);
-    // 카운트다운 도중 이탈로 인원이 무너졌으면 대기실로 되돌린다
     if (roster.length < MIN_PARTICIPANTS) {
       returnToLobby(room);
       return;
@@ -371,28 +370,6 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       players: room.participants.slice(),
     });
     broadcastState(room);
-  };
-
-  const beginCountdown = (room: Room): void => {
-    clearTimers(room);
-    room.matchId++;
-    room.phase = "countdown";
-    // 참가자 확정 — 이후 들어오는 사람은 관전자가 된다
-    room.participants = rosterOf(room).map((p) => p.id);
-    for (const p of room.players) {
-      p.alive = room.participants.includes(p.id);
-      p.placement = null;
-    }
-    const startsAt = Date.now() + countdownSeconds * 1000;
-    broadcast(room, {
-      t: "countdown",
-      matchId: room.matchId,
-      startsAt,
-      seconds: countdownSeconds,
-    });
-    broadcastState(room);
-    room.countdownTimer = setTimeout(() => startMatch(room), countdownSeconds * 1000);
-    room.countdownTimer.unref?.();
   };
 
   // ---- 리플레이 검증 --------------------------------------------------------
@@ -484,7 +461,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     sockToPlayer.delete(ws);
     const { room, player } = entry;
     const wasParticipant =
-      (room.phase === "playing" || room.phase === "countdown") &&
+      room.phase === "playing" &&
       room.participants.includes(player.id) &&
       player.alive;
 
@@ -569,7 +546,6 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           nick: sanitizeNick(raw.nick),
           isBot,
           role: "player",
-          ready: isBot,
           alive: true,
           placement: null,
           wins: 0,
@@ -584,7 +560,6 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           matchId: 0,
           participants: [],
           seed: 0,
-          countdownTimer: null,
           resultsTimer: null,
         };
         rooms.set(code, room);
@@ -636,7 +611,6 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           isBot,
           runner,
           role: midMatch ? "spectator" : "player",
-          ready: isBot && !midMatch,
           alive: false,
           placement: null,
           wins: 0,
@@ -647,19 +621,12 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
         broadcastState(room);
         break;
       }
-      case "ready": {
+      case "skip-results": {
         const entry = sockToPlayer.get(ws);
         if (!entry) return;
-        if (entry.room.phase !== "lobby") {
-          send(ws, { t: "error", reason: "not-in-lobby" });
-          return;
-        }
-        if (entry.player.role !== "player") {
-          send(ws, { t: "error", reason: "spectator-cannot-ready" });
-          return;
-        }
-        entry.player.ready = !!raw.ready;
-        broadcastState(entry.room);
+        // 결과 화면을 다 본 사람이 있으면 굳이 타이머를 기다리지 않는다
+        if (entry.room.phase !== "results") return;
+        returnToLobby(entry.room);
         break;
       }
       case "set-role": {
@@ -676,7 +643,6 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           return;
         }
         entry.player.role = role;
-        if (role === "spectator") entry.player.ready = false;
         broadcastState(entry.room);
         break;
       }
@@ -696,8 +662,6 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           return;
         }
         entry.room.config = raw.config;
-        // 설정이 바뀌면 준비를 물린다 — 모르는 룰로 시작하는 걸 막는다
-        for (const p of entry.room.players) if (!p.isBot) p.ready = false;
         broadcastState(entry.room);
         break;
       }
@@ -722,11 +686,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           send(ws, { t: "error", reason: "not-enough-players" });
           return;
         }
-        if (roster.some((p) => !p.ready)) {
-          send(ws, { t: "error", reason: "not-everyone-ready" });
-          return;
-        }
-        beginCountdown(room);
+        startMatch(room);
         break;
       }
       case "ko": {

@@ -16,12 +16,14 @@ export type GameMessage = { t: string; [k: string]: unknown };
 
 /**
  * 방의 진행 상태.
- *  lobby     — 대기실. 준비 토글·설정 편집·봇 추가.
- *  countdown — 시작 카운트다운. 보드는 떠 있고 입력만 잠긴다.
- *  playing   — 대전 중. 마지막 1인이 남을 때까지.
- *  results   — 순위표. 잠시 후 자동으로 lobby로 돌아간다.
+ *  lobby   — 대기실. 설정 편집·봇 추가.
+ *  playing — 대전 중. 마지막 1인이 남을 때까지.
+ *  results — 순위표. 잠시 후 자동으로 lobby로 돌아간다.
+ *
+ * 시작 카운트다운은 별도 페이즈가 아니다. 엔진이 판을 열 때 자체 Ready
+ * 카운트다운을 돌리므로(보드는 떠 있고 입력만 잠긴다) 서버가 또 셀 필요가 없다.
  */
-export type RoomPhase = "lobby" | "countdown" | "playing" | "results";
+export type RoomPhase = "lobby" | "playing" | "results";
 
 /** 참가자는 이번 매치를 뛰고, 관전자는 다음 매치를 기다린다. */
 export type PlayerRole = "player" | "spectator";
@@ -35,7 +37,6 @@ export interface PlayerInfo {
   /** 봇이라면 이 봇을 올린 사람(토큰 소유자). 사람 참가자는 없음. */
   botOwner?: string;
   role: PlayerRole;
-  ready: boolean;
   /** 이번 매치 생존 여부(playing 중에만 의미 있음) */
   alive: boolean;
   /** 확정된 순위. 1 = 우승. null = 미확정 */
@@ -93,14 +94,14 @@ export type ClientControl =
   | { t: "leave" }
   | { t: "relay"; msg: GameMessage }
   | { t: "relay-to"; targetId: string; msg: GameMessage }
-  /** 준비 토글(lobby 전용) */
-  | { t: "ready"; ready: boolean }
   /** 참가자 ↔ 관전자 전환(lobby 전용) */
   | { t: "set-role"; role: PlayerRole }
   /** 호스트 전용: 매치 설정 갱신 */
   | { t: "config"; config: MatchConfig }
-  /** 호스트 전용: 카운트다운 시작 */
+  /** 호스트 전용: 매치 시작 */
   | { t: "start-match" }
+  /** 결과 화면 대기시간을 건너뛰고 곧바로 대기실로 (results 전용) */
+  | { t: "skip-results" }
   /** 내가 탈락했다는 자기 신고(playing 전용) */
   | { t: "ko" }
   /**
@@ -125,10 +126,8 @@ export type ClientControl =
 export type ServerControl =
   | { t: "created"; code: string; myId: string; state: RoomState }
   | { t: "joined"; code: string; myId: string; state: RoomState }
-  /** 방 상태가 바뀔 때마다(입퇴장·준비·역할·설정·페이즈) 전체 스냅샷 */
+  /** 방 상태가 바뀔 때마다(입퇴장·역할·설정·페이즈) 전체 스냅샷 */
   | { t: "state"; state: RoomState }
-  /** 카운트다운 시작 — startsAt은 서버 기준 epoch ms */
-  | { t: "countdown"; matchId: number; startsAt: number; seconds: number }
   /** 매치 개시 — 참가자는 이 시드로 동시에 시작한다 */
   | { t: "match-start"; matchId: number; seed: number; config: MatchConfig; players: string[] }
   /** 누군가 탈락 — placement는 확정된 순위, remaining은 남은 생존자 수 */

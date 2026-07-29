@@ -30,37 +30,40 @@ npm run build && npm start
 |---|---|
 | `{ t: "create", maxPlayers?, nick? }` | 방 생성 → `{ t: "created", code, myId, state }` |
 | `{ t: "join", code, nick?, ticket? }` | 방 입장 → `{ t: "joined", ... }` / `{ t: "error", reason }` |
-| `{ t: "ready", ready }` | 준비 토글(lobby 전용) |
 | `{ t: "set-role", role }` | 참가자 ↔ 관전자 전환(lobby 전용) |
-| `{ t: "config", config }` | (호스트) 매치 설정 갱신 — 준비가 전부 풀린다 |
-| `{ t: "start-match" }` | (호스트) 카운트다운 시작 |
+| `{ t: "config", config }` | (호스트) 매치 설정 갱신 |
+| `{ t: "start-match" }` | (호스트) 매치 시작 |
+| `{ t: "skip-results" }` | 결과 대기시간 건너뛰고 대기실로 |
 | `{ t: "ko" }` | 내가 탈락했다는 자기 신고 |
-| `{ t: "replay", matchId, frames, keys }` | 매치 종료 후 리플레이 제출(검증용, 아직 미구현) |
+| `{ t: "replay", matchId, frames, keys, fingerprint }` | 매치 종료 후 리플레이 제출(검증용) |
 | `{ t: "relay", msg }` | 발신자 제외 방 전체에 게임 메시지 중계 |
 | `{ t: "relay-to", targetId, msg }` | 특정 플레이어에게만 중계 |
-| `{ t: "add-bot", nick? }` | (호스트) 대기 중인 러너에게 봇 초대 요청 |
+| `{ t: "add-bot", nick?, runnerId? }` | (호스트) 봇 초대 — runnerId로 지목 가능 |
+| `{ t: "list-runners" }` | 부를 수 있는 봇 러너 목록 |
 | `{ t: "kick-bot", playerId }` | (호스트) 방에 있는 봇 퇴장 |
 | `{ t: "bot-hello", name?, capacity? }` | (`/bot` 전용) 봇 러너 등록 |
 | `{ t: "leave" }` | 방 나가기 |
 
-서버 → 클라이언트(`ServerControl`): `created`, `joined`, `state`, `countdown`, `match-start`, `ko`, `match-end`, `error`, `relay`, `bot-ready`, `bot-invite`, `bot-pending`.
+서버 → 클라이언트(`ServerControl`): `created`, `joined`, `state`, `match-start`, `ko`, `match-end`, `error`, `relay`, `bot-ready`, `bot-invite`, `bot-pending`, `runners`.
 
-`relay`의 `msg`(게임 메시지)는 서버가 해석하지 않습니다. 방 정원은 `create`의 `maxPlayers`(2~8, 기본 4)로 정합니다. 방에 변화가 생기면(입퇴장·준비·역할·설정·페이즈) `state`로 **방 전체 스냅샷**이 브로드캐스트됩니다 — 개별 이벤트를 추적하는 대신 상태를 통째로 갈아끼우면 됩니다. 마지막 인원이 나가면 방이 삭제되고, 호스트가 나가면 남은 사람 중 한 명이 승계합니다(봇은 후순위). 30초 주기 ping으로 죽은 연결을 정리합니다.
+`relay`의 `msg`(게임 메시지)는 서버가 해석하지 않습니다. 방 정원은 `create`의 `maxPlayers`로 정하며 **0이 기본(제한 없음)**, 값을 주면 2~8로 잡힙니다. 정원은 참가자만 세고 관전자는 자리를 차지하지 않습니다. 방에 변화가 생기면(입퇴장·역할·설정·페이즈) `state`로 **방 전체 스냅샷**이 브로드캐스트됩니다 — 개별 이벤트를 추적하는 대신 상태를 통째로 갈아끼우면 됩니다. 마지막 인원이 나가면 방이 삭제되고, 호스트가 나가면 남은 사람 중 한 명이 승계합니다(봇은 후순위). 25초 주기 ping을 보내며, 연속 3회 응답이 없어야 연결을 끊습니다(순단으로 튕기지 않도록).
 
 ## 매치 진행
 
 서버는 게임을 시뮬레이션하지 않지만 **매치 진행은 소유합니다.** 방은 다음 상태를 오갑니다.
 
 ```
-lobby ──start-match──▶ countdown ──(3초)──▶ playing ──마지막 1인──▶ results
-  ▲                                                                    │
-  └────────────────────────(6초 후 자동 복귀)───────────────────────────┘
+lobby ──start-match──▶ playing ──마지막 1인──▶ results
+  ▲                                              │
+  └──(6초 후 자동 복귀 · skip-results로 즉시)─────┘
 ```
 
+시작 카운트다운은 서버가 세지 않습니다. 엔진이 판을 열면서 자체 Ready 카운트다운을 돌리므로(보드는 떠 있고 입력만 잠깁니다) 서버가 또 세면 이중이 되고, 그동안 클라이언트는 보여줄 게 없어 화면이 멈춘 것처럼 보입니다.
+
 - **참가자와 관전자** — `role: "player"`인 사람만 매치를 뜁니다. 매치 진행 중 입장하면 자동으로 관전자가 되고 다음 판부터 참가합니다.
-- **시작 조건** — 호스트만 시작할 수 있고, 설정이 등록돼 있어야 하며, 참가자가 2명 이상이고 전원 준비 상태여야 합니다. 봇은 항상 준비된 것으로 칩니다.
+- **시작 조건** — 호스트만 시작할 수 있고, 설정이 등록돼 있어야 하며, 참가자가 2명 이상이어야 합니다. 준비 절차는 없습니다 — 호스트가 누르면 바로 시작합니다.
 - **라스트맨 스탠딩** — `ko` 신고가 올 때마다 탈락 역순으로 순위가 확정됩니다(첫 탈락자가 꼴찌). 생존자가 1명이 되면 그 사람이 우승하고 `wins`가 1 오릅니다. 매치 중 이탈도 탈락으로 처리합니다.
-- **대기실 복귀** — 결과를 보여준 뒤 준비 상태를 풀고 lobby로 돌아갑니다. 누적 승수는 방에 머무는 동안 유지됩니다.
+- **대기실 복귀** — 결과를 보여준 뒤 lobby로 돌아갑니다. 누구든 `skip-results`로 기다림을 건너뛸 수 있고, 누적 승수는 방에 머무는 동안 유지됩니다.
 
 `MatchConfig`에는 `rule`·`handling`·`simRate`가 함께 실립니다. 서버는 내용을 해석하지 않지만, 리플레이 검증에서 **같은 simRate와 핸들링으로 재현해야** 하므로 매치 시작 시점에 확정해 둡니다 — simRate가 다르면 같은 시드·입력이라도 결과가 갈립니다.
 
@@ -99,7 +102,7 @@ KO는 자기 신고입니다. 서버는 보드를 실시간으로 보지 않으�
  │◀──── bot-invite ──────│───── bot-pending ───────▶│
  │   (code, ticket)      │                          │
  │                       │                          │
-봇 ── join(code,ticket) ▶│───── peer-joined ───────▶│
+봇 ── join(code,ticket) ▶│───────── state ─────────▶│
  │◀───── joined ─────────│                          │
 ```
 
@@ -170,7 +173,7 @@ npm run start:admin -w fetris-be
 
 ### 참조 러너
 
-`examples/bot-runner.mjs`가 등록 → 초대 수신 → 착석까지의 최소 흐름을 담고 있습니다.
+`examples/bot-runner.mjs`가 등록 → 초대 수신 → 착석 → 실제 플레이까지의 흐름을 담고 있습니다.
 
 ```bash
 npm run bot:example
@@ -178,7 +181,7 @@ npm run bot:example
 FETRIS_WS_URL=ws://localhost:8787 FETRIS_BOT_CAPACITY=4 node examples/bot-runner.mjs
 ```
 
-이 예제에는 플레이 로직이 없습니다(판이 시작되면 잠시 뒤 항복). 실제 봇은 `@fetris/engine`을 그대로 import해 보드를 시뮬레이션하면서 `attack` / `board` / `dead` 게임 메시지를 내보내면 됩니다 — 엔진이 워크스페이스 공유 패키지라 서버·클라이언트와 같은 코드로 돌릴 수 있습니다.
+예제에는 **실제로 두는 두뇌가 들어 있습니다** — 모든 회전×열을 놓아보고 구멍·굴곡·높이로 점수를 매겨 고릅니다. 채팅 커맨드(`!bot pps 2.5`, `!bot target elims`, `!bot status`)로 속도와 타깃 전략을 조절할 수 있습니다. 엔진이 워크스페이스 공유 패키지라 서버·클라이언트와 같은 코드로 돌아갑니다.
 
 ## 테스트
 

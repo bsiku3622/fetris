@@ -44,9 +44,8 @@ export class NetClient {
   // 제어 이벤트
   onCreated?: (code: string) => void;
   onJoined?: (code: string) => void;
-  /** 방 상태가 갱신될 때마다(입퇴장·준비·역할·설정·페이즈) */
+  /** 방 상태가 갱신될 때마다(입퇴장·역할·설정·페이즈) */
   onRoomState?: (state: RoomState) => void;
-  onCountdown?: (matchId: number, startsAt: number, seconds: number) => void;
   onMatchStart?: (matchId: number, seed: number, config: MatchConfig, players: string[]) => void;
   onKO?: (playerId: string, placement: number, remaining: number) => void;
   onMatchEnd?: (
@@ -129,9 +128,6 @@ export class NetClient {
       case "state":
         this.applyState(msg.state);
         break;
-      case "countdown":
-        this.onCountdown?.(msg.matchId, msg.startsAt, msg.seconds);
-        break;
       case "match-start":
         this.onMatchStart?.(msg.matchId, msg.seed, msg.config, msg.players);
         break;
@@ -175,9 +171,6 @@ export class NetClient {
 
   // ---- 매치 ----------------------------------------------------------------
 
-  setReady(ready: boolean): void {
-    this.sendControl({ t: "ready", ready });
-  }
   setRole(role: PlayerRole): void {
     this.sendControl({ t: "set-role", role });
   }
@@ -186,6 +179,10 @@ export class NetClient {
   }
   startMatch(): void {
     this.sendControl({ t: "start-match" });
+  }
+  /** 결과 화면 대기시간을 건너뛴다 */
+  skipResults(): void {
+    this.sendControl({ t: "skip-results" });
   }
   /** 내가 톱아웃했다고 서버에 알린다 */
   reportKO(): void {

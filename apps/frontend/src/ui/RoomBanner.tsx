@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { FUNKY } from "../render/theme";
 import type { RoomSession } from "../app/roomSession";
 
@@ -10,38 +9,17 @@ import type { RoomSession } from "../app/roomSession";
 
 export function RoomBanner({ room, onReturn }: { room: RoomSession; onReturn: () => void }) {
   const state = room.state;
-  const [remain, setRemain] = useState<number | null>(null);
-
-  // 카운트다운이 걸리면 남은 초를 보여준다
-  useEffect(() => {
-    if (!room.countdown) {
-      setRemain(null);
-      return;
-    }
-    const tick = () => {
-      const left = Math.max(0, Math.ceil((room.countdown!.startsAt - Date.now()) / 1000));
-      setRemain(left);
-    };
-    tick();
-    const id = setInterval(tick, 200);
-    return () => clearInterval(id);
-  }, [room.countdown]);
-
   if (!state) return null;
 
   const alive = state.players.filter((p) => p.alive).length;
   const label =
     state.phase === "playing"
       ? `대전 중 · ${alive}명 생존`
-      : state.phase === "countdown"
-        ? remain !== null
-          ? `${remain}초 후 시작`
-          : "곧 시작"
-        : state.phase === "results"
-          ? "결과 확인 중"
-          : `대기실 · ${state.players.length}명`;
+      : state.phase === "results"
+        ? "결과 확인 중"
+        : `대기실 · ${state.players.length}명`;
 
-  const urgent = state.phase === "countdown" || state.phase === "playing";
+  const urgent = state.phase === "playing";
 
   return (
     <div

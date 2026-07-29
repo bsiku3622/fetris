@@ -12,8 +12,8 @@ import { FUNKY } from "../render/theme";
 // ============================================================================
 // VersusScreen — 커스텀 룸(최대 8인 라스트맨 스탠딩).
 //  연결 없음 → 로비(방 만들기 / 코드 입장)
-//  lobby     → 대기실(로스터·준비·설정·봇·채팅)
-//  countdown / playing → MatchStage(대전 + 관전)
+//  lobby     → 대기실(로스터·설정·봇·채팅)
+//  playing   → MatchStage(대전 + 관전)
 //  results   → 순위표
 //
 // 매치 진행은 서버가 소유한다. 이 화면은 서버가 알려준 phase를 그대로 따를 뿐
@@ -131,7 +131,7 @@ export function VersusScreen({
     attackMul: c.attackMul,
   });
 
-  /** 호스트가 설정을 만지면 서버에 밀어넣는다(참가자 준비가 풀린다) */
+  /** 호스트가 설정을 만지면 서버에 밀어넣어 방 전체에 반영한다 */
   const applyEdit = (patch: Partial<Cfg>) => {
     const next = { ...cfg, ...patch };
     setCfg(next);
@@ -227,13 +227,13 @@ export function VersusScreen({
   };
 
   // ---- 대전 / 관전 ---------------------------------------------------------
-  if (state && (state.phase === "playing" || state.phase === "countdown") && room.matchStart) {
+  if (state && state.phase === "playing" && room.matchStart) {
     return <MatchStage settings={settings} room={room} match={room.matchStart} />;
   }
 
   // ---- 결과 ---------------------------------------------------------------
   if (state && state.phase === "results" && room.matchEnd) {
-    return <ResultsView room={room} onLeave={leaveRoom} />;
+    return <ResultsView room={room} />;
   }
 
   // ---- 로비(연결 전) -------------------------------------------------------
@@ -316,8 +316,7 @@ export function VersusScreen({
   const roster = state.players;
   const participants = roster.filter((p) => p.role === "player");
   const spectators = roster.filter((p) => p.role === "spectator");
-  const readyCount = participants.filter((p) => p.ready).length;
-  const canStart = isHost && participants.length >= 2 && readyCount === participants.length;
+  const canStart = isHost && participants.length >= 2;
   // 정원이 무제한이면 슬롯을 그리는 대신 "봇 부르기" 한 칸만 둔다
   const unlimited = state.maxPlayers === 0;
   const emptySlots = unlimited ? 1 : Math.max(0, state.maxPlayers - participants.length);
@@ -348,7 +347,7 @@ export function VersusScreen({
               <span className="fx-room-code__label">Room Code</span>
               <span className="fx-room-code__value">{room.code}</span>
               <span className="fx-room-code__count">
-                {participants.length}명 참가 · {readyCount}명 준비
+                {participants.length}명 참가
                 {spectators.length > 0 ? ` · 관전 ${spectators.length}명` : ""}
               </span>
             </div>
@@ -389,28 +388,24 @@ export function VersusScreen({
           </div>
 
           <footer className="fx-room-col__foot" style={{ gap: 8 }}>
+            {isHost && (
+              <Button variant="primary" size="lg" onClick={() => room.startMatch()} disabled={!canStart}>
+                {participants.length < 2 ? "참가자 대기 중…" : "매치 시작"}
+              </Button>
+            )}
             {me?.role === "player" ? (
-              <>
-                <Button variant={me.ready ? "success" : "secondary"} size="lg" onClick={() => room.setReady(!me.ready)}>
-                  {me.ready ? "준비 완료 ✓" : "준비하기"}
-                </Button>
-                <Button variant="neutral" size="md" onClick={() => room.setRole("spectator")}>
-                  관전으로 전환
-                </Button>
-              </>
+              <Button variant="neutral" size="md" onClick={() => room.setRole("spectator")}>
+                관전으로 전환
+              </Button>
             ) : (
               <Button variant="neutral" size="md" onClick={() => room.setRole("player")}>
                 참가하기
               </Button>
             )}
-            {isHost && (
-              <Button variant="primary" size="lg" onClick={() => room.startMatch()} disabled={!canStart}>
-                {participants.length < 2
-                  ? "참가자 대기 중…"
-                  : readyCount < participants.length
-                    ? `준비 ${readyCount}/${participants.length}`
-                    : "매치 시작"}
-              </Button>
+            {!isHost && (
+              <Text variant="chrome" muted style={{ textAlign: "center", fontSize: "0.78rem" }}>
+                호스트가 시작하면 바로 들어갑니다
+              </Text>
             )}
             <Button variant="neutral" size="md" onClick={onPlayZen}>
               Zen 하러 가기
@@ -539,7 +534,7 @@ export function VersusScreen({
 
 // ---- 결과 ------------------------------------------------------------------
 
-function ResultsView({ room, onLeave }: { room: RoomSession; onLeave: () => void }) {
+function ResultsView({ room }: { room: RoomSession }) {
   const end = room.matchEnd!;
   const players = room.state?.players ?? [];
   const nickOf = (id: string) => players.find((p) => p.id === id)?.nick ?? "―";
@@ -573,10 +568,12 @@ function ResultsView({ room, onLeave }: { room: RoomSession; onLeave: () => void
             </div>
           ))}
         </div>
-        <Text variant="chrome" muted>잠시 후 대기실로 돌아갑니다…</Text>
-        <Button variant="neutral" size="md" onClick={onLeave}>
-          방 나가기
+        <Button variant="primary" size="lg" onClick={() => room.skipResults()}>
+          대기실로 돌아가기
         </Button>
+        <Text variant="chrome" muted style={{ fontSize: "0.78rem" }}>
+          누르지 않아도 잠시 후 자동으로 돌아갑니다
+        </Text>
       </div>
     </div>
   );
@@ -605,11 +602,7 @@ function PlayerRow({
       {player.isBot && <Badge color="purple">{player.botOwner ? `BOT · ${player.botOwner}` : "BOT"}</Badge>}
       {player.isHost && <Badge color="yellow">호스트</Badge>}
       {me && <Badge color="sky">나</Badge>}
-      {player.role === "spectator" ? (
-        <Badge color="neutral">관전</Badge>
-      ) : player.ready ? (
-        <Badge color="green">준비</Badge>
-      ) : null}
+      {player.role === "spectator" && <Badge color="neutral">관전</Badge>}
       {canKick && (
         <button
           onClick={onKick}

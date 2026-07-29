@@ -40,7 +40,6 @@ export function MatchStage({
 
   const [focusId, setFocusId] = useState<string | null>(opponents[0] ?? null);
   const [strategy, setStrategy] = useState<TargetStrategy>("random");
-  const [countdownLeft, setCountdownLeft] = useState<number | null>(null);
   /** 이미 KO 연출을 태운 상대 — 중복 실행 방지 */
   const koneRef = useRef<Set<string>>(new Set());
 
@@ -134,21 +133,6 @@ export function MatchStage({
     const payload = session.replayPayload();
     room.net.submitReplay(end.matchId, payload.frames, payload.keys, payload.fingerprint);
   }, [room.matchEnd, room.net]);
-
-  // ---- 카운트다운 ----------------------------------------------------------
-  useEffect(() => {
-    if (!room.countdown) {
-      setCountdownLeft(null);
-      return;
-    }
-    const tick = () => {
-      const left = Math.ceil((room.countdown!.startsAt - Date.now()) / 1000);
-      setCountdownLeft(left > 0 ? left : 0);
-    };
-    tick();
-    const id = setInterval(tick, 100);
-    return () => clearInterval(id);
-  }, [room.countdown]);
 
   const colorOf = (idx: number) => OPP_PALETTE[idx % OPP_PALETTE.length];
 
@@ -348,26 +332,6 @@ export function MatchStage({
         </div>
       )}
 
-      {/* 카운트다운 */}
-      {countdownLeft !== null && countdownLeft > 0 && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 20,
-            pointerEvents: "none",
-            fontWeight: 900,
-            fontSize: "8rem",
-            color: FUNKY.yellow,
-            textShadow: "6px 6px 0 rgba(0,0,0,0.35)",
-          }}
-        >
-          {countdownLeft}
-        </div>
-      )}
     </div>
   );
 }

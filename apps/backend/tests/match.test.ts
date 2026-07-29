@@ -3,15 +3,14 @@ import { runReplay, fingerprint } from "@fetris/engine/replay";
 import type { RelayServer } from "../src/server.js";
 import { Client, startTestServer, createRoom, joinRoom, playerIn, TEST_CONFIG } from "./helpers.js";
 
-// 카운트다운·결과 표시를 짧게 줄여 실제 전이를 기다릴 수 있게 한다
-const COUNTDOWN = 0.05;
+// 결과 표시를 짧게 줄여 실제 전이를 기다릴 수 있게 한다
 const RESULTS = 120;
 
 let server: RelayServer;
 let url: string;
 
 beforeAll(async () => {
-  const started = await startTestServer({ countdownSeconds: COUNTDOWN, resultsMs: RESULTS });
+  const started = await startTestServer({ resultsMs: RESULTS });
   server = started.server;
   url = started.url;
 });
@@ -20,7 +19,7 @@ afterAll(async () => {
   await server.close();
 });
 
-/** 호스트 + 게스트들로 방을 꾸리고 전원 준비까지 마친다 */
+/** 호스트 + 게스트들로 방을 꾸려 바로 시작할 수 있는 상태로 만든다 */
 async function readyRoom(guestCount: number, maxPlayers = 8) {
   const { host, code } = await createRoom(url, maxPlayers);
   host.send({ t: "config", config: TEST_CONFIG });
@@ -28,20 +27,13 @@ async function readyRoom(guestCount: number, maxPlayers = 8) {
   for (let i = 0; i < guestCount; i++) {
     guests.push(await joinRoom(url, code, `G${i + 1}`));
   }
-  host.send({ t: "ready", ready: true });
-  for (const g of guests) g.send({ t: "ready", ready: true });
-  // 모든 준비가 반영된 state를 기다린다
-  for (;;) {
-    const m = await host.waitFor("state");
-    const roster = m.state.players.filter((p) => p.role === "player");
-    if (roster.length === guestCount + 1 && roster.every((p) => p.ready)) break;
-  }
+  await host.waitState((s) => s.players.filter((p) => p.role === "player").length === guestCount + 1);
   host.drain();
   for (const g of guests) g.drain();
   return { host, guests, code };
 }
 
-/** 카운트다운을 거쳐 매치를 시작하고 각자의 match-start를 받아낸다 */
+/** 매치를 시작하고 각자의 match-start를 받아낸다 */
 async function startMatch(host: Client, guests: Client[]) {
   host.send({ t: "start-match" });
   const started = await host.waitFor("match-start");
@@ -53,9 +45,7 @@ describe("매치 진행", () => {
   it("설정 없이는 시작할 수 없다", async () => {
     const { host, code } = await createRoom(url);
     const guest = await joinRoom(url, code, "G");
-    host.send({ t: "ready", ready: true });
-    guest.send({ t: "ready", ready: true });
-    await host.waitFor("state");
+    await host.waitState((s) => s.players.length === 2);
 
     host.send({ t: "start-match" });
     const err = await host.waitFor("error");
@@ -67,26 +57,11 @@ describe("매치 진행", () => {
   it("혼자서는 시작할 수 없다", async () => {
     const { host } = await createRoom(url);
     host.send({ t: "config", config: TEST_CONFIG });
-    host.send({ t: "ready", ready: true });
     await host.waitFor("state");
     host.send({ t: "start-match" });
     const err = await host.waitFor("error");
     expect(err.reason).toBe("not-enough-players");
     host.close();
-  });
-
-  it("전원 준비가 안 되면 시작할 수 없다", async () => {
-    const { host, code } = await createRoom(url);
-    host.send({ t: "config", config: TEST_CONFIG });
-    const guest = await joinRoom(url, code, "G");
-    host.send({ t: "ready", ready: true });
-    await host.waitFor("state");
-
-    host.send({ t: "start-match" });
-    const err = await host.waitFor("error");
-    expect(err.reason).toBe("not-everyone-ready");
-    host.close();
-    guest.close();
   });
 
   it("호스트가 아니면 시작할 수 없다", async () => {
@@ -98,14 +73,11 @@ describe("매치 진행", () => {
     guests[0].close();
   });
 
-  it("전원 준비 후 카운트다운을 거쳐 매치가 시작된다", async () => {
+  it("호스트가 시작하면 곧바로 매치가 열린다", async () => {
     const { host, guests } = await readyRoom(1);
     host.send({ t: "start-match" });
 
-    const cd = await host.waitFor("countdown");
-    expect(cd.seconds).toBe(COUNTDOWN);
-    expect(cd.startsAt).toBeGreaterThan(Date.now() - 1000);
-
+    // 서버는 카운트다운을 세지 않는다 — 엔진이 판을 열며 Ready를 돌린다
     const start = await host.waitFor("match-start");
     expect(start.players).toHaveLength(2);
     expect(start.config).toEqual(TEST_CONFIG);
@@ -161,8 +133,6 @@ describe("매치 진행", () => {
       if (s.state.phase === "lobby") {
         const champ = playerIn(s.state, end.winnerId as string);
         expect(champ?.wins).toBe(1);
-        // 다음 판을 위해 준비가 풀린다(봇은 유지)
-        expect(s.state.players.filter((p) => !p.isBot).every((p) => !p.ready)).toBe(true);
         break;
       }
     }
@@ -171,7 +141,7 @@ describe("매치 진행", () => {
     guests[0].close();
   });
 
-  it("매치 중 입장하면 관전자가 되고, 준비할 수 없다", async () => {
+  it("매치 중 입장하면 관전자가 된다", async () => {
     const { host, guests, code } = await readyRoom(1);
     await startMatch(host, guests);
 
@@ -179,10 +149,6 @@ describe("매치 진행", () => {
     const joined = await host.waitState((s) => s.players.some((p) => p.nick === "지각생"));
     const lateInfo = joined.players.find((p) => p.nick === "지각생");
     expect(lateInfo?.role).toBe("spectator");
-
-    late.send({ t: "ready", ready: true });
-    const err = await late.waitFor("error");
-    expect(err.reason).toBe("not-in-lobby");
 
     host.close();
     guests[0].close();
@@ -206,12 +172,37 @@ describe("매치 진행", () => {
     guests[1].close();
   });
 
-  it("설정을 바꾸면 준비가 풀린다", async () => {
+  it("호스트가 설정을 바꾸면 방 전체에 반영된다", async () => {
     const { host, guests } = await readyRoom(1);
     host.send({ t: "config", config: { ...TEST_CONFIG, attackMul: 2 } });
-    const s = await host.waitFor("state");
-    expect(s.state.players.filter((p) => !p.isBot).every((p) => !p.ready)).toBe(true);
-    expect((s.state.config as typeof TEST_CONFIG).attackMul).toBe(2);
+    const s = await guests[0].waitState((st) => (st.config as typeof TEST_CONFIG | null)?.attackMul === 2);
+    expect((s.config as typeof TEST_CONFIG).attackMul).toBe(2);
+    host.close();
+    guests[0].close();
+  });
+
+  it("결과 대기시간을 건너뛰고 곧바로 대기실로 갈 수 있다", async () => {
+    const { host, guests } = await readyRoom(1);
+    await startMatch(host, guests);
+
+    guests[0].send({ t: "ko" });
+    await host.waitFor("match-end");
+
+    // 타이머(120ms)를 기다리지 않고 즉시 넘긴다
+    const before = Date.now();
+    host.send({ t: "skip-results" });
+    const s = await host.waitState((st) => st.phase === "lobby");
+    expect(s.phase).toBe("lobby");
+    expect(Date.now() - before).toBeLessThan(RESULTS);
+
+    host.close();
+    guests[0].close();
+  });
+
+  it("결과 화면이 아니면 스킵은 무시된다", async () => {
+    const { host, guests } = await readyRoom(1);
+    host.send({ t: "skip-results" }); // lobby에서 보냄
+    await expect(host.waitFor("error", 200)).rejects.toThrow();
     host.close();
     guests[0].close();
   });

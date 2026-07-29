@@ -81,7 +81,6 @@ describe("봇 엔드포인트", () => {
       const botInfo = s.state.players.find((p) => p.isBot);
       if (botInfo) {
         expect(botInfo.nick).toBe("Bot 1");
-        expect(botInfo.ready).toBe(true);
         expect(botInfo.role).toBe("player");
         break;
       }
