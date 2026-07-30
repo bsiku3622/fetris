@@ -199,6 +199,8 @@ export function MatchStage({
   const colorOf = (idx: number) => OPP_PALETTE[idx % OPP_PALETTE.length];
 
   const thumbs = sideBySide ? [] : opponents.filter((id) => id !== mainOpponent);
+  // 썸네일이 몇 줄로 설지 — 많아질수록 열을 늘려 세로로 흘러넘치지 않게 한다
+  const thumbCols = thumbs.length <= 2 ? 1 : thumbs.length <= 6 ? 2 : 3;
 
   const koBadge = (id: string) => {
     const p = byId(id);
@@ -264,23 +266,39 @@ export function MatchStage({
           ))}
         </div>
       ) : (
-        <>
+        /*
+          주역 하나 + 썸네일. 예전엔 썸네일을 화면 위에 절대 배치로 얹었는데,
+          인원이 늘면 고정 크기 썸네일이 줄바꿈하며 화면 밖으로 넘치고 주역 보드의
+          NEXT까지 덮어버렸다. 그래서 겹치지 않는 2단 배치로 바꾸고, 썸네일은
+          개수에 맞춰 칸을 나눠 갖도록 했다 — 몇 명이 들어와도 화면 안에 들어온다.
+        */
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            gap: 10,
+            padding: 12,
+            paddingBottom: 48,
+            boxSizing: "border-box",
+            minWidth: 0,
+          }}
+        >
           {/* 주역 — 살아 있으면 내 보드, 죽었으면 포커스한 상대 */}
           <div
             style={{
-              position: "absolute",
-              inset: 0,
+              flex: 1,
+              minWidth: 0,
               display: "flex",
               justifyContent: "center",
-              alignItems: "center",
-              padding: 12,
-              boxSizing: "border-box",
+              position: "relative",
             }}
           >
             <div
               style={{
-                width: "44%",
-                height: "94%",
+                width: "100%",
+                maxWidth: 520,
+                height: "100%",
                 display: "flex",
                 opacity: spectating ? 0 : 1,
                 pointerEvents: spectating ? "none" : "auto",
@@ -296,7 +314,7 @@ export function MatchStage({
               />
             </div>
             {spectating && mainOpponent && (
-              <div style={{ width: "44%", height: "94%", display: "flex", position: "relative" }}>
+              <div style={{ width: "100%", maxWidth: 520, height: "100%", display: "flex", position: "relative" }}>
                 <OppPane
                   id={mainOpponent}
                   label={byId(mainOpponent)?.nick ?? "상대"}
@@ -310,39 +328,38 @@ export function MatchStage({
             )}
           </div>
 
-          {/* 썸네일 — 나머지 상대들 */}
-          <div
-            style={{
-              position: "absolute",
-              top: 10,
-              right: 10,
-              width: "46%",
-              display: "flex",
-              flexWrap: "wrap",
-              justifyContent: "flex-end",
-              alignContent: "flex-start",
-              gap: 8,
-              zIndex: 5,
-            }}
-          >
-            {thumbs.map((id, idx) => (
-              // display:flex가 없으면 .fx-versus-pane의 flex:1이 먹지 않아
-              // 캔버스 높이가 0으로 찌그러진다
-              <div key={id} style={{ width: 150, height: 220, flex: "0 0 auto", position: "relative", display: "flex" }}>
-                <OppPane
-                  id={id}
-                  label={byId(id)?.nick ?? `P${idx + 2}`}
-                  color={colorOf(opponents.indexOf(id))}
-                  refs={oppCanvasRefs}
-                  onCanvas={(el) => sessionRef.current?.rebindRemote(id, el)}
-                  onClick={() => setFocusId(id)}
-                  focused={focusId === id}
-                />
-                {koBadge(id)}
-              </div>
-            ))}
-          </div>
-        </>
+          {/* 썸네일 — 나머지 상대들. 칸을 나눠 가지므로 인원이 늘어도 넘치지 않는다 */}
+          {thumbs.length > 0 && (
+            <div
+              style={{
+                flex: `0 0 ${thumbCols * 22}%`,
+                maxWidth: thumbCols * 190,
+                display: "grid",
+                gridTemplateColumns: `repeat(${thumbCols}, minmax(0, 1fr))`,
+                gridAutoRows: "minmax(0, 1fr)",
+                gap: 8,
+                minWidth: 0,
+              }}
+            >
+              {thumbs.map((id, idx) => (
+                // display:flex가 없으면 .fx-versus-pane의 flex:1이 먹지 않아
+                // 캔버스 높이가 0으로 찌그러진다
+                <div key={id} style={{ position: "relative", display: "flex", minWidth: 0, minHeight: 0 }}>
+                  <OppPane
+                    id={id}
+                    label={byId(id)?.nick ?? `P${idx + 2}`}
+                    color={colorOf(opponents.indexOf(id))}
+                    refs={oppCanvasRefs}
+                    onCanvas={(el) => sessionRef.current?.rebindRemote(id, el)}
+                    onClick={() => setFocusId(id)}
+                    focused={focusId === id}
+                  />
+                  {koBadge(id)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {/* 타깃 전략 — 직접 뛰는 동안에만 의미가 있다 */}
