@@ -1,5 +1,6 @@
 import { Game } from "@fetris/engine/game";
-import { Piece } from "@fetris/engine/types";
+import { Piece, MAX_PLAN_GHOSTS } from "@fetris/engine/types";
+import type { PlanGhost } from "@fetris/engine/types";
 import { shapeOf, BOX_SIZE } from "@fetris/engine/pieces";
 import { PIECE_COLORS, FUNKY, darken, lighten } from "./theme";
 import type { ParticleSystem, ActionTextManager, DamageNumberManager } from "./effects";
@@ -104,7 +105,7 @@ export class Renderer {
     }
   }
 
-  render(game: Game, _alpha: number, gfx: GfxOptions, particles?: ParticleSystem, action?: ActionTextManager, damage?: DamageNumberManager, hud?: HudInfo, pendingGarbage = 0, readyGarbage = 0): void {
+  render(game: Game, _alpha: number, gfx: GfxOptions, particles?: ParticleSystem, action?: ActionTextManager, damage?: DamageNumberManager, hud?: HudInfo, pendingGarbage = 0, readyGarbage = 0, plan?: readonly PlanGhost[]): void {
     const ctx = this.ctx;
     const { cols, rows } = game.board;
     const W = this.cssW;
@@ -165,6 +166,9 @@ export class Renderer {
 
     // 스택
     this.drawStack(game, bx, by, cell, renderTop);
+
+    // 계획 고스트 — 실제 판과 무관한 표시용. 스택 위, 액티브 피스 아래에 깔린다.
+    if (plan && plan.length > 0) this.drawPlan(plan, bx, by, cell, renderTop, cols);
 
     // 고스트 + 액티브 피스 (셀 단위 스냅 — 칸 단위로 또렷하게 낙하)
     if (game.cur !== Piece.None) {
@@ -624,6 +628,40 @@ export class Renderer {
       const sx = bx + (game.px + shape[i]) * cell;
       const sy = by + (boardRow - renderTop) * cell;
       if (sp) this.blitBlock(sp, sx, sy);
+    }
+    ctx.restore();
+  }
+
+  /**
+   * 계획 고스트 — 봇이 "여기에 놓을 생각"이라고 알려준 자리.
+   *
+   * 실제 낙하 고스트와 헷갈리면 안 되므로 점선 외곽선으로 그린다. 게임 상태가
+   * 아니라 남이 보내준 표시일 뿐이라, 보드 밖으로 나가는 좌표는 조용히 버린다.
+   */
+  private drawPlan(plan: readonly PlanGhost[], bx: number, by: number, cell: number, renderTop: number, cols: number): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.setLineDash([Math.max(2, cell * 0.22), Math.max(2, cell * 0.16)]);
+    ctx.lineWidth = Math.max(1.5, cell * 0.1);
+    for (let n = 0; n < plan.length && n < MAX_PLAN_GHOSTS; n++) {
+      const g = plan[n];
+      if (g.piece === Piece.None) continue;
+      const shape = shapeOf(g.piece, g.rot);
+      const color = PIECE_COLORS[g.piece];
+      const alpha = Math.max(0, Math.min(1, g.alpha ?? 0.5));
+      for (let i = 0; i < 8; i += 2) {
+        const x = g.x + shape[i];
+        const y = g.y + shape[i + 1];
+        if (y < renderTop || x < 0 || x >= cols) continue;
+        const sx = bx + x * cell;
+        const sy = by + (y - renderTop) * cell;
+        ctx.globalAlpha = alpha * 0.22;
+        ctx.fillStyle = color;
+        ctx.fillRect(sx + 2, sy + 2, cell - 4, cell - 4);
+        ctx.globalAlpha = alpha * 0.85;
+        ctx.strokeStyle = lighten(color, 0.25);
+        ctx.strokeRect(sx + 2, sy + 2, cell - 4, cell - 4);
+      }
     }
     ctx.restore();
   }

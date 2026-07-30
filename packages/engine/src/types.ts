@@ -141,3 +141,23 @@ export interface Stats {
   holds: number;
   finesseFaults: number;
 }
+
+/**
+ * 표시 전용 계획 고스트 — 봇이 "이렇게 놓을 생각이다"를 보여주기 위한 것.
+ *
+ * 게임 상태가 아니다. 시뮬레이션·판정·리플레이 검증 어디에도 끼어들지 않고,
+ * 오로지 화면에만 그려진다. 그래서 결정론을 건드리지 않는다.
+ */
+export interface PlanGhost {
+  piece: Piece;
+  rot: Rot;
+  /** 보드 열 */
+  x: number;
+  /** 보드 행(버퍼 포함 — Game.py와 같은 좌표계) */
+  y: number;
+  /** 0~1. 없으면 기본 불투명도. 뒤쪽 계획을 흐리게 할 때 쓴다. */
+  alpha?: number;
+}
+
+/** 한 번에 그릴 수 있는 계획 고스트 수 — 보드를 통째로 덧칠하는 걸 막는다 */
+export const MAX_PLAN_GHOSTS = 32;

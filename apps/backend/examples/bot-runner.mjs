@@ -40,6 +40,7 @@ const RECONNECT_MS = 3000;
 const defaults = {
   pps: Number(process.env.FETRIS_BOT_PPS ?? 2), // 초당 놓는 조각 수
   target: "random", // random | even | elims | payback
+  planDepth: Number(process.env.FETRIS_BOT_PLAN ?? 3), // 화면에 띄울 계획 길이(0 = 끄기)
 };
 
 const botUrl = () => `${SERVER}/bot${TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ""}`;
@@ -93,10 +94,37 @@ function bestPlacement(game) {
       trial.board.place(shape, px, y, game.cur);
       trial.board.clearLines();
       const s = boardScore(trial.board);
-      if (!best || s < best.score) best = { rot, px, score: s };
+      if (!best || s < best.score) best = { rot, px, y, score: s };
     }
   }
   return best;
+}
+
+/**
+ * 앞으로 놓을 자리들을 미리 잡아 본다 — 화면에 띄울 "계획"이다.
+ *
+ * 실제로 두는 것과는 무관하다. 매 조각마다 다시 계산하므로 여기서 나온 자리가
+ * 그대로 실행된다는 보장은 없고, 어디까지나 지금 생각을 보여주는 용도다.
+ */
+function planAhead(game, depth) {
+  const plan = [];
+  const trial = new Game(game.rule, game.handling.h, game.seed);
+  trial.deserialize(game.serialize());
+  const upcoming = [trial.cur, ...trial.nextPieces(depth)];
+
+  for (let i = 0; i < upcoming.length && plan.length < depth; i++) {
+    const piece = upcoming[i];
+    if (piece === Piece.None) break;
+    trial.cur = piece;
+    const spot = bestPlacement(trial);
+    if (!spot) break;
+    const shape = shapeOf(piece, spot.rot);
+    // 뒤쪽 계획일수록 흐리게 — 확정도가 낮다는 걸 눈으로 알 수 있게
+    plan.push({ piece, rot: spot.rot, x: spot.px, y: spot.y, alpha: 0.55 - i * 0.1 });
+    trial.board.place(shape, spot.px, spot.y, piece);
+    trial.board.clearLines();
+  }
+  return plan;
 }
 
 const EMPTY_CMD = {
@@ -172,6 +200,8 @@ function joinAsBot({ code, ticket, nick }) {
   let matchSeed = 0;
   /** 판이 끝나기 전에 떠 놓은 리플레이(톱아웃하면 게임 객체가 먼저 사라진다) */
   let pendingReplay = null;
+  /** 마지막으로 방에 띄운 계획(같은 내용을 반복해 보내지 않기 위해) */
+  let shownPlan = "";
 
   const send = (m) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
@@ -282,11 +312,22 @@ function joinAsBot({ code, ticket, nick }) {
         say(`타깃 전략을 ${v}로 바꿨어요`);
         break;
       }
+      case "plan": {
+        const v = Number(args[0]);
+        if (!Number.isFinite(v) || v < 0 || v > 6) {
+          say(`plan은 0~6으로 주세요 (지금 ${settings.planDepth}, 0이면 끔)`);
+          return;
+        }
+        settings.planDepth = Math.floor(v);
+        if (settings.planDepth === 0) publishPlan([]);
+        say(settings.planDepth === 0 ? "계획 표시를 껐어요" : `계획을 ${settings.planDepth}수까지 보여줄게요`);
+        break;
+      }
       case "status":
-        say(`pps=${settings.pps} · target=${settings.target}`);
+        say(`pps=${settings.pps} · target=${settings.target} · plan=${settings.planDepth}`);
         break;
       case "help":
-        say("!bot pps <숫자> · !bot target <random|even|elims|payback> · !bot status");
+        say("!bot pps <숫자> · !bot target <random|even|elims|payback> · !bot plan <0~6> · !bot status");
         break;
       default:
         say(`모르는 명령이에요. !bot help 를 보세요`);
@@ -322,6 +363,8 @@ function joinAsBot({ code, ticket, nick }) {
   }
 
   function stopMatch() {
+    // 판이 끝나면 내 계획도 걷는다
+    if (shownPlan && shownPlan !== "[]") publishPlan([]);
     if (loop) clearInterval(loop);
     if (snapTimer) clearInterval(snapTimer);
     loop = null;
@@ -330,6 +373,7 @@ function joinAsBot({ code, ticket, nick }) {
     if (game && recorder && !pendingReplay) pendingReplay = captureReplay(game, recorder);
     game = null;
     recorder = null;
+    shownPlan = "";
     mirrors.clear();
   }
 
@@ -408,6 +452,18 @@ function joinAsBot({ code, ticket, nick }) {
     }
   }
 
+  /**
+   * 계획 고스트를 방에 띄운다. 게임 메시지로 나가지만 서버는 해석하지 않고,
+   * 받는 쪽은 화면에만 그린다 — 판정·리플레이 검증에는 전혀 끼지 않는다.
+   * 빈 배열을 보내면 지워진다.
+   */
+  function publishPlan(ghosts) {
+    const key = JSON.stringify(ghosts);
+    if (key === shownPlan) return; // 같은 그림을 반복해 보낼 이유가 없다
+    shownPlan = key;
+    sendGame({ t: "plan", ghosts });
+  }
+
   /** 한 프레임의 조작을 만든다 */
   function think() {
     // 카운트다운 중이거나 조각이 아직 없으면 아무것도 하지 않는다
@@ -415,7 +471,11 @@ function joinAsBot({ code, ticket, nick }) {
       plan = null;
       return EMPTY_CMD;
     }
-    if (!plan) plan = bestPlacement(game);
+    if (!plan) {
+      plan = bestPlacement(game);
+      // 새 조각을 잡을 때마다 앞으로의 계획을 방에 띄운다(표시 전용)
+      publishPlan(settings.planDepth > 0 ? planAhead(game, settings.planDepth) : []);
+    }
     if (!plan) return EMPTY_CMD;
 
     if (game.rot !== plan.rot) {

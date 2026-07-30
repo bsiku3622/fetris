@@ -420,7 +420,7 @@ export class VersusSession {
       if (!remoteGame) continue;
       // 크게 뜬 보드에만 성적을 붙인다(썸네일에는 자리가 없다)
       const hud = this.focusIds.has(playerId) ? remoteHud(remoteGame) : undefined;
-      renderer.render(remoteGame, 0, this.remoteGfx, undefined, undefined, undefined, hud, remoteGame.pendingGarbage, remoteGame.readyGarbage);
+      renderer.render(remoteGame, 0, this.remoteGfx, undefined, undefined, undefined, hud, remoteGame.pendingGarbage, remoteGame.readyGarbage, this.match.plans.get(playerId));
     }
 
     // 위험 경고음 — 스택이 천장 근처면 주기적으로 삐

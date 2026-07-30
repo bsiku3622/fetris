@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { Game } from "../src/game.js";
 import type { InputCommands } from "../src/game.js";
 import { STANDARD_RULESET, DEFAULT_HANDLING } from "../src/config.js";
+import { Piece, Rot } from "../src/types.js";
+import type { PlanGhost } from "../src/types.js";
 import {
   runReplay,
   fingerprint,
@@ -364,5 +366,64 @@ describe("서버 녹화", () => {
 
     expect(at60).toBeLessThanOrEqual(at200);
     expect(player.boards[0].game.stats.piecesPlaced).toBe(at200);
+  });
+});
+
+// ============================================================================
+// 계획 고스트는 리플레이에도 남아야 한다 — 관전자든 나중에 보는 사람이든
+// 그때 봇이 뭘 하려 했는지 같이 보인다.
+// ============================================================================
+
+describe("리플레이 속 계획 고스트", () => {
+  const plan = (x: number): PlanGhost[] => [{ piece: Piece.T, rot: Rot.Spawn, x, y: 20 }];
+
+  function fileWithPlans(): MatchReplayFile {
+    return {
+      format: MATCH_REPLAY_FORMAT,
+      game: "fetris",
+      recordedAt: "2026-07-30T00:00:00.000Z",
+      match: { code: "PLAN", matchId: 1 },
+      rule: RULE,
+      handling: HANDLING,
+      simRate: 60,
+      players: [{ id: "bot", nick: "Bot" }],
+      timeline: [
+        { ms: 0, id: "bot", snap: new Game(RULE, HANDLING, 1).serialize() },
+        { ms: 500, id: "bot", plan: plan(2) },
+        { ms: 1500, id: "bot", plan: plan(7) },
+        { ms: 2500, id: "bot", plan: [] },
+      ],
+    };
+  }
+
+  it("시간에 맞춰 떴다가 지워진다", () => {
+    const p = new MatchReplayPlayer(fileWithPlans());
+
+    p.seek(0);
+    expect(p.planOf(0)).toBeUndefined();
+
+    p.seek(60); // 1초 — 첫 계획이 떠 있어야 한다
+    expect(p.planOf(0)?.[0].x).toBe(2);
+
+    p.seek(120); // 2초 — 두 번째로 바뀐다
+    expect(p.planOf(0)?.[0].x).toBe(7);
+
+    p.seek(180); // 3초 — 봇이 지웠다
+    expect(p.planOf(0)).toBeUndefined();
+  });
+
+  it("되감아도 그 시점 계획으로 되돌아간다", () => {
+    const p = new MatchReplayPlayer(fileWithPlans());
+    p.seek(180);
+    expect(p.planOf(0)).toBeUndefined();
+    p.seek(60);
+    expect(p.planOf(0)?.[0].x).toBe(2);
+  });
+
+  it("계획만 있는 프레임은 보드 재생을 건드리지 않는다", () => {
+    // 계획은 표시일 뿐이라, 보드 상태는 스냅샷 프레임에서만 온다
+    const p = new MatchReplayPlayer(fileWithPlans());
+    p.seek(120);
+    expect(p.boards[0].game.board.grid.some((v) => v !== 0)).toBe(false);
   });
 });

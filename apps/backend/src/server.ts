@@ -92,13 +92,16 @@ interface Recording {
   frames: RecordedFrame[];
 }
 
-/** 시간축 위의 보드 한 장 — 페이로드는 해석하지 않고 그대로 담는다 */
+/** 시간축 위의 한 장면 — 페이로드는 해석하지 않고 그대로 담는다 */
 interface RecordedFrame {
   /** 판 시작 후 경과 ms */
   ms: number;
-  /** 누구 보드인지 */
+  /** 누구 것인지 */
   id: string;
-  snap: unknown;
+  /** 보드 스냅샷 */
+  snap?: unknown;
+  /** 표시 전용 계획 고스트(빈 배열이면 지움) */
+  plan?: unknown;
 }
 
 /** 내보낼 수 있는 형태로 굳힌 녹화 */
@@ -366,16 +369,16 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
   const record = (room: Room, playerId: string, msg: GameMessage): void => {
     const rec = room.recording;
     if (!rec || room.phase !== "playing") return;
-    if (msg?.t !== "board") return;
+    if (msg?.t !== "board" && msg?.t !== "plan") return;
     if (rec.truncated) return;
 
-    const frame: RecordedFrame = {
-      ms: Date.now() - rec.startedAt,
-      id: playerId,
-      snap: (msg as { snap?: unknown }).snap,
-    };
+    const ms = Date.now() - rec.startedAt;
+    const frame: RecordedFrame =
+      msg.t === "board"
+        ? { ms, id: playerId, snap: (msg as { snap?: unknown }).snap }
+        : { ms, id: playerId, plan: (msg as { ghosts?: unknown }).ghosts ?? [] };
     // 대략적인 크기만 세면 충분하다(정확한 바이트가 아니라 폭주 방지가 목적)
-    rec.bytes += JSON.stringify(frame.snap ?? null).length + 24;
+    rec.bytes += JSON.stringify(frame.snap ?? frame.plan ?? null).length + 24;
     if (rec.bytes > MAX_RECORDING_BYTES) {
       rec.truncated = true;
       console.warn(`[fetris-be] 녹화 상한 도달 — room=${room.code} match=${rec.matchId}`);

@@ -198,8 +198,8 @@ export type ServerControl =
       players: { id: string; nick: string; placement: number | null; isBot: boolean }[];
       /** 상한에 걸려 뒷부분이 잘렸는지 */
       truncated: boolean;
-      /** 시간축 위의 보드들 — [{ ms, id, snap }] */
-      frames: { ms: number; id: string; snap: unknown }[];
+      /** 시간축 위의 장면들 — 보드 스냅샷과 표시용 계획 고스트가 섞여 있다 */
+      frames: { ms: number; id: string; snap?: unknown; plan?: unknown }[];
     }
   | { t: "error"; reason: string }
   | { t: "relay"; from: string; msg: GameMessage }

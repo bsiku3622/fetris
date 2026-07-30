@@ -1,4 +1,4 @@
-import type { RuleSet, Handling } from "@fetris/engine/types";
+import type { RuleSet, Handling, PlanGhost } from "@fetris/engine/types";
 import type { GameSnapshot } from "@fetris/engine/game";
 import type { ReplayFile } from "@fetris/engine/replay";
 
@@ -80,6 +80,12 @@ export type GameMessage =
   | { t: "focus"; watching: boolean }
   /** 대기실·관전 채팅 */
   | { t: "chat"; nick: string; text: string }
+  /**
+   * 표시 전용 계획 고스트 — 봇이 "이렇게 놓을 생각"을 보여준다.
+   * 게임 상태가 아니라 화면 장식이므로 시뮬레이션·판정·검증과 무관하다.
+   * 빈 배열을 보내면 지운다.
+   */
+  | { t: "plan"; ghosts: PlanGhost[] }
   /**
    * 매치가 끝난 뒤 자기 판의 기록을 방에 나눠준다.
    * 관전자는 자기 입력 로그가 없으므로, 이걸 받아야 그 경기를 내려받을 수 있다.
@@ -163,7 +169,7 @@ export type ServerControl =
       winnerId: string | null;
       players: { id: string; nick: string; placement: number | null; isBot: boolean }[];
       truncated: boolean;
-      frames: { ms: number; id: string; snap: GameSnapshot }[];
+      frames: { ms: number; id: string; snap?: GameSnapshot; plan?: PlanGhost[] }[];
     }
   | { t: "error"; reason: string }
   | { t: "relay"; from: string; msg: GameMessage }

@@ -1,6 +1,7 @@
 import { Game, EventType } from "@fetris/engine/game";
 import type { GameEvent, InputCommands } from "@fetris/engine/game";
-import type { Handling, RuleSet } from "@fetris/engine/types";
+import { MAX_PLAN_GHOSTS } from "@fetris/engine/types";
+import type { Handling, RuleSet, PlanGhost } from "@fetris/engine/types";
 import type { MultiTransport } from "../net/transport";
 import type { GameMessage, TargetStrategy } from "../net/protocol";
 
@@ -44,6 +45,11 @@ export class VersusMatch {
   readonly local: Game;
   /** playerId → 상대 미러 Game */
   readonly remotes = new Map<string, Game>();
+  /**
+   * playerId → 표시 전용 계획 고스트. 게임 상태가 아니라 화면에만 쓰이므로
+   * 미러 Game과 따로 둔다(시뮬레이션·검증에 섞이면 안 된다).
+   */
+  readonly plans = new Map<string, PlanGhost[]>();
   /** 아직 살아있는 상대 */
   private aliveIds: string[] = [];
   /** 내가 살아있는지 — 죽으면 입력을 받지 않는다 */
@@ -137,6 +143,7 @@ export class VersusMatch {
   private removeOpponent(playerId: string): void {
     this.applyKO(playerId);
     this.remotes.delete(playerId);
+    this.plans.delete(playerId);
   }
 
   /**
@@ -314,6 +321,13 @@ export class VersusMatch {
           }
         }
         this.onRemoteUpdate?.(from);
+        break;
+      }
+      case "plan": {
+        if (!from) break;
+        const ghosts = Array.isArray(m.ghosts) ? m.ghosts.slice(0, MAX_PLAN_GHOSTS) : [];
+        if (ghosts.length === 0) this.plans.delete(from);
+        else this.plans.set(from, ghosts);
         break;
       }
       case "focus": {

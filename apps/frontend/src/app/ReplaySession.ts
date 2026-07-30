@@ -297,6 +297,7 @@ export class ReplaySession {
         undefined, undefined, undefined,
         this.hud,
         g.pendingGarbage, g.readyGarbage,
+        this.match.planOf(i),
       );
     }
   }

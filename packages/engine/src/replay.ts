@@ -1,6 +1,6 @@
 import { Game } from "./game.js";
 import type { GameSnapshot, InputCommands } from "./game.js";
-import type { Handling, RuleSet } from "./types.js";
+import type { Handling, RuleSet, PlanGhost } from "./types.js";
 
 // ============================================================================
 // 리플레이 — 원시 키 입력을 프레임 단위로 기록하고, 같은 조건에서 재현한다.
@@ -292,12 +292,17 @@ export interface ReplayFile {
 /** 매치 리플레이 포맷 버전 */
 export const MATCH_REPLAY_FORMAT = 3;
 
-/** 서버 녹화의 한 장면 — 어느 시점에 누구 보드가 어떠했는지 */
+/**
+ * 서버 녹화의 한 장면 — 어느 시점에 누구 보드가 어떠했는지.
+ * 표시 전용 계획 고스트도 같은 시간축에 섞여 들어온다.
+ */
 export interface MatchReplayFrame {
   /** 판 시작 후 경과 ms */
   ms: number;
   id: string;
-  snap: GameSnapshot;
+  snap?: GameSnapshot;
+  /** 봇이 띄운 계획 고스트(빈 배열이면 그 시점에 지운 것) */
+  plan?: PlanGhost[];
 }
 
 /** 매치 리플레이 안의 참가자 한 명 */
@@ -370,7 +375,8 @@ class SnapshotBoard {
       applied = this.idx;
       this.idx++;
     }
-    if (applied >= 0) this.game.deserialize(this.shots[applied].snap);
+    const snap = applied >= 0 ? this.shots[applied].snap : undefined;
+    if (snap) this.game.deserialize(snap);
   }
 
   reset(): void {
@@ -394,6 +400,13 @@ export class MatchReplayPlayer {
 
   private sims: (ReplayPlayer | null)[];
   private shots: (SnapshotBoard | null)[];
+  /**
+   * 참가자별 계획 고스트 — 게임 상태가 아니라 그 시점에 화면에 떠 있던 표시다.
+   * 입력 로그로 재현하는 보드에도 붙는다(입력에서 유도할 수 없는 정보라 녹화에만 있다).
+   */
+  private planShots: MatchReplayFrame[][];
+  private planIdx: number[];
+  private planNow: (PlanGhost[] | undefined)[];
 
   constructor(file: MatchReplayFile) {
     const timeline = file.timeline ?? [];
@@ -418,12 +431,16 @@ export class MatchReplayPlayer {
       const board = new SnapshotBoard(
         file.rule,
         p.handling ?? file.handling,
-        timeline.filter((f) => f.id === p.id),
+        timeline.filter((f) => f.id === p.id && f.snap),
       );
       this.sims.push(null);
       this.shots.push(board);
       return board;
     });
+
+    this.planShots = file.players.map((p) => timeline.filter((f) => f.id === p.id && f.plan));
+    this.planIdx = file.players.map(() => 0);
+    this.planNow = file.players.map(() => undefined);
 
     const simFrames = this.sims.reduce((m, s) => Math.max(m, s?.frames ?? 0), 0);
     const lastMs = timeline.length > 0 ? timeline[timeline.length - 1].ms : 0;
@@ -443,19 +460,46 @@ export class MatchReplayPlayer {
     }
     const ms = (this.frame / 60) * 1000;
     for (const shot of this.shots) shot?.applyAt(ms);
+    this.applyPlansAt(ms);
     return true;
+  }
+
+  /** 그 시점에 떠 있던 계획 고스트(없으면 undefined) */
+  planOf(index: number): PlanGhost[] | undefined {
+    return this.planNow[index];
+  }
+
+  /** 계획은 상태가 아니라 "그때 이게 떠 있었다"는 기록이라 되감기가 싸다 */
+  private applyPlansAt(ms: number): void {
+    for (let i = 0; i < this.planShots.length; i++) {
+      const shots = this.planShots[i];
+      if (shots.length === 0) continue;
+      if (this.planIdx[i] > 0 && shots[this.planIdx[i] - 1].ms > ms) {
+        this.planIdx[i] = 0;
+        this.planNow[i] = undefined;
+      }
+      while (this.planIdx[i] < shots.length && shots[this.planIdx[i]].ms <= ms) {
+        const plan = shots[this.planIdx[i]].plan;
+        this.planNow[i] = plan && plan.length > 0 ? plan : undefined;
+        this.planIdx[i]++;
+      }
+    }
   }
 
   seek(target: number): void {
     const goal = Math.max(0, Math.min(this.frames, Math.floor(target)));
     for (const sim of this.sims) sim?.seek(goal);
-    for (const shot of this.shots) shot?.applyAt((goal / 60) * 1000);
+    const ms = (goal / 60) * 1000;
+    for (const shot of this.shots) shot?.applyAt(ms);
+    this.applyPlansAt(ms);
     this.frame = goal;
   }
 
   reset(): void {
     for (const sim of this.sims) sim?.reset();
     for (const shot of this.shots) shot?.reset();
+    this.planIdx = this.planIdx.map(() => 0);
+    this.planNow = this.planNow.map(() => undefined);
     this.frame = 0;
   }
 }
