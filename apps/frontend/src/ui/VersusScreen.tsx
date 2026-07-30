@@ -762,7 +762,21 @@ function ResultsView({ room }: { room: RoomSession }) {
             {iWon ? "WINNER!" : end.winnerId ? `${nickOf(end.winnerId)} 승리` : "무승부"}
           </h2>
         )}
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, margin: "12px 0", minWidth: 260 }}>
+        {/*
+          순위는 참가자 수만큼 늘어난다. 꽉 찬 방이면 목록만으로 패널이 화면을
+          넘겨 아래 버튼이 손에 닿지 않으므로, 목록 쪽만 스크롤시킨다.
+        */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+            margin: "12px 0",
+            minWidth: 260,
+            maxHeight: "40vh",
+            overflowY: "auto",
+          }}
+        >
           {end.standings.map((s) => (
             <div
               key={s.playerId}
@@ -843,15 +857,28 @@ function PlayerRow({
     <div className="fx-player-box" style={{ opacity: player.role === "spectator" ? 0.6 : 1 }}>
       <span className="fx-player-box__swatch" style={{ background: color }} />
       <span className="fx-player-box__name">{player.nick}</span>
-      {player.wins > 0 && <Badge color="yellow">{firstTo > 0 ? `${player.wins}/${firstTo}승` : `${player.wins}승`}</Badge>}
-      {player.isBot && <Badge color="purple">{player.botOwner ? `BOT · ${player.botOwner}` : "BOT"}</Badge>}
-      {player.isHost && <Badge color="yellow">호스트</Badge>}
-      {me && <Badge color="sky">나</Badge>}
-      {player.role === "spectator" && <Badge color="neutral">관전</Badge>}
+      {/* 배지는 줄어들지 않는다 — 줄어들면 글자가 이름 위로 겹쳐 올라온다 */}
+      <span style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto", whiteSpace: "nowrap" }}>
+        {player.wins > 0 && <Badge color="yellow">{firstTo > 0 ? `${player.wins}/${firstTo}승` : `${player.wins}승`}</Badge>}
+        {player.isBot && <Badge color="purple">{player.botOwner ? `BOT · ${player.botOwner}` : "BOT"}</Badge>}
+        {player.isHost && <Badge color="yellow">호스트</Badge>}
+        {me && <Badge color="sky">나</Badge>}
+        {player.role === "spectator" && <Badge color="neutral">관전</Badge>}
+      </span>
       {canKick && (
         <button
           onClick={onKick}
-          style={{ marginLeft: "auto", border: "2px solid var(--funky-line)", background: "transparent", fontWeight: 900, fontSize: "0.7rem", cursor: "pointer", padding: "2px 6px" }}
+          style={{
+            marginLeft: "auto",
+            flex: "0 0 auto",
+            whiteSpace: "nowrap",
+            border: "2px solid var(--funky-line)",
+            background: "transparent",
+            fontWeight: 900,
+            fontSize: "0.7rem",
+            cursor: "pointer",
+            padding: "2px 6px",
+          }}
         >
           내보내기
         </button>
