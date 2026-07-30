@@ -76,6 +76,8 @@ export class VersusSession {
   private input: InputManager;
   private loop: GameLoop;
   private gfx: GfxOptions;
+  /** 상대 보드용 — 고스트를 진하게 */
+  private remoteGfx: GfxOptions;
   private cbs: VersusCallbacks;
   private shakeMag = 0;
   private spikeValue = 0;
@@ -102,6 +104,9 @@ export class VersusSession {
   ) {
     this.cbs = cbs;
     this.gfx = opts.gfx;
+    // 상대 보드는 스냅샷 주기로만 갱신돼 조각이 떨어지는 움직임이 없다.
+    // 고스트가 "어디에 놓일지"를 알려주는 유일한 단서라, 내 보드보다 진하게 그린다.
+    this.remoteGfx = { ...opts.gfx, ghostOpacity: Math.max(opts.gfx.ghostOpacity, 0.55) };
     this.remoteCanvases = new Map(remoteCanvases);
     this.match = new VersusMatch({
       rule: opts.rule,
@@ -376,6 +381,7 @@ export class VersusSession {
 
   setGfx(gfx: GfxOptions): void {
     this.gfx = gfx;
+    this.remoteGfx = { ...gfx, ghostOpacity: Math.max(gfx.ghostOpacity, 0.55) };
   }
 
   private onRender(localGame: Game, alpha: number, fps: number): void {
@@ -414,7 +420,7 @@ export class VersusSession {
       if (!remoteGame) continue;
       // 크게 뜬 보드에만 성적을 붙인다(썸네일에는 자리가 없다)
       const hud = this.focusIds.has(playerId) ? remoteHud(remoteGame) : undefined;
-      renderer.render(remoteGame, 0, this.gfx, undefined, undefined, undefined, hud, remoteGame.pendingGarbage, remoteGame.readyGarbage);
+      renderer.render(remoteGame, 0, this.remoteGfx, undefined, undefined, undefined, hud, remoteGame.pendingGarbage, remoteGame.readyGarbage);
     }
 
     // 위험 경고음 — 스택이 천장 근처면 주기적으로 삐
