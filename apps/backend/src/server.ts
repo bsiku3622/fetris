@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { createServer, type Server } from "node:http";
 import { randomUUID } from "node:crypto";
 import { verifyReplay } from "@fetris/engine/replay";
+import { shapeOf } from "@fetris/engine/pieces";
 import type { Handling, RuleSet } from "@fetris/engine/types";
 import { BotTokenStore } from "./botTokens.js";
 import type {
@@ -11,6 +12,7 @@ import type {
   PlayerRole,
   BotRunnerInfo,
   MatchConfig,
+  PlanGhost,
   RoomPhase,
   RoomState,
   GameMessage,
@@ -81,6 +83,12 @@ interface Room {
   recording: Recording | null;
   /** 방금 끝난 판의 녹화 — 다음 판이 시작될 때까지 보관한다 */
   lastRecording: MatchRecording | null;
+  /**
+   * playerId → 표시 전용 계획 고스트. 서버가 들고 있는 이유는 셋이다 —
+   * 개별 삭제, 그 자리에 조각이 놓였을 때 자동 정리, 판 종료 시 정리.
+   * 게임 상태와는 무관하다(시뮬레이션·검증 어디에도 쓰이지 않는다).
+   */
+  plans: Map<string, PlanGhost[]>;
 }
 
 /** 녹화 중 버퍼 */
@@ -359,6 +367,61 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     broadcastState(room);
   };
 
+  // ---- 계획 고스트(표시 전용) -----------------------------------------------
+
+  const MAX_PLAN_GHOSTS = 32;
+
+  /** 계획이 바뀌면 방에 알리고 녹화에도 남긴다 */
+  const publishPlan = (room: Room, playerId: string): void => {
+    const ghosts = room.plans.get(playerId) ?? [];
+    broadcast(room, { t: "plan-state", playerId, ghosts });
+    recordPlan(room, playerId, ghosts);
+  };
+
+  /** 계획을 통째로 비운다(판 시작·종료처럼 화면을 정리해야 할 때) */
+  const clearPlans = (room: Room): void => {
+    if (room.plans.size === 0) return;
+    const ids = [...room.plans.keys()];
+    room.plans.clear();
+    for (const id of ids) publishPlan(room, id);
+  };
+
+  /**
+   * 그 자리에 조각이 실제로 놓였으면 계획을 걷어낸다.
+   *
+   * 여기서만 게임 페이로드를 들여다본다 — 보드 스냅샷의 그리드를 읽어 고스트가
+   * 차지한 칸이 전부 메워졌는지 본다. 다 메워졌다면 계획은 이미 실행됐거나
+   * 무의미해진 것이라 화면에 남겨둘 이유가 없다.
+   */
+  const prunePlacedPlans = (room: Room, playerId: string, snap: unknown): void => {
+    const ghosts = room.plans.get(playerId);
+    if (!ghosts || ghosts.length === 0) return;
+    const grid = (snap as { grid?: number[] })?.grid;
+    const rule = room.config?.rule as { cols?: number } | undefined;
+    const cols = rule?.cols;
+    if (!Array.isArray(grid) || !cols || cols <= 0) return;
+    const totalRows = Math.floor(grid.length / cols);
+
+    const kept = ghosts.filter((g) => {
+      const shape = shapeOf(g.piece, g.rot);
+      let filled = 0;
+      let inside = 0;
+      for (let i = 0; i < 8; i += 2) {
+        const x = g.x + shape[i];
+        const y = g.y + shape[i + 1];
+        if (x < 0 || x >= cols || y < 0 || y >= totalRows) continue;
+        inside++;
+        if (grid[y * cols + x] !== 0) filled++;
+      }
+      // 보드 안에 있는 칸이 전부 메워졌으면 놓인 것으로 본다
+      return inside === 0 || filled < inside;
+    });
+    if (kept.length === ghosts.length) return;
+    if (kept.length === 0) room.plans.delete(playerId);
+    else room.plans.set(playerId, kept);
+    publishPlan(room, playerId);
+  };
+
   /**
    * 중계하는 김에 받아 적는다. 페이로드는 여전히 해석하지 않는다 — 종류(`t`)만
    * 보고 보드 스냅샷이면 시간축을 붙여 담을 뿐이다.
@@ -366,17 +429,9 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
    * 여기 담기는 건 방 전체에 뿌려지는 저빈도 스냅샷이라, 나중에 다시 볼 때의
    * 매끄러움은 관전자가 실시간으로 보던 것과 같다.
    */
-  const record = (room: Room, playerId: string, msg: GameMessage): void => {
+  const pushFrame = (room: Room, frame: RecordedFrame): void => {
     const rec = room.recording;
-    if (!rec || room.phase !== "playing") return;
-    if (msg?.t !== "board" && msg?.t !== "plan") return;
-    if (rec.truncated) return;
-
-    const ms = Date.now() - rec.startedAt;
-    const frame: RecordedFrame =
-      msg.t === "board"
-        ? { ms, id: playerId, snap: (msg as { snap?: unknown }).snap }
-        : { ms, id: playerId, plan: (msg as { ghosts?: unknown }).ghosts ?? [] };
+    if (!rec || room.phase !== "playing" || rec.truncated) return;
     // 대략적인 크기만 세면 충분하다(정확한 바이트가 아니라 폭주 방지가 목적)
     rec.bytes += JSON.stringify(frame.snap ?? frame.plan ?? null).length + 24;
     if (rec.bytes > MAX_RECORDING_BYTES) {
@@ -385,6 +440,23 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       return;
     }
     rec.frames.push(frame);
+  };
+
+  /** 계획 변화를 녹화에 남긴다 — 나중에 볼 때도 그때 뭘 하려 했는지 보이도록 */
+  const recordPlan = (room: Room, playerId: string, ghosts: PlanGhost[]): void => {
+    const rec = room.recording;
+    if (!rec) return;
+    pushFrame(room, { ms: Date.now() - rec.startedAt, id: playerId, plan: ghosts });
+  };
+
+  const record = (room: Room, playerId: string, msg: GameMessage): void => {
+    const rec = room.recording;
+    if (!rec || room.phase !== "playing") return;
+    if (msg?.t !== "board") return;
+    const snap = (msg as { snap?: unknown }).snap;
+    pushFrame(room, { ms: Date.now() - rec.startedAt, id: playerId, snap });
+    // 계획한 자리에 조각이 놓였으면 여기서 걷어낸다
+    prunePlacedPlans(room, playerId, snap);
   };
 
   /** 진행 중 녹화를 내보낼 수 있는 형태로 굳힌다 */
@@ -434,6 +506,9 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       firstTo > 0 && !seriesWinner && rosterOf(room).length >= MIN_PARTICIPANTS;
     room.nextRound = nextRound;
 
+    // 판이 끝나면 화면에 남은 계획은 의미가 없다 — 서버가 걷는다.
+    // (녹화가 굳기 전에 지워야 "마지막에 지웠다"는 것까지 기록에 남는다)
+    clearPlans(room);
     room.lastRecording = freezeRecording(room, winner?.id ?? null);
     room.recording = null;
 
@@ -514,6 +589,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     }
     room.phase = "playing";
     room.seed = (Math.random() * 0xffffffff) >>> 0;
+    clearPlans(room);
     // 판을 서버가 직접 받아 적는다. 참가자가 기록을 내주든 말든(리플레이를
     // 지원하지 않는 봇이라도) 판 전체가 남아야 하기 때문이다.
     room.recording = {
@@ -665,6 +741,8 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
 
     room.players = room.players.filter((p) => p !== player);
     if (player.runner) player.runner.active = Math.max(0, player.runner.active - 1);
+    // 나간 사람의 계획은 화면에 남을 이유가 없다
+    if (room.plans.delete(player.id)) publishPlan(room, player.id);
 
     if (room.players.length === 0) {
       clearTimers(room);
@@ -763,6 +841,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           resetWins: false,
           recording: null,
           lastRecording: null,
+          plans: new Map(),
         };
         rooms.set(code, room);
         sockToPlayer.set(ws, { room, player });
@@ -1018,6 +1097,38 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
         runner.capacity = capacity;
         runners.set(ws, runner);
         send(ws, { t: "bot-ready", runner: runnerInfo(runner) });
+        break;
+      }
+      case "plan": {
+        const entry = sockToPlayer.get(ws);
+        if (!entry) return;
+        const { room, player } = entry;
+        const clean = (list: unknown): PlanGhost[] =>
+          (Array.isArray(list) ? list : [])
+            .filter((g): g is PlanGhost => !!g && typeof g === "object")
+            .slice(0, MAX_PLAN_GHOSTS);
+
+        let next: PlanGhost[];
+        if (Array.isArray(raw.set)) {
+          next = clean(raw.set);
+        } else {
+          next = [...(room.plans.get(player.id) ?? [])];
+          if (Array.isArray(raw.remove)) {
+            const drop = new Set(raw.remove.map(String));
+            next = next.filter((g) => g.id === undefined || !drop.has(g.id));
+          }
+          for (const g of clean(raw.add)) {
+            // 같은 이름이 이미 있으면 덮어쓴다
+            const at = g.id !== undefined ? next.findIndex((x) => x.id === g.id) : -1;
+            if (at >= 0) next[at] = g;
+            else next.push(g);
+          }
+          next = next.slice(0, MAX_PLAN_GHOSTS);
+        }
+
+        if (next.length === 0) room.plans.delete(player.id);
+        else room.plans.set(player.id, next);
+        publishPlan(room, player.id);
         break;
       }
       case "get-recording": {

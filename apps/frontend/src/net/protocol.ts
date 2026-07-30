@@ -1,4 +1,6 @@
 import type { RuleSet, Handling, PlanGhost } from "@fetris/engine/types";
+
+export type { PlanGhost };
 import type { GameSnapshot } from "@fetris/engine/game";
 import type { ReplayFile } from "@fetris/engine/replay";
 
@@ -80,12 +82,7 @@ export type GameMessage =
   | { t: "focus"; watching: boolean }
   /** 대기실·관전 채팅 */
   | { t: "chat"; nick: string; text: string }
-  /**
-   * 표시 전용 계획 고스트 — 봇이 "이렇게 놓을 생각"을 보여준다.
-   * 게임 상태가 아니라 화면 장식이므로 시뮬레이션·판정·검증과 무관하다.
-   * 빈 배열을 보내면 지운다.
-   */
-  | { t: "plan"; ghosts: PlanGhost[] }
+
   /**
    * 매치가 끝난 뒤 자기 판의 기록을 방에 나눠준다.
    * 관전자는 자기 입력 로그가 없으므로, 이걸 받아야 그 경기를 내려받을 수 있다.
@@ -128,7 +125,12 @@ export type ClientControl =
   /** 대기 중인 봇 러너 목록 요청 */
   | { t: "list-runners" }
   /** 방금 끝난 판의 서버 녹화 요청(용량이 커서 필요할 때만 받는다) */
-  | { t: "get-recording" };
+  | { t: "get-recording" }
+  /**
+   * 표시 전용 계획 고스트. set은 통째로 교체, add는 추가/갱신(같은 id면 덮어씀),
+   * remove는 id로 골라 삭제. 상태는 서버가 들고 있다가 방에 뿌린다.
+   */
+  | { t: "plan"; set?: PlanGhost[]; add?: PlanGhost[]; remove?: string[] };
 
 /** 서버 → 클라이언트 제어 메시지 */
 export type ServerControl =
@@ -147,6 +149,8 @@ export type ServerControl =
       /** 있으면 시리즈(FT)까지 끝났다는 뜻 */
       seriesWinnerId?: string;
     }
+  /** 누군가의 계획 고스트가 바뀌었다(서버가 정리한 경우도 포함) */
+  | { t: "plan-state"; playerId: string; ghosts: PlanGhost[] }
   /** 다른 참가자가 제출한 판 기록 — 서버가 방에 흘려준다 */
   | {
       t: "replay-record";

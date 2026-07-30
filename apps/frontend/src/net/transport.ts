@@ -1,4 +1,4 @@
-import type { GameMessage } from "./protocol";
+import type { GameMessage, PlanGhost } from "./protocol";
 
 // ============================================================================
 // Transport — 대전 게임 메시지의 양방향 채널 추상화.
@@ -26,6 +26,11 @@ export interface MultiTransport extends Transport {
   onPlayerLeft(cb: (playerId: string) => void): void;
   /** 새 플레이어가 입장했을 때 콜백 (playerId, isHost 전달) */
   onPlayerJoined(cb: (playerId: string, isHost: boolean) => void): void;
+  /**
+   * 표시 전용 계획 고스트가 갱신됐을 때. 게임 메시지가 아니라 서버가 들고 있는
+   * 상태라 별도 채널로 온다(로컬 대전에는 서버가 없어 아무도 부르지 않는다).
+   */
+  onPlanState?(cb: (playerId: string, ghosts: PlanGhost[]) => void): void;
 }
 
 /** 메시지를 직접 상대 엔드포인트로 전달하는 인메모리 채널(테스트/로컬 대전용) */

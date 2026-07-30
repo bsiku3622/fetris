@@ -120,7 +120,8 @@ function planAhead(game, depth) {
     if (!spot) break;
     const shape = shapeOf(piece, spot.rot);
     // 뒤쪽 계획일수록 흐리게 — 확정도가 낮다는 걸 눈으로 알 수 있게
-    plan.push({ piece, rot: spot.rot, x: spot.px, y: spot.y, alpha: 0.55 - i * 0.1 });
+    // id를 달아두면 나중에 하나만 골라 지울 수 있다
+    plan.push({ id: `p${i}`, piece, rot: spot.rot, x: spot.px, y: spot.y, alpha: 0.55 - i * 0.1 });
     trial.board.place(shape, spot.px, spot.y, piece);
     trial.board.clearLines();
   }
@@ -363,8 +364,7 @@ function joinAsBot({ code, ticket, nick }) {
   }
 
   function stopMatch() {
-    // 판이 끝나면 내 계획도 걷는다
-    if (shownPlan && shownPlan !== "[]") publishPlan([]);
+    // 판이 끝나면 서버가 계획을 걷어주므로 여기서 보낼 필요는 없다
     if (loop) clearInterval(loop);
     if (snapTimer) clearInterval(snapTimer);
     loop = null;
@@ -453,15 +453,16 @@ function joinAsBot({ code, ticket, nick }) {
   }
 
   /**
-   * 계획 고스트를 방에 띄운다. 게임 메시지로 나가지만 서버는 해석하지 않고,
-   * 받는 쪽은 화면에만 그린다 — 판정·리플레이 검증에는 전혀 끼지 않는다.
-   * 빈 배열을 보내면 지워진다.
+   * 계획 고스트를 띄운다. 판정·리플레이 검증에는 전혀 끼지 않는 표시 전용이다.
+   * 놓인 자리는 서버가 알아서 지우고, 판이 끝날 때도 서버가 정리한다.
    */
   function publishPlan(ghosts) {
     const key = JSON.stringify(ghosts);
     if (key === shownPlan) return; // 같은 그림을 반복해 보낼 이유가 없다
     shownPlan = key;
-    sendGame({ t: "plan", ghosts });
+    // 제어 메시지다(relay가 아니다) — 서버가 상태를 들고 있으면서 방에 뿌리고,
+    // 그 자리에 조각이 놓이면 알아서 걷어낸다.
+    send({ t: "plan", set: ghosts });
   }
 
   /** 한 프레임의 조작을 만든다 */

@@ -149,6 +149,11 @@ export interface Stats {
  * 오로지 화면에만 그려진다. 그래서 결정론을 건드리지 않는다.
  */
 export interface PlanGhost {
+  /**
+   * 이 고스트를 가리키는 이름. 나중에 하나만 골라 지울 때 쓴다.
+   * 없으면 통째로 갈아끼우는 것 말고는 지울 방법이 없다.
+   */
+  id?: string;
   piece: Piece;
   rot: Rot;
   /** 보드 열 */

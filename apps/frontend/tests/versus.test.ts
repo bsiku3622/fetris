@@ -363,52 +363,39 @@ describe("대전 리플레이 기록", () => {
 // ============================================================================
 
 describe("계획 고스트", () => {
-  const ghost = (x: number): PlanGhost => ({ piece: Piece.T, rot: Rot.Spawn, x, y: 20 });
+  const ghost = (x: number, id?: string): PlanGhost => ({ id, piece: Piece.T, rot: Rot.Spawn, x, y: 20 });
 
-  it("상대가 띄운 계획이 그 사람 몫으로 보관된다", () => {
+  it("서버가 알려준 계획을 그 사람 몫으로 보관한다", () => {
     const [a, b] = makePair();
     bothToPlaying(a, b);
-    const send = (m: VersusMatch, msg: unknown, from: string) =>
-      (m as unknown as { onMessage: (msg: unknown, from: string) => void }).onMessage(msg, from);
-
-    send(b, { t: "plan", ghosts: [ghost(2), ghost(5)] }, "A");
+    b.setPlan("A", [ghost(2), ghost(5)]);
     expect(b.plans.get("A")).toHaveLength(2);
     expect(b.plans.get("A")?.[0].x).toBe(2);
     void a;
   });
 
-  it("빈 배열을 보내면 지워진다", () => {
+  it("빈 목록을 받으면 지운다", () => {
     const [, b] = makePair();
-    const send = (msg: unknown) =>
-      (b as unknown as { onMessage: (msg: unknown, from: string) => void }).onMessage(msg, "A");
-    send({ t: "plan", ghosts: [ghost(1)] });
+    b.setPlan("A", [ghost(1)]);
     expect(b.plans.has("A")).toBe(true);
-    send({ t: "plan", ghosts: [] });
+    b.setPlan("A", []);
     expect(b.plans.has("A")).toBe(false);
   });
 
   it("보드를 통째로 덧칠하지 못하도록 개수를 자른다", () => {
     const [, b] = makePair();
     const many = Array.from({ length: MAX_PLAN_GHOSTS + 20 }, (_, i) => ghost(i % 10));
-    (b as unknown as { onMessage: (msg: unknown, from: string) => void }).onMessage(
-      { t: "plan", ghosts: many },
-      "A",
-    );
+    b.setPlan("A", many);
     expect(b.plans.get("A")).toHaveLength(MAX_PLAN_GHOSTS);
   });
 
-  it("계획을 띄워도 판의 전개와 지문은 그대로다", () => {
+  it("계획이 떠 있어도 판의 전개와 지문은 그대로다", () => {
     // 표시 전용이라는 게 이 테스트의 요지 — 같은 입력이면 계획이 있든 없든 같은 판이다.
     const play = (withPlan: boolean) => {
       const [a, b] = makePair(4242);
       bothToPlaying(a, b);
       for (let f = 0; f < 120; f++) {
-        if (withPlan && f % 10 === 0) {
-          (b as unknown as { onMessage: (msg: unknown, from: string) => void }).onMessage(
-            { t: "plan", ghosts: [ghost(f % 8)] },
-            "A",
-          );
-        }
+        if (withPlan && f % 10 === 0) b.setPlan("A", [ghost(f % 8)]);
         a.tick(1, CMD({ hardDrop: f % 13 === 0 }));
         b.tick(1, CMD({ hardDrop: f % 13 === 0 }));
       }
@@ -420,10 +407,7 @@ describe("계획 고스트", () => {
   it("상대가 나가면 그 사람 계획도 함께 사라진다", () => {
     const [a, b] = makePair();
     bothToPlaying(a, b);
-    (b as unknown as { onMessage: (msg: unknown, from: string) => void }).onMessage(
-      { t: "plan", ghosts: [ghost(3)] },
-      "A",
-    );
+    b.setPlan("A", [ghost(3)]);
     expect(b.plans.has("A")).toBe(true);
     a.dispose();
     expect(b.plans.has("A")).toBe(false);

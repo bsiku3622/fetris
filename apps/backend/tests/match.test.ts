@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { runReplay, fingerprint } from "@fetris/engine/replay";
 import type { RelayServer } from "../src/server.js";
 import { Client, startTestServer, createRoom, joinRoom, playerIn, TEST_CONFIG } from "./helpers.js";
+import { shapeOf } from "@fetris/engine/pieces";
+import { STANDARD_RULESET } from "@fetris/engine/config";
 
 // 결과 표시를 짧게 줄여 실제 전이를 기다릴 수 있게 한다
 const RESULTS = 120;
@@ -480,6 +482,99 @@ describe("매치 진행", () => {
     host.send({ t: "get-recording" });
     const err = await host.waitFor("error");
     expect(err.reason).toBe("no-recording");
+    host.close();
+    guests[0].close();
+  });
+
+  it("계획 고스트는 서버가 들고 있다가 방에 뿌린다", async () => {
+    const { host, code, state } = await createRoom(url);
+    const hostId = state.players[0].id;
+    host.send({ t: "config", config: TEST_CONFIG });
+    const guest = await joinRoom(url, code, "G1");
+    await host.waitState((st) => st.players.length === 2);
+    host.drain();
+    guest.drain();
+
+    const g = (id: string, x: number) => ({ id, piece: 6, rot: 0, x, y: 20 });
+
+    // set — 통째로 올린다
+    host.send({ t: "plan", set: [g("a", 1), g("b", 4)] });
+    let st = await guest.waitFor("plan-state");
+    expect(st.playerId).toBe(hostId);
+    expect(st.ghosts.map((x) => x.id)).toEqual(["a", "b"]);
+
+    // add — 같은 id는 덮어쓰고, 새 id는 붙는다
+    host.send({ t: "plan", add: [g("b", 9), g("c", 2)] });
+    st = await guest.waitFor("plan-state");
+    expect(st.ghosts.map((x) => x.id)).toEqual(["a", "b", "c"]);
+    expect(st.ghosts.find((x) => x.id === "b")?.x).toBe(9);
+
+    // remove — 고른 것만 지운다
+    host.send({ t: "plan", remove: ["b"] });
+    st = await guest.waitFor("plan-state");
+    expect(st.ghosts.map((x) => x.id)).toEqual(["a", "c"]);
+
+    // set: [] — 전부 지운다
+    host.send({ t: "plan", set: [] });
+    st = await guest.waitFor("plan-state");
+    expect(st.ghosts).toEqual([]);
+
+    host.close();
+    guest.close();
+  });
+
+  it("계획한 자리에 조각이 놓이면 서버가 알아서 걷어낸다", async () => {
+    const { host, code } = await createRoom(url);
+    host.send({ t: "config", config: TEST_CONFIG });
+    const guest = await joinRoom(url, code, "G1");
+    await host.waitState((st) => st.players.length === 2);
+    host.drain();
+    guest.drain();
+    host.send({ t: "start-match" });
+    await host.waitFor("match-start");
+    await guest.waitFor("match-start");
+
+    // O 조각을 (0,0)과 (4,0)에 놓을 계획
+    host.send({
+      t: "plan",
+      set: [
+        { id: "placed", piece: 4, rot: 0, x: 0, y: 0 },
+        { id: "still", piece: 4, rot: 0, x: 4, y: 0 },
+      ],
+    });
+    let st = await guest.waitFor("plan-state");
+    expect(st.ghosts.map((x) => x.id)).toEqual(["placed", "still"]);
+
+    // 첫 계획 자리만 메워진 보드를 보낸다
+    const cols = STANDARD_RULESET.cols;
+    const totalRows = STANDARD_RULESET.rows + STANDARD_RULESET.bufferRows;
+    const grid = new Array(cols * totalRows).fill(0);
+    const shape = shapeOf(4, 0); // O
+    for (let i = 0; i < 8; i += 2) grid[(0 + shape[i + 1]) * cols + (0 + shape[i])] = 4;
+    host.send({ t: "relay", msg: { t: "board", snap: { grid } } });
+
+    // 놓인 쪽만 사라지고 나머지는 남는다
+    st = await guest.waitFor("plan-state");
+    expect(st.ghosts.map((x) => x.id)).toEqual(["still"]);
+
+    host.close();
+    guest.close();
+  });
+
+  it("판이 끝나면 서버가 계획을 걷는다", async () => {
+    const { host, guests } = await readyRoom(1);
+    await startMatch(host, guests);
+    host.send({ t: "plan", set: [{ id: "x", piece: 6, rot: 0, x: 3, y: 20 }] });
+    const up = await guests[0].waitFor("plan-state");
+    expect(up.ghosts).toHaveLength(1);
+
+    guests[0].send({ t: "ko" });
+    // 판 종료와 함께 비워진 상태가 온다
+    for (;;) {
+      const st = await guests[0].waitFor("plan-state", 3000);
+      if (st.ghosts.length === 0) break;
+    }
+
     host.close();
     guests[0].close();
   });

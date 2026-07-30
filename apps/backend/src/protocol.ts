@@ -11,6 +11,19 @@
 //   ticket으로 join. 자세한 흐름은 README "봇 엔드포인트" 절 참고.
 // ============================================================================
 
+/**
+ * 표시 전용 계획 고스트 — 봇이 자기 계획을 보여주는 오버레이.
+ * 좌표는 엔진과 같은 계(y는 버퍼 포함)를 쓴다.
+ */
+export interface PlanGhost {
+  id?: string;
+  piece: number;
+  rot: number;
+  x: number;
+  y: number;
+  alpha?: number;
+}
+
 /** 서버가 들여다보지 않는 게임 메시지(불투명 페이로드) */
 export type GameMessage = { t: string; [k: string]: unknown };
 
@@ -141,6 +154,18 @@ export type ClientControl =
   /** 대기 중인 봇 러너 목록 요청(누구 봇을 부를지 고르기 위해) */
   | { t: "list-runners" }
   /**
+   * 표시 전용 계획 고스트 — "이렇게 놓을 생각"을 자기 보드에 반투명하게 띄운다.
+   * 게임 상태가 아니라 화면 장식이므로 시뮬레이션·판정·검증과 무관하다.
+   *
+   *  set    — 통째로 교체(빈 배열이면 전부 지움)
+   *  add    — 추가. 같은 id가 있으면 덮어쓴다
+   *  remove — id로 골라서 지움
+   *
+   * 서버가 상태를 들고 있다가 방 전체에 뿌리고, 그 자리에 조각이 실제로 놓이면
+   * 알아서 걷어낸다. 판이 끝날 때도 서버가 정리한다.
+   */
+  | { t: "plan"; set?: PlanGhost[]; add?: PlanGhost[]; remove?: string[] }
+  /**
    * 방금 끝난 판의 녹화 요청. 서버가 중계하며 직접 받아 적은 것이라 참가자의
    * 협조와 무관하게 존재한다. 용량이 크므로 필요할 때만 보낸다.
    */
@@ -188,6 +213,8 @@ export type ServerControl =
       /** 참고용 최종 성적(재생에는 쓰이지 않는다) */
       stats?: { piecesPlaced: number; lines: number; attack: number };
     }
+  /** 누군가의 계획 고스트가 바뀌었다(서버가 정리한 경우도 포함) */
+  | { t: "plan-state"; playerId: string; ghosts: PlanGhost[] }
   /** get-recording 응답 — 요청한 사람에게만 보낸다 */
   | {
       t: "recording";

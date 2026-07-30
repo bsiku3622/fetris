@@ -8,7 +8,7 @@ import type {
   PlayerRole,
   BotRunnerInfo,
 } from "./protocol";
-import type { Handling } from "@fetris/engine/types";
+import type { Handling, PlanGhost } from "@fetris/engine/types";
 
 // ============================================================================
 // NetClient — 릴레이 서버와의 연결을 감싸고, 방 상태를 하나의 진실로 들고 있다.
@@ -39,6 +39,7 @@ export class NetClient {
   private transportCloseCb: (() => void) | null = null;
   private playerLeftCb: ((id: string) => void) | null = null;
   private playerJoinedCb: ((id: string, isHost: boolean) => void) | null = null;
+  private planStateCb: ((playerId: string, ghosts: PlanGhost[]) => void) | null = null;
   /** 직전 로스터 — state 변화에서 입퇴장을 뽑아내기 위해 들고 있는다 */
   private lastRoster = new Set<string>();
   /** get-recording 응답을 기다리는 쪽 */
@@ -62,6 +63,8 @@ export class NetClient {
     seriesWinnerId?: string,
     nextRound?: boolean,
   ) => void;
+  /** 누군가의 계획 고스트가 바뀌었다 */
+  onPlanState?: (playerId: string, ghosts: PlanGhost[]) => void;
   /** 다른 참가자가 제출한 판 기록이 도착했다(서버가 흘려준 것) */
   onReplayRecord?: (r: {
     matchId: number;
@@ -157,6 +160,10 @@ export class NetClient {
         break;
       case "match-end":
         this.onMatchEnd?.(msg.matchId, msg.winnerId, msg.standings, msg.seriesWinnerId, msg.nextRound);
+        break;
+      case "plan-state":
+        this.onPlanState?.(msg.playerId, msg.ghosts);
+        this.planStateCb?.(msg.playerId, msg.ghosts);
         break;
       case "replay-record":
         this.onReplayRecord?.(msg);
@@ -260,6 +267,11 @@ export class NetClient {
     this.sendControl({ t: "list-runners" });
   }
 
+  /** 표시 전용 계획 고스트 — 자기 보드에만 그려진다 */
+  setPlan(op: { set?: PlanGhost[]; add?: PlanGhost[]; remove?: string[] }): void {
+    this.sendControl({ t: "plan", ...op });
+  }
+
   /**
    * 방금 끝난 판의 서버 녹화를 받아온다. 몇 MB가 될 수 있어 자동으로 뿌리지
    * 않고 필요할 때만 요청한다.
@@ -308,6 +320,9 @@ export class NetClient {
       },
       onPlayerLeft: (cb) => {
         client.playerLeftCb = cb;
+      },
+      onPlanState: (cb) => {
+        client.planStateCb = cb;
       },
       onPlayerJoined: (cb) => {
         client.playerJoinedCb = cb;

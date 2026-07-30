@@ -48,6 +48,9 @@ export class VersusMatch {
   /**
    * playerId → 표시 전용 계획 고스트. 게임 상태가 아니라 화면에만 쓰이므로
    * 미러 Game과 따로 둔다(시뮬레이션·검증에 섞이면 안 된다).
+   *
+   * 내용은 서버가 소유한다 — 개별 삭제·자동 정리·판 종료 정리를 서버가 하고,
+   * 여기는 그 결과를 받아 그리기만 한다.
    */
   readonly plans = new Map<string, PlanGhost[]>();
   /** 아직 살아있는 상대 */
@@ -113,6 +116,7 @@ export class VersusMatch {
 
     this.transport.onMessage((m, from) => this.onMessage(m, from));
     this.transport.onPlayerLeft?.((playerId) => this.removeOpponent(playerId));
+    this.transport.onPlanState?.((playerId, ghosts) => this.setPlan(playerId, ghosts));
   }
 
   /** 상대 미러를 만들어 둔다(스냅샷이 오기 전에도 자리를 잡아야 렌더러가 붙는다) */
@@ -137,6 +141,12 @@ export class VersusMatch {
       this.setFocus([...this.focusIds].filter((id) => id !== playerId));
     }
     this.watchers.delete(playerId);
+  }
+
+  /** 서버가 알려준 계획 상태를 반영한다(빈 배열이면 지운다) */
+  setPlan(playerId: string, ghosts: readonly PlanGhost[]): void {
+    if (ghosts.length === 0) this.plans.delete(playerId);
+    else this.plans.set(playerId, ghosts.slice(0, MAX_PLAN_GHOSTS));
   }
 
   /** 이탈 — 미러까지 즉시 제거 */
@@ -321,13 +331,6 @@ export class VersusMatch {
           }
         }
         this.onRemoteUpdate?.(from);
-        break;
-      }
-      case "plan": {
-        if (!from) break;
-        const ghosts = Array.isArray(m.ghosts) ? m.ghosts.slice(0, MAX_PLAN_GHOSTS) : [];
-        if (ghosts.length === 0) this.plans.delete(from);
-        else this.plans.set(from, ghosts);
         break;
       }
       case "focus": {
