@@ -641,25 +641,31 @@ export class Renderer {
   private drawPlan(plan: readonly PlanGhost[], bx: number, by: number, cell: number, renderTop: number, cols: number): void {
     const ctx = this.ctx;
     ctx.save();
-    ctx.setLineDash([Math.max(2, cell * 0.22), Math.max(2, cell * 0.16)]);
-    ctx.lineWidth = Math.max(1.5, cell * 0.1);
+    ctx.setLineDash([Math.max(2, cell * 0.26), Math.max(2, cell * 0.14)]);
+    ctx.lineWidth = Math.max(2, cell * 0.14);
+    ctx.lineJoin = "round";
     for (let n = 0; n < plan.length && n < MAX_PLAN_GHOSTS; n++) {
       const g = plan[n];
       if (g.piece === Piece.None) continue;
       const shape = shapeOf(g.piece, g.rot);
       const color = PIECE_COLORS[g.piece];
-      const alpha = Math.max(0, Math.min(1, g.alpha ?? 0.5));
+      const bright = lighten(color, 0.45);
+      const alpha = Math.max(0, Math.min(1, g.alpha ?? 0.6));
       for (let i = 0; i < 8; i += 2) {
         const x = g.x + shape[i];
         const y = g.y + shape[i + 1];
         if (y < renderTop || x < 0 || x >= cols) continue;
         const sx = bx + x * cell;
         const sy = by + (y - renderTop) * cell;
-        ctx.globalAlpha = alpha * 0.22;
+        // 어두운 보드 위에서 뜨도록 옅은 채움 + 밝은 점선 + 글로우
+        ctx.shadowColor = "transparent";
+        ctx.globalAlpha = alpha * 0.45;
         ctx.fillStyle = color;
         ctx.fillRect(sx + 2, sy + 2, cell - 4, cell - 4);
-        ctx.globalAlpha = alpha * 0.85;
-        ctx.strokeStyle = lighten(color, 0.25);
+        ctx.shadowColor = bright;
+        ctx.shadowBlur = cell * 0.35;
+        ctx.globalAlpha = Math.min(1, alpha * 1.25);
+        ctx.strokeStyle = bright;
         ctx.strokeRect(sx + 2, sy + 2, cell - 4, cell - 4);
       }
     }
