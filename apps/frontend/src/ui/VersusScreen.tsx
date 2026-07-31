@@ -121,6 +121,16 @@ export function VersusScreen({
   const setHandling = (patch: Partial<Handling>) =>
     updateSettings((s) => ({ ...s, handling: { ...s.handling, ...patch } }));
 
+  /*
+    내 감도를 방에 알려 둔다. 남들이 내 보드를 입력만으로 따라 돌리려면 이 값이
+    있어야 하는데(같은 키라도 감도가 다르면 다르게 움직인다), 방 설정이 아니라
+    개인 설정이라 서버가 따로 모아 매치 시작 때 실어 보낸다.
+  */
+  useEffect(() => {
+    if (state) room.setHandling(h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [h, !!state]);
+
   useEffect(() => {
     return () => {
       if (isTauri()) lanStop().catch(() => {});
@@ -208,11 +218,11 @@ export function VersusScreen({
   }, [remoteConfig, isHost]);
 
   const host = async (urlOverride?: string) => {
-    await room.connect(urlOverride ?? serverUrl, "host", { maxPlayers, nick: myNick });
+    await room.connect(urlOverride ?? serverUrl, "host", { maxPlayers, nick: myNick, handling: h });
   };
   const join = async (urlOverride?: string) => {
     if (!joinCode.trim()) return;
-    await room.connect(urlOverride ?? serverUrl, "join", { code: joinCode, nick: myNick });
+    await room.connect(urlOverride ?? serverUrl, "join", { code: joinCode, nick: myNick, handling: h });
   };
 
   const hostLan = async () => {

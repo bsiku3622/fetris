@@ -49,6 +49,13 @@ export interface MatchConfig {
   firstTo: number;
 }
 
+/** 참가자 한 명을 재현하는 데 필요한 조건 */
+export interface MatchSimParams {
+  id: string;
+  seed: number;
+  handling: Handling;
+}
+
 export interface RoomState {
   code: string;
   phase: RoomPhase;
@@ -73,15 +80,24 @@ export interface BotRunnerInfo {
 export type GameMessage =
   /** 상쇄 후 보낸 순수 공격(holes = 줄별 구멍 컬럼, targetId = 공격 대상) */
   | { t: "attack"; holes: number[]; targetId?: string }
-  /** 상대 화면 표시용 보드 스냅샷 */
-  | { t: "board"; snap: GameSnapshot }
   /**
-   * "지금 네 보드를 크게 보고 있다"는 알림.
-   * 받은 쪽은 그 사람에게만 스냅샷을 고빈도로 보내 트래픽을 아낀다
-   * (인원이 늘면 전체 브로드캐스트만으로는 N² 로 불어난다).
-   * watching=false면 포커스 해제.
+   * 입력 릴레이 — 보드가 아니라 **누른 키**를 흘려보낸다.
+   *
+   * keys는 [프레임, 액션, 눌림] 평탄 배열이고 ige는 [프레임, 줄수, 구멍…]이다
+   * (리플레이 로그와 같은 인코딩). 받는 쪽은 같은 시드·감도로 다시 돌려 상대
+   * 화면을 프레임 단위로 재현한다.
+   *
+   * upto는 "이 프레임까지는 빠짐없이 보냈다"는 경계다. 미러는 딱 거기까지만
+   * 진행할 수 있다 — 넘어서면 아직 오지 않은 입력을 없는 셈 치고 돌게 된다.
    */
-  | { t: "focus"; watching: boolean }
+  | { t: "sync"; upto: number; keys?: number[]; ige?: number[] }
+  /**
+   * 상태 키프레임. 입력이 통째로 빈 구간(순단)은 따라 돌 방법이 없어서,
+   * 그때 미러를 되돌려 놓기 위해 낮은 빈도로 함께 보낸다.
+   */
+  | { t: "full"; frame: number; snap: GameSnapshot }
+  /** 옛 방식의 보드 스냅샷 — 입력을 흘리지 않는 봇 호환용 */
+  | { t: "board"; snap: GameSnapshot }
   /** 대기실·관전 채팅 */
   | { t: "chat"; nick: string; text: string }
 
@@ -93,13 +109,20 @@ export type GameMessage =
 
 /** 클라이언트 → 서버 제어 메시지. cid는 재전송 판별용 순번이다. */
 type ClientControlBody =
-  | { t: "create"; maxPlayers?: number; nick?: string }
-  | { t: "join"; code: string; nick?: string }
+  /** handling을 함께 주면 앉자마자 감도가 등록된다(별도 메시지를 기다리는 틈이 없다) */
+  | { t: "create"; maxPlayers?: number; nick?: string; handling?: Handling }
+  | { t: "join"; code: string; nick?: string; handling?: Handling }
   | { t: "leave" }
   | { t: "relay"; msg: GameMessage }
   | { t: "relay-to"; targetId: string; msg: GameMessage }
   | { t: "set-role"; role: PlayerRole }
   | { t: "config"; config: MatchConfig }
+  /**
+   * 내 감도를 서버에 알린다. 감도는 마우스 감도처럼 개인 설정이라 사람마다
+   * 다른데, 남들이 내 보드를 따라 돌리려면 이 값을 알아야 한다.
+   * 서버가 들고 있다가 매치 시작 때 방 전체에 실어 보낸다.
+   */
+  | { t: "handling"; handling: Handling }
   | { t: "start-match" }
   /** 결과 대기시간을 건너뛴다 — 시리즈 도중이면 곧바로 다음 판 */
   | { t: "skip-results" }
@@ -145,7 +168,19 @@ type ServerControlBody =
   /** resume 성공 — 같은 자리로 돌아왔다 */
   | { t: "resumed"; code: string; myId: string; state: RoomState; ackClientId: number }
   | { t: "state"; state: RoomState }
-  | { t: "match-start"; matchId: number; seed: number; config: MatchConfig; players: string[] }
+  | {
+      t: "match-start";
+      matchId: number;
+      seed: number;
+      config: MatchConfig;
+      players: string[];
+      /**
+       * 참가자별 시드·감도. 상대 보드를 입력만으로 따라 돌리려면 둘 다
+       * 있어야 한다 — 시드가 조각 순서를, 감도가 키의 해석을 정한다.
+       * 시드는 서버가 나눠준다(조각 순서를 공유하지 않는 방이면 각자 다르다).
+       */
+      sim: MatchSimParams[];
+    }
   | { t: "ko"; playerId: string; placement: number; remaining: number }
   | {
       t: "match-end";

@@ -7,7 +7,7 @@ import { Piece, Rot, MAX_PLAN_GHOSTS } from "@fetris/engine/types";
 import type { PlanGhost } from "@fetris/engine/types";
 import { shapeOf } from "@fetris/engine/pieces";
 import { STANDARD_RULESET, DEFAULT_HANDLING } from "@fetris/engine/config";
-import { ReplayRecorder, ReplayAction, runReplay, fingerprint } from "@fetris/engine/replay";
+import { ReplayAction, runReplay, fingerprint } from "@fetris/engine/replay";
 
 const CMD = (over: Partial<InputCommands> = {}): InputCommands => ({
   rotateCW: false,
@@ -107,45 +107,69 @@ describe("VersusMatch 공격 라우팅", () => {
     void a;
   });
 
-  it("상대 보드 스냅샷이 미러에 반영된다", () => {
-    const [a, b] = makePair();
-    bothToPlaying(a, b);
-    setupQuad(a, 4);
-    // ambient 스냅샷 주기(12프레임)를 넘겨야 브로드캐스트가 나간다
-    for (let i = 0; i < 13; i++) a.tick(1, CMD());
+});
 
-    const remote = b.remotes.get("A");
-    expect(remote).toBeDefined();
-    let filled = 0;
-    const grid = remote!.board.grid;
-    for (let i = 0; i < grid.length; i++) if (grid[i] !== 0) filled++;
-    expect(filled).toBeGreaterThan(0);
+// ============================================================================
+// 입력 릴레이 — 보드가 아니라 누른 키를 흘려보내고, 받는 쪽이 다시 돌린다.
+//
+// 이게 성립하려면 미러가 원본과 **완전히 같은 판**이어야 한다. 한 프레임이라도
+// 어긋나면 그 뒤로 계속 벌어지므로, 지문까지 맞는지 본다.
+// ============================================================================
+
+describe("입력 릴레이", () => {
+  it("흘려보낸 입력만으로 상대 미러가 같은 판을 따라 돈다", () => {
+    const [a, b] = makePair(4242);
+    // 스트림 주기(4프레임)의 배수만큼 돌려야 마지막 조각까지 흘러나간다
+    const TICKS = 240;
+    for (let i = 0; i < TICKS; i++) {
+      const drop = i > 70 && i % 17 === 0;
+      if (drop) a.recorder.push(ReplayAction.HardDrop, true);
+      if (i > 70 && i % 23 === 5) {
+        a.recorder.push(ReplayAction.MoveLeft, true);
+        a.local.pressDir(-1);
+      }
+      if (i > 70 && i % 23 === 11) {
+        a.recorder.push(ReplayAction.MoveLeft, false);
+        a.local.releaseDir(-1);
+      }
+      a.tick(1, CMD({ hardDrop: drop }));
+      b.tick(1, CMD());
+    }
+    // 미러는 스트림이 도착하는 만큼 뒤에서 따라온다 — 마저 돌려 따라잡힌다
+    for (let i = 0; i < 20; i++) b.tick(1, CMD());
+
+    const mirror = b.remotes.get("A");
+    expect(mirror).toBeDefined();
+    expect(a.local.stats.piecesPlaced).toBeGreaterThan(0);
+    expect(mirror!.frame).toBe(a.recorder.frame);
+    expect(fingerprint(mirror!.game)).toBe(fingerprint(a.local));
   });
 
-  it("1대1은 포커스 없이 항상 고빈도로 보낸다", () => {
-    // 상대가 한 명뿐이면 "누구를 크게 보는가"라는 질문 자체가 없다.
-    // 포커스는 인원이 늘 때 트래픽을 줄이려는 장치이므로 여기선 꺼져 있어야 한다.
-    const [a, b] = makePair();
-    bothToPlaying(a, b);
-    b.setFocus(["A"]);
-    expect([...b.focus]).toEqual([]);
-
-    setupQuad(a, 4);
-    // 아무도 포커스를 걸지 않았는데도 고빈도 주기(3프레임)만에 도착한다
-    for (let i = 0; i < 4; i++) a.tick(1, CMD());
-
-    const grid = b.remotes.get("A")!.board.grid;
-    let filled = 0;
-    for (let i = 0; i < grid.length; i++) if (grid[i] !== 0) filled++;
-    expect(filled).toBeGreaterThan(0);
+  it("받은 것보다 앞서 돌지 않는다", () => {
+    // upto를 넘어서 돌면 아직 오지 않은 입력을 없는 셈 치고 돌게 되어 어긋난다.
+    const [a, b] = makePair(77);
+    for (let i = 0; i < 40; i++) {
+      a.tick(1, CMD());
+      b.tick(1, CMD());
+    }
+    const mirror = b.remotes.get("A")!;
+    expect(mirror.frame).toBeLessThanOrEqual(a.recorder.frame);
+    // a를 멈춰 두고 b만 돌려도 마지막으로 받은 지점을 넘지 않는다
+    const stuck = mirror.frame;
+    for (let i = 0; i < 30; i++) b.tick(1, CMD());
+    expect(mirror.frame).toBeLessThanOrEqual(Math.max(stuck, a.recorder.frame));
+    expect(mirror.frame).toBe(a.recorder.frame);
   });
 
-  it("셋 이상이면 포커스를 건 사람에게만 고빈도로 보낸다", () => {
-    const sent: { target: string; t: string }[] = [];
+  it("스트림은 방 전체로 나간다 — 누구에게만 따로 보내지 않는다", () => {
+    // 예전에는 "나를 크게 보는 사람"에게만 스냅샷을 자주 보내는 장치가 있었다.
+    // 입력은 통째로 보내도 스냅샷 한 장보다 작아서 그 장치가 필요 없다.
+    const sent: string[] = [];
+    const targeted: string[] = [];
     const transport = {
       myId: "A",
-      send: () => {},
-      sendTo: (targetId: string, msg: { t: string }) => sent.push({ target: targetId, t: msg.t }),
+      send: (msg: { t: string }) => sent.push(msg.t),
+      sendTo: (_targetId: string, msg: { t: string }) => targeted.push(msg.t),
       onMessage: () => {},
       onClose: () => {},
       onPlayerLeft: () => {},
@@ -157,17 +181,54 @@ describe("VersusMatch 공격 라우팅", () => {
       transport, opponents: ["X", "Y", "Z"],
     });
 
-    m.setFocus(["Y"]);
-    expect([...m.focus]).toEqual(["Y"]);
-    expect(sent.filter((s) => s.t === "focus")).toEqual([{ target: "Y", t: "focus" }]);
+    for (let i = 0; i < 12; i++) m.tick(1, CMD());
+    expect(sent.filter((t) => t === "sync").length).toBe(3);
+    expect(targeted).toEqual([]);
+  });
 
-    // 보는 대상을 둘로 늘리면 새로 본 쪽에만 알린다
-    m.setFocus(["Y", "Z"]);
-    expect(sent.filter((s) => s.t === "focus").map((s) => s.target)).toEqual(["Y", "Z"]);
-    // 다시 좁히면 빠진 쪽에 해제를 알린다
-    m.setFocus(["Z"]);
-    expect(sent.filter((s) => s.t === "focus").map((s) => s.target)).toEqual(["Y", "Z", "Y"]);
-    expect([...m.focus]).toEqual(["Z"]);
+  it("낮은 빈도로 상태 키프레임을 함께 보낸다", () => {
+    // 순단으로 입력이 통째로 빈 구간이 생기면 미러가 그 자리에 멈춘다.
+    // 이걸 받아야 다시 이어 붙는다.
+    const sent: string[] = [];
+    const transport = {
+      myId: "A",
+      send: (msg: { t: string }) => sent.push(msg.t),
+      sendTo: () => {},
+      onMessage: () => {},
+      onClose: () => {},
+      onPlayerLeft: () => {},
+      onPlayerJoined: () => {},
+      close: () => {},
+    };
+    const m = new VersusMatch({
+      rule: { ...RULE }, handling: DEFAULT_HANDLING, seed: 3, myAttackMul: 1,
+      transport, opponents: ["X"],
+    });
+
+    for (let i = 0; i < 119; i++) m.tick(1, CMD());
+    expect(sent.filter((t) => t === "full")).toHaveLength(0);
+    m.tick(1, CMD());
+    expect(sent.filter((t) => t === "full")).toHaveLength(1);
+    // 스트림이 먼저 나가야 한다 — 순서가 뒤집히면 미러가 지나간 입력을 다시 먹는다
+    expect(sent.lastIndexOf("sync")).toBeLessThan(sent.lastIndexOf("full"));
+  });
+
+  it("스냅샷만 보내는 상대(옛 봇)는 받은 그대로 얹는다", () => {
+    const [a, b] = makePair();
+    bothToPlaying(a, b);
+    setupQuad(a, 4);
+    // 입력 스트림 대신 보드를 통째로 보내는 옛 방식
+    (b as unknown as { onMessage: (m: unknown, from: string) => void }).onMessage(
+      { t: "board", snap: a.local.serialize() },
+      "A",
+    );
+
+    const mirror = b.remotes.get("A")!;
+    expect(mirror.snapshotOnly).toBe(true);
+    let filled = 0;
+    const grid = mirror.game.board.grid;
+    for (let i = 0; i < grid.length; i++) if (grid[i] !== 0) filled++;
+    expect(filled).toBeGreaterThan(0);
   });
 });
 
@@ -252,7 +313,7 @@ describe("타깃 전략", () => {
 
     // Y의 미러 보드만 위험하게 채운다
     const y = m.remotes.get("Y")!;
-    const yb = y.board;
+    const yb = y.game.board;
     for (let row = yb.bufferRows; row < yb.totalRows; row++) {
       yb.grid[row * yb.cols] = Piece.Garbage;
     }
@@ -290,12 +351,11 @@ describe("대전 리플레이 기록", () => {
   /** VersusSession이 하는 것과 같은 배선으로 한 판을 돌린다 */
   function playRecorded(seed = 909) {
     const [a, b] = makePair(seed);
-    const rec = new ReplayRecorder();
-    // 세션과 같은 자리: 가비지를 받으면 기록기에도 남긴다
-    a.onGarbage = (holes) => rec.pushGarbage(holes);
+    // 기록기는 매치가 들고 있다 — 검증에 낼 로그와 지금 상대에게 흘려보내는
+    // 스트림이 같은 자료여야 둘이 어긋날 수 없다
+    const rec = a.recorder;
 
     const step = (cmd: InputCommands) => {
-      rec.commitFrame();
       a.tick(1, cmd);
       b.tick(1, CMD());
     };

@@ -101,10 +101,13 @@ export function MatchStage({
         gfx: { ...settings.gfx, nextCount: match.config.rule.nextCount },
         audio: settings.audio,
         perf: { ...settings.perf, simRate: match.config.simRate },
-        seed: match.config.sharePieces ? match.seed : (Math.random() * 0xffffffff) >>> 0,
+        // 시드는 서버가 나눠준다 — 조각 순서를 공유하지 않는 방이라도 서버가
+        // 각자의 시드를 알아야 리플레이를 재현해 볼 수 있다
+        seed: match.sim.find((s) => s.id === myId)?.seed ?? match.seed,
         myAttackMul: match.config.attackMul,
         transport: net.transport(),
         opponents,
+        sim: match.sim,
         strategy: "random",
         undoEnabled: match.config.undo,
         spectating: iAmSpectator,

@@ -5,6 +5,7 @@ import type {
   GameMessage,
   RoomState,
   MatchConfig,
+  MatchSimParams,
   PlayerRole,
   BotRunnerInfo,
 } from "./protocol";
@@ -67,7 +68,13 @@ export class NetClient {
   onResumed?: (code: string) => void;
   /** 방 상태가 갱신될 때마다(입퇴장·역할·설정·페이즈) */
   onRoomState?: (state: RoomState) => void;
-  onMatchStart?: (matchId: number, seed: number, config: MatchConfig, players: string[]) => void;
+  onMatchStart?: (
+    matchId: number,
+    seed: number,
+    config: MatchConfig,
+    players: string[],
+    sim: MatchSimParams[],
+  ) => void;
   onKO?: (playerId: string, placement: number, remaining: number) => void;
   onMatchEnd?: (
     matchId: number,
@@ -181,7 +188,7 @@ export class NetClient {
         this.applyState(msg.state);
         break;
       case "match-start":
-        this.onMatchStart?.(msg.matchId, msg.seed, msg.config, msg.players);
+        this.onMatchStart?.(msg.matchId, msg.seed, msg.config, msg.players, msg.sim ?? []);
         break;
       case "ko":
         this.onKO?.(msg.playerId, msg.placement, msg.remaining);
@@ -238,7 +245,13 @@ export class NetClient {
     }
     const stamped = { ...msg, cid: ++this.cid };
     this.pending.push({ cid: stamped.cid, msg: stamped });
-    if (this.pending.length > 256) this.pending.shift();
+    /*
+      끊긴 동안 쌓인 것을 복귀하며 다시 보내기 위한 버퍼다. 판이 도는 중에는
+      입력 스트림이 초당 열 몇 개씩 흐르므로, 자리 유예(15초)를 덮으려면
+      넉넉해야 한다 — 여기서 잘리면 그 구간의 입력이 영영 사라지고 남들 화면의
+      내 보드가 그만큼 어긋난 채로 남는다.
+    */
+    if (this.pending.length > 1024) this.pending.shift();
     if (this.ws && this.state === "open") this.ws.send(JSON.stringify(stamped));
   }
 
@@ -253,11 +266,15 @@ export class NetClient {
 
   // ---- 방 ------------------------------------------------------------------
 
-  createRoom(maxPlayers = 4, nick?: string): void {
-    this.sendControl({ t: "create", maxPlayers, nick });
+  /**
+   * handling을 함께 넘기면 앉자마자 감도가 등록된다. 나중에 따로 알리면 호스트가
+   * 곧바로 시작을 눌렀을 때 그 사이에 끼어 매치가 방 기본값으로 열릴 수 있다.
+   */
+  createRoom(maxPlayers = 4, nick?: string, handling?: Handling): void {
+    this.sendControl({ t: "create", maxPlayers, nick, handling });
   }
-  joinRoom(code: string, nick?: string): void {
-    this.sendControl({ t: "join", code: code.toUpperCase().trim(), nick });
+  joinRoom(code: string, nick?: string, handling?: Handling): void {
+    this.sendControl({ t: "join", code: code.toUpperCase().trim(), nick, handling });
   }
   leaveRoom(): void {
     this.sendControl({ t: "leave" });
@@ -270,6 +287,13 @@ export class NetClient {
   }
   setConfig(config: MatchConfig): void {
     this.sendControl({ t: "config", config });
+  }
+  /**
+   * 내 감도를 서버에 알린다. 남들이 내 보드를 입력만으로 따라 돌리려면 감도를
+   * 알아야 하는데, 이건 방 설정이 아니라 개인 설정이라 서버가 따로 모아둔다.
+   */
+  setHandling(handling: Handling): void {
+    this.sendControl({ t: "handling", handling });
   }
   startMatch(): void {
     this.sendControl({ t: "start-match" });

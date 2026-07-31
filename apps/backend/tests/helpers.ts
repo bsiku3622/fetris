@@ -149,9 +149,14 @@ export async function createRoom(
 }
 
 /** 게스트를 입장시키고 입장 응답까지 받는다 */
-export async function joinRoom(url: string, code: string, nick: string): Promise<Client> {
+export async function joinRoom(
+  url: string,
+  code: string,
+  nick: string,
+  handling?: unknown,
+): Promise<Client> {
   const guest = await Client.connect(url);
-  guest.send({ t: "join", code, nick });
+  guest.send({ t: "join", code, nick, handling });
   const joined = await guest.next();
   if (joined.t !== "joined") throw new Error(`입장 실패: ${JSON.stringify(joined)}`);
   return guest;

@@ -86,6 +86,13 @@ export interface MatchConfig {
   firstTo: number;
 }
 
+/** 참가자 한 명을 재현하는 데 필요한 조건 */
+export interface MatchSimParams {
+  id: string;
+  seed: number;
+  handling: unknown;
+}
+
 /** 방 전체 상태 스냅샷 — 대기실 변화가 있을 때마다 브로드캐스트한다. */
 export interface RoomState {
   code: string;
@@ -116,9 +123,10 @@ export interface BotRunnerInfo {
  * 알려주면 클라가 그 뒤로 보냈던 것만 다시 보내면 된다.
  */
 type ClientControlBody =
-  | { t: "create"; maxPlayers?: number; nick?: string }
+  /** handling을 함께 주면 앉자마자 감도가 등록된다(별도 메시지를 기다리는 틈이 없다) */
+  | { t: "create"; maxPlayers?: number; nick?: string; handling?: unknown }
   /** ticket이 있으면 add-bot으로 예약된 슬롯에 착석(봇 경로 전용) */
-  | { t: "join"; code: string; nick?: string; ticket?: string }
+  | { t: "join"; code: string; nick?: string; ticket?: string; handling?: unknown }
   | { t: "leave" }
   | { t: "relay"; msg: GameMessage }
   | { t: "relay-to"; targetId: string; msg: GameMessage }
@@ -126,6 +134,12 @@ type ClientControlBody =
   | { t: "set-role"; role: PlayerRole }
   /** 호스트 전용: 매치 설정 갱신 */
   | { t: "config"; config: MatchConfig }
+  /**
+   * 내 감도를 알린다. 감도는 마우스 감도처럼 개인 설정이라 사람마다 다른데,
+   * 남들이 내 보드를 입력만으로 따라 돌리려면 이 값을 알아야 한다.
+   * 서버는 해석하지 않고 보관했다가 매치 시작 때 방에 실어 보낸다.
+   */
+  | { t: "handling"; handling: unknown }
   /** 호스트 전용: 매치 시작 */
   | { t: "start-match" }
   /** 결과 화면 대기시간을 건너뛴다 — 시리즈 도중이면 곧바로 다음 판 (results 전용) */
@@ -203,7 +217,21 @@ type ServerControlBody =
   /** 방 상태가 바뀔 때마다(입퇴장·역할·설정·페이즈) 전체 스냅샷 */
   | { t: "state"; state: RoomState }
   /** 매치 개시 — 참가자는 이 시드로 동시에 시작한다 */
-  | { t: "match-start"; matchId: number; seed: number; config: MatchConfig; players: string[] }
+  | {
+      t: "match-start";
+      matchId: number;
+      seed: number;
+      config: MatchConfig;
+      players: string[];
+      /**
+       * 참가자별 시드·감도. 서로의 보드를 입력만으로 따라 돌리려면 둘 다
+       * 있어야 한다 — 시드가 조각 순서를, 감도가 키의 해석을 정한다.
+       *
+       * 시드를 서버가 나눠주는 이유는 검증 때문이다. 조각 순서를 공유하지 않는
+       * 방에서도 서버가 각자의 시드를 알고 있어야 리플레이를 재현해 볼 수 있다.
+       */
+      sim: MatchSimParams[];
+    }
   /** 누군가 탈락 — placement는 확정된 순위, remaining은 남은 생존자 수 */
   | { t: "ko"; playerId: string; placement: number; remaining: number }
   /**

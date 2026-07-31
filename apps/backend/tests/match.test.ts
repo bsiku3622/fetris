@@ -3,7 +3,7 @@ import { runReplay, fingerprint } from "@fetris/engine/replay";
 import type { RelayServer } from "../src/server.js";
 import { Client, startTestServer, createRoom, joinRoom, playerIn, TEST_CONFIG } from "./helpers.js";
 import { shapeOf } from "@fetris/engine/pieces";
-import { STANDARD_RULESET } from "@fetris/engine/config";
+import { STANDARD_RULESET, DEFAULT_HANDLING } from "@fetris/engine/config";
 
 // 결과 표시를 짧게 줄여 실제 전이를 기다릴 수 있게 한다
 const RESULTS = 120;
@@ -490,6 +490,7 @@ describe("매치 진행", () => {
     guest.send({
       t: "replay",
       matchId: start.matchId,
+      // 제출자가 시드를 고쳐 불러도 서버가 배정한 값이 쓰인다
       seed: 4242,
       frames: 90,
       keys,
@@ -497,12 +498,14 @@ describe("매치 진행", () => {
       fingerprint: "abcd1234",
     });
 
+    const assignedSeed = start.sim.find((s) => s.id === guestId)?.seed;
+
     // 관전자와 다른 참가자 모두 그 기록을 받는다
     for (const c of [watcher, host]) {
       const rec = await c.waitFor("replay-record");
       expect(rec.matchId).toBe(start.matchId);
       expect(rec.playerId).toBe(guestId);
-      expect(rec.seed).toBe(4242);
+      expect(rec.seed).toBe(assignedSeed);
       expect(rec.frames).toBe(90);
       expect(rec.keys).toEqual(keys);
       expect(rec.garbage).toEqual(garbage);
@@ -512,6 +515,57 @@ describe("매치 진행", () => {
     host.close();
     guest.close();
     watcher.close();
+  });
+
+  it("참가자별 시드와 감도를 매치 시작에 함께 실어 보낸다", async () => {
+    // 서로의 보드를 입력만으로 따라 돌리려면 둘 다 있어야 한다 —
+    // 시드가 조각 순서를, 감도가 키의 해석을 정한다.
+    const { host, code, state } = await createRoom(url);
+    const hostId = state.players[0].id;
+    host.send({ t: "config", config: TEST_CONFIG });
+    // 게스트만 감도를 다르게 쓴다. 앉을 때 함께 보내므로 호스트가 곧바로
+    // 시작을 눌러도 그 사이에 끼어 방 기본값으로 열리지 않는다.
+    const guest = await joinRoom(url, code, "G1", { ...DEFAULT_HANDLING, das: 3, arr: 0 });
+    await host.waitState((st) => st.players.length === 2);
+    host.drain();
+
+    host.send({ t: "start-match" });
+    const start = await host.waitFor("match-start");
+    const guestId = start.players.find((id) => id !== hostId) as string;
+
+    expect(start.sim.map((s) => s.id).sort()).toEqual([hostId, guestId].sort());
+    const mine = start.sim.find((s) => s.id === hostId);
+    const theirs = start.sim.find((s) => s.id === guestId);
+    // 조각 순서를 공유하는 방이므로 시드는 같다
+    expect(mine?.seed).toBe(start.seed);
+    expect(theirs?.seed).toBe(start.seed);
+    // 감도는 각자의 것이다 — 알리지 않은 사람은 방 설정을 쓴다
+    expect((theirs?.handling as { das: number }).das).toBe(3);
+    expect((mine?.handling as { das: number }).das).toBe(DEFAULT_HANDLING.das);
+
+    host.close();
+    guest.close();
+  });
+
+  it("조각 순서를 공유하지 않으면 시드를 사람마다 다르게 나눠준다", async () => {
+    // 예전에는 각자가 자기 시드를 뽑았다. 그러면 서버에 재현할 근거가 없어
+    // 검증이 통째로 꺼졌고, 남들도 그 사람 보드를 따라 돌릴 수 없었다.
+    const { host, code, state } = await createRoom(url);
+    const hostId = state.players[0].id;
+    host.send({ t: "config", config: { ...TEST_CONFIG, sharePieces: false } });
+    const guest = await joinRoom(url, code, "G1");
+    await host.waitState((st) => st.players.length === 2);
+    host.drain();
+
+    host.send({ t: "start-match" });
+    const start = await host.waitFor("match-start");
+    const guestId = start.players.find((id) => id !== hostId) as string;
+    const mine = start.sim.find((s) => s.id === hostId)?.seed;
+    const theirs = start.sim.find((s) => s.id === guestId)?.seed;
+    expect(mine).not.toBe(theirs);
+
+    host.close();
+    guest.close();
   });
 
   it("서버가 판을 직접 녹화해 누구에게나 내준다", async () => {

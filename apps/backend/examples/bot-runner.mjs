@@ -264,8 +264,11 @@ function joinAsBot({ code, ticket, nick }) {
         }
         hitBy.set(from, frame);
         break;
+      // 사람 클라이언트는 보드 대신 입력을 흘려보내고, 상태는 낮은 빈도의
+      // 키프레임(full)으로만 온다. 여기서는 elims 전략에 쓸 스택 높이만
+      // 알면 되므로 상태가 실린 메시지만 미러에 얹는다.
+      case "full":
       case "board": {
-        // 상대 보드를 미러에 적용 — elims 전략에 쓴다
         if (!config) break;
         let m = mirrors.get(from);
         if (!m) {
@@ -343,7 +346,9 @@ function joinAsBot({ code, ticket, nick }) {
     // 참가자가 아니면(관전 상태) 판을 열지 않는다
     if (!msg.players.includes(myId)) return;
 
-    const seed = config.sharePieces ? msg.seed : (Math.random() * 0xffffffff) >>> 0;
+    // 시드는 서버가 나눠준다 — 조각 순서를 공유하지 않는 방이라도 서버가 내
+    // 시드를 알고 있어야 제출한 기록을 재현해 볼 수 있다
+    const seed = (msg.sim ?? []).find((s) => s.id === myId)?.seed ?? msg.seed;
     game = new Game(config.rule, config.handling, seed);
     game.attackMultiplier = config.attackMul;
     plan = null;

@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NetClient } from "../net/client";
-import type { BotRunnerInfo, GameMessage, MatchConfig, PlayerRole, RoomState } from "../net/protocol";
+import type {
+  BotRunnerInfo,
+  GameMessage,
+  MatchConfig,
+  MatchSimParams,
+  PlayerRole,
+  RoomState,
+} from "../net/protocol";
 import { MATCH_REPLAY_FORMAT } from "@fetris/engine/replay";
 import type { MatchReplayFile, MatchReplayPlayerEntry } from "@fetris/engine/replay";
+import type { Handling } from "@fetris/engine/types";
 
 // ============================================================================
 // useRoomSession — 방 연결을 화면보다 위층에서 유지하는 훅.
@@ -22,6 +30,8 @@ export interface MatchStartInfo {
   config: MatchConfig;
   /** 참가자 id (나 포함) */
   players: string[];
+  /** 참가자별 시드·감도 — 서로의 보드를 입력만으로 따라 돌리는 데 쓴다 */
+  sim: MatchSimParams[];
 }
 
 export interface MatchEndInfo {
@@ -58,10 +68,19 @@ export interface RoomSession {
 /** 방금 끝난 판을 내려받을 수 있는지 */
   canDownloadMatch: boolean;
 
-  connect(url: string, mode: "host" | "join", opts: { code?: string; maxPlayers?: number; nick: string }): Promise<void>;
+  connect(
+    url: string,
+    mode: "host" | "join",
+    opts: { code?: string; maxPlayers?: number; nick: string; handling?: Handling },
+  ): Promise<void>;
   leave(): void;
   setRole(role: PlayerRole): void;
   setConfig(config: MatchConfig): void;
+  /**
+   * 내 감도를 서버에 알린다. 감도는 개인 설정이라 방 설정과 별개인데, 남들이
+   * 내 보드를 입력만으로 따라 돌리려면 이 값이 필요하다.
+   */
+  setHandling(handling: Handling): void;
   startMatch(): void;
   /** 결과 대기시간을 건너뛰고 대기실로 */
   skipResults(): void;
@@ -120,7 +139,7 @@ export function useRoomSession(): RoomSession {
   /** 콜백 안에서 최신 매치 정보를 보기 위한 사본(state는 클로저에 갇힌다) */
   const matchStartRef = useRef<MatchStartInfo | null>(null);
   /** 재연결에 필요한 마지막 접속 정보 */
-  const lastConnect = useRef<{ url: string; code: string; nick: string } | null>(null);
+  const lastConnect = useRef<{ url: string; code: string; nick: string; handling?: Handling } | null>(null);
   /** 끊겼을 때 원래 자리로 돌아가기 위한 토큰 */
   const sessionToken = useRef<string | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -173,12 +192,12 @@ export function useRoomSession(): RoomSession {
         setState(s);
         if (s.phase === "lobby") setKoed(false);
       };
-      net.onMatchStart = (matchId, seed, config, players) => {
-        matchStartRef.current = { matchId, seed, config, players };
+      net.onMatchStart = (matchId, seed, config, players, sim) => {
+        matchStartRef.current = { matchId, seed, config, players, sim };
         setKoed(false);
         setMatchEnd(null);
         setRecords([]);
-        setMatchStart({ matchId, seed, config, players });
+        setMatchStart({ matchId, seed, config, players, sim });
       };
       net.onKO = (playerId) => {
         if (playerId === net.myId) setKoed(true);
@@ -280,7 +299,7 @@ export function useRoomSession(): RoomSession {
       net.onError = (reason) => {
         if (reason === "resume-failed") {
           net.session = null;
-          net.joinRoom(info.code, info.nick);
+          net.joinRoom(info.code, info.nick, info.handling);
           return;
         }
         setError(humanError(reason));
@@ -288,7 +307,7 @@ export function useRoomSession(): RoomSession {
       try {
         await net.connect();
         if (token) net.resume();
-        else net.joinRoom(info.code, info.nick);
+        else net.joinRoom(info.code, info.nick, info.handling);
       } catch {
         scheduleReconnect();
       }
@@ -299,7 +318,7 @@ export function useRoomSession(): RoomSession {
     async (
       url: string,
       mode: "host" | "join",
-      opts: { code?: string; maxPlayers?: number; nick: string },
+      opts: { code?: string; maxPlayers?: number; nick: string; handling?: Handling },
     ) => {
       setError("");
       setChat([]);
@@ -315,12 +334,12 @@ export function useRoomSession(): RoomSession {
         setCode(c);
         setMyId(net.myId);
         // 재연결 때는 방을 새로 만들 수 없으니 코드로 되돌아간다
-        lastConnect.current = { url, code: c, nick: opts.nick };
+        lastConnect.current = { url, code: c, nick: opts.nick, handling: opts.handling };
       };
       net.onJoined = (c) => {
         setCode(c);
         setMyId(net.myId);
-        lastConnect.current = { url, code: c, nick: opts.nick };
+        lastConnect.current = { url, code: c, nick: opts.nick, handling: opts.handling };
       };
       try {
         await net.connect();
@@ -328,8 +347,8 @@ export function useRoomSession(): RoomSession {
         setError("서버에 연결할 수 없습니다. 주소를 확인해주세요.");
         return;
       }
-      if (mode === "host") net.createRoom(opts.maxPlayers ?? 0, opts.nick);
-      else net.joinRoom(opts.code ?? "", opts.nick);
+      if (mode === "host") net.createRoom(opts.maxPlayers ?? 0, opts.nick, opts.handling);
+      else net.joinRoom(opts.code ?? "", opts.nick, opts.handling);
     },
     [wire],
   );
@@ -419,6 +438,7 @@ export function useRoomSession(): RoomSession {
       leave,
       setRole: (r) => netRef.current?.setRole(r),
       setConfig: (c) => netRef.current?.setConfig(c),
+      setHandling: (h) => netRef.current?.setHandling(h),
       startMatch: () => netRef.current?.startMatch(),
       skipResults: () => netRef.current?.skipResults(),
       abortSeries: () => netRef.current?.abortSeries(),

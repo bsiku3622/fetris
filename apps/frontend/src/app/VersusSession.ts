@@ -10,14 +10,14 @@ import { SoundEngine, bgmForMode } from "../audio/sound";
 import type { AudioOptions } from "../audio/sound";
 import { InputManager } from "@fetris/engine/input";
 import type { KeyMap, Action } from "@fetris/engine/input";
-import { ReplayRecorder, ReplayAction, fingerprint } from "@fetris/engine/replay";
+import { ReplayAction, fingerprint } from "@fetris/engine/replay";
 import type { MatchReplayPlayerEntry } from "@fetris/engine/replay";
 import { VersusMatch } from "./VersusMatch";
 import { liveStats } from "@fetris/engine/modes";
 import type { HudInfo } from "@fetris/engine/modes";
 import type { MultiTransport } from "../net/transport";
 import { TARGET_STRATEGIES } from "../net/protocol";
-import type { TargetStrategy } from "../net/protocol";
+import type { MatchSimParams, TargetStrategy } from "../net/protocol";
 import type { Handling, RuleSet } from "@fetris/engine/types";
 import { SpinType, Piece } from "@fetris/engine/types";
 
@@ -51,6 +51,8 @@ export interface VersusSessionOptions {
   transport: MultiTransport;
   /** 이번 매치 상대들(나 제외) */
   opponents: string[];
+  /** 참가자별 시드·감도 — 상대 보드를 입력만으로 따라 돌리는 데 쓴다 */
+  sim?: readonly MatchSimParams[];
   /** 시작 타깃 전략 */
   strategy: TargetStrategy;
   /** 교육 모드: Ctrl+Z 되돌리기 허용 */
@@ -87,8 +89,6 @@ export class VersusSession {
   private hudAccum = 0;
   private lastHud: HudInfo = { left: [], right: [] };
   private localCanvas: HTMLCanvasElement;
-  /** 서버 검증용 입력 기록 — 매치가 끝나면 통째로 제출한다 */
-  private recorder = new ReplayRecorder();
   /** 관전 모드면 내 보드를 돌리지도 그리지도 않는다 */
   private readonly spectating: boolean;
   /** 지금 크게 보고 있는 상대들 — 소리를 화면에 뜬 보드로 좁힌다 */
@@ -104,8 +104,8 @@ export class VersusSession {
   ) {
     this.cbs = cbs;
     this.gfx = opts.gfx;
-    // 상대 보드는 스냅샷 주기로만 갱신돼 조각이 떨어지는 움직임이 없다.
-    // 고스트가 "어디에 놓일지"를 알려주는 유일한 단서라, 내 보드보다 진하게 그린다.
+    // 상대 보드는 대개 썸네일이라 작다. 고스트가 "어디에 놓을 생각인지"를
+    // 알려주는 가장 눈에 띄는 단서라, 내 보드보다 진하게 그린다.
     this.remoteGfx = { ...opts.gfx, ghostOpacity: Math.max(opts.gfx.ghostOpacity, 0.55) };
     this.remoteCanvases = new Map(remoteCanvases);
     this.match = new VersusMatch({
@@ -115,6 +115,8 @@ export class VersusSession {
       myAttackMul: opts.myAttackMul,
       transport: opts.transport,
       opponents: opts.opponents,
+      sim: opts.sim,
+      simRate: opts.perf.simRate,
       strategy: opts.strategy,
     });
     this.match.local.undoEnabled = opts.undoEnabled;
@@ -127,7 +129,8 @@ export class VersusSession {
     // 상대 스냅샷 수신만 남는다.
     if (this.spectating) this.match.alive = false;
     // 내 보드가 없으면 이벤트도 없어 화면이 무음이 된다.
-    // 보고 있는 상대의 보드 변화를 소리로 옮겨 준다.
+    // 보고 있는 상대의 보드에서 일어난 일을 소리로 옮겨 준다.
+    this.match.onRemoteEvents = (playerId, events) => this.playRemoteEvents(playerId, events);
     this.match.onRemoteBeat = (playerId, beat) => this.playRemoteBeat(playerId, beat);
     this.localCanvas = localCanvas;
     this.match.onSelfKO = () => {
@@ -165,20 +168,16 @@ export class VersusSession {
 
     // 입력을 프레임 경계에 맞춰 기록한다 — pressDir의 효과가 어차피 다음
     // update부터 나타나므로, 이 기록만으로 서버가 같은 전개를 재현할 수 있다.
+    // 같은 기록이 실시간으로 상대에게 흘러가 그쪽 미러를 굴린다.
     this.input.onAction = (action, down) => {
       const mapped = REPLAY_ACTION[action];
-      if (mapped !== undefined) this.recorder.push(mapped, down);
+      if (mapped !== undefined) this.match.recorder.push(mapped, down);
     };
-    // 받은 가비지도 같이 남긴다 — 대전은 키 입력만으로 판이 결정되지 않는다
-    this.match.onGarbage = (holes) => this.recorder.pushGarbage(holes);
 
     this.loop = new GameLoop(this.match.local, opts.perf, {
       pollInput: () => this.input.poll(),
       render: (g, alpha, fps) => this.onRender(g, alpha, fps),
-      stepGame: (dt, cmd, t) => {
-        this.recorder.commitFrame();
-        this.match.tick(dt, cmd, t);
-      },
+      stepGame: (dt, cmd, t) => this.match.tick(dt, cmd, t),
     });
   }
 
@@ -259,13 +258,83 @@ export class VersusSession {
   }
 
   /**
-   * 크게 보고 있는 상대들 — 이들에게서만 고빈도 스냅샷을 받고, 소리도 이들 것만 낸다.
+   * 크게 보고 있는 상대들 — 소리를 이들 것만 낸다.
    * 화면에 나란히 떠 있으면(1대1 결승 등) 둘 다 들려야 판이 읽힌다.
+   *
+   * 예전에는 이게 네트워크에도 걸려 있었다(보는 사람에게만 스냅샷을 고빈도로
+   * 받는 장치). 지금은 입력만 흘려보내 인원이 늘어도 트래픽이 거의 늘지 않아
+   * 화면 문제로만 남았다.
    */
   setFocus(ids: readonly string[]): void {
     if (this.duel) return; // 1대1은 상대가 고정이다
     this.focusIds = new Set(ids);
-    this.match.setFocus(ids);
+  }
+
+  /**
+   * 상대 보드에서 일어난 일을 소리로 옮긴다.
+   *
+   * 미러가 진짜 게임이라 엔진 이벤트가 그대로 나온다 — 스핀·B2B·콤보까지
+   * 살아 있어서, 관전 화면도 자기 판과 같은 소리를 낸다.
+   */
+  private playRemoteEvents(playerId: string, events: GameEvent[]): void {
+    if (!this.hearing(playerId)) return;
+    const watching = this.spectating || !this.match.alive;
+
+    let cleared = 0;
+    const ring = () => {
+      for (let i = 0; i < events.length; i++) {
+        const e = events[i];
+        switch (e.type) {
+          case EventType.HardDrop:
+            this.sound.play("harddrop");
+            break;
+          case EventType.SpinDetect:
+            this.sound.spinHit((e.piece ?? Piece.T) === Piece.T);
+            break;
+          case EventType.LineClear: {
+            const n = e.a ?? 1;
+            cleared += n;
+            this.sound.clear(
+              n,
+              (e.spin ?? SpinType.None) !== SpinType.None,
+              (e.clear?.b2b ?? 0) > 1,
+              e.clear?.combo ?? 1,
+            );
+            const attack = e.clear?.attack ?? 0;
+            if (attack > 0) this.sound.spike(attack);
+            break;
+          }
+          case EventType.PerfectClear:
+            this.sound.play("pc");
+            break;
+          case EventType.GarbageIn:
+            this.sound.garbageRise(e.a ?? 1);
+            break;
+          case EventType.TopOut:
+            this.sound.death();
+            break;
+        }
+      }
+    };
+
+    // 내가 뛰는 중이면 상대 소리는 뒤로 물린다(관전 중엔 그게 유일한 소리라 그대로)
+    if (watching) {
+      ring();
+      if (cleared > 0) this.localRenderer.flash = Math.min(1, 0.3 + cleared * 0.12);
+    } else {
+      this.sound.asOpponent(ring);
+    }
+  }
+
+  /**
+   * 이 상대의 소리를 지금 낼 것인가.
+   * 소리는 화면을 따라간다 — 크게 떠 있는 보드만 울린다. 방 전체가 소리를 내면
+   * 인원이 늘수록 뭉개져서 무슨 일이 일어나는지 오히려 알 수 없다.
+   * 내가 아직 뛰는 중이라면 1대1일 때만 상대 소리를 얹는다.
+   */
+  private hearing(playerId: string): boolean {
+    if (!this.focusIds.has(playerId)) return false;
+    return this.spectating || !this.match.alive || this.duel;
   }
 
   /**
@@ -283,10 +352,8 @@ export class VersusSession {
     playerId: string,
     beat: { cleared: number; locked: number; attacked: number; b2b: number; combo: number },
   ): void {
+    if (!this.hearing(playerId)) return;
     const watching = this.spectating || !this.match.alive;
-    // 뛰는 중에 들리는 건 1대1일 때뿐이다
-    if (!watching && !this.duel) return;
-    if (!this.focusIds.has(playerId)) return;
 
     const ring = () => {
       if (beat.cleared > 0) {
@@ -320,15 +387,16 @@ export class VersusSession {
     fingerprint: string;
     stats: { piecesPlaced: number; lines: number; attack: number };
   } {
+    const recorder = this.match.recorder;
     return {
-      // sharePieces가 꺼져 있으면 내 시드는 서버가 모른다 — 같이 올려야
-      // 남들이 이 판을 재생할 수 있다
+      // 서버가 나눠준 시드 그대로. 조각 순서를 공유하지 않는 방이면 사람마다
+      // 다르므로, 남들이 이 판을 재생하려면 같이 올려야 한다
       seed: this.match.local.seed,
       // 감도도 사람마다 다르다 — 방 설정으로 재현하면 어긋난다
       handling: this.match.local.handling.h,
-      frames: this.recorder.frame,
-      keys: this.recorder.keys.slice(),
-      garbage: this.recorder.garbage.slice(),
+      frames: recorder.frame,
+      keys: recorder.keys.slice(),
+      garbage: recorder.garbage.slice(),
       fingerprint: fingerprint(this.match.local),
       stats: {
         piecesPlaced: this.match.local.stats.piecesPlaced,
@@ -341,15 +409,16 @@ export class VersusSession {
   /** 매치 리플레이에 들어갈 내 몫 — 방이 이걸 모아 판 하나로 묶는다 */
   replayEntry(meta: { playerId: string; nick: string; placement?: number }): MatchReplayPlayerEntry {
     const g = this.match.local;
+    const recorder = this.match.recorder;
     return {
       id: meta.playerId,
       nick: meta.nick,
       placement: meta.placement,
       seed: g.seed,
       handling: g.handling.h,
-      frames: this.recorder.frame,
-      keys: this.recorder.keys.slice(),
-      garbage: this.recorder.garbage.slice(),
+      frames: recorder.frame,
+      keys: recorder.keys.slice(),
+      garbage: recorder.garbage.slice(),
       fingerprint: fingerprint(g),
       stats: {
         piecesPlaced: g.stats.piecesPlaced,
@@ -416,7 +485,7 @@ export class VersusSession {
     }
     // 원격: 각 상대 미러 단순 렌더(이펙트 없음, 게이지·성적은 표시)
     for (const [playerId, renderer] of this.remoteRenderers) {
-      const remoteGame = this.match.remotes.get(playerId);
+      const remoteGame = this.match.remotes.get(playerId)?.game;
       if (!remoteGame) continue;
       // 크게 뜬 보드에만 성적을 붙인다(썸네일에는 자리가 없다)
       const hud = this.focusIds.has(playerId) ? remoteHud(remoteGame) : undefined;

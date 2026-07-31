@@ -76,12 +76,21 @@ const EMPTY_CMD: InputCommands = {
  */
 export class ReplayPlayer {
   readonly game: Game;
-  /** 총 프레임 수 */
-  readonly frames: number;
+  /**
+   * 총 프레임 수.
+   *
+   * 저장된 파일을 볼 때는 고정이지만, 생중계 미러는 상대의 입력이 도착하는
+   * 대로 늘어난다 — "여기까지는 빠짐없이 받았다"는 경계이므로 그만큼만
+   * 진행할 수 있다.
+   */
+  frames: number;
   /** 지금까지 진행한 프레임 */
   frame = 0;
 
   private opts: ReplayOptions;
+  /** 입력 로그. 생중계에서는 뒤로 계속 붙는다 */
+  private keys: ReplayKeys;
+  private garb: ReplayGarbage;
   private dt: number;
   private cmd: InputCommands = { ...EMPTY_CMD };
   private softHeld = false;
@@ -91,6 +100,8 @@ export class ReplayPlayer {
   constructor(opts: ReplayOptions) {
     this.opts = opts;
     this.frames = opts.frames;
+    this.keys = opts.keys;
+    this.garb = opts.garbage ?? [];
     this.dt = 60 / opts.simRate;
     this.game = new Game(opts.rule, opts.handling, opts.seed);
   }
@@ -102,7 +113,7 @@ export class ReplayPlayer {
   /** 한 프레임 진행. 끝에 도달했으면 false */
   step(): boolean {
     if (this.done) return false;
-    const { keys } = this.opts;
+    const keys = this.keys;
     const cmd = this.cmd;
 
     cmd.rotateCW = false;
@@ -111,8 +122,10 @@ export class ReplayPlayer {
     cmd.hardDrop = false;
     cmd.hold = false;
 
-    // 이번 프레임에 들어온 입력을 순서대로 적용
-    while (this.ki + 2 < keys.length && keys[this.ki] === this.frame) {
+    // 이번 프레임에 들어온 입력을 순서대로 적용.
+    // 로그는 프레임 오름차순이라 `<=`도 `===`와 같게 동작하지만, 키프레임으로
+    // 앞질러 간 뒤에는 지나간 항목이 남아 있을 수 있어 그것까지 소진한다.
+    while (this.ki + 2 < keys.length && keys[this.ki] <= this.frame) {
       const action = keys[this.ki + 1];
       const down = keys[this.ki + 2] === 1;
       switch (action) {
@@ -147,24 +160,61 @@ export class ReplayPlayer {
     }
 
     // 이번 프레임에 도착한 가비지를 큐에 적재(실제 판에서도 update 직전에 쌓였다)
-    const garbage = this.opts.garbage;
-    if (garbage) {
-      while (this.gi + 1 < garbage.length && garbage[this.gi] === this.frame) {
-        const n = garbage[this.gi + 1];
-        // 손상된 로그가 무한 루프를 만들지 않도록 막는다
-        if (!Number.isInteger(n) || n <= 0 || this.gi + 2 + n > garbage.length) {
-          this.gi = garbage.length;
-          break;
-        }
-        this.game.receiveGarbage({ holes: garbage.slice(this.gi + 2, this.gi + 2 + n) });
-        this.gi += 2 + n;
+    const garbage = this.garb;
+    while (this.gi + 1 < garbage.length && garbage[this.gi] <= this.frame) {
+      const n = garbage[this.gi + 1];
+      // 손상된 로그가 무한 루프를 만들지 않도록 막는다
+      if (!Number.isInteger(n) || n <= 0 || this.gi + 2 + n > garbage.length) {
+        this.gi = garbage.length;
+        break;
       }
+      this.game.receiveGarbage({ holes: garbage.slice(this.gi + 2, this.gi + 2 + n) });
+      this.gi += 2 + n;
     }
 
     cmd.softDropHeld = this.softHeld;
     this.game.update(this.dt, cmd, 0);
     this.frame++;
     return true;
+  }
+
+  /**
+   * 생중계로 들어온 입력을 뒤에 이어 붙인다.
+   *
+   * 미러는 상대가 지금 누르는 키를 받아 따라 도는 것이라 로그가 처음부터 다
+   * 있지 않다. `upto`는 상대가 "이 프레임까지는 빠짐없이 보냈다"고 알려준
+   * 경계이므로, 딱 거기까지만 진행할 수 있다(더 가면 아직 오지 않은 입력을
+   * 무시한 채 돌게 되어 어긋난다).
+   */
+  extend(upto: number, keys?: readonly number[], garbage?: readonly number[]): void {
+    if (keys) for (let i = 0; i < keys.length; i++) this.keys.push(keys[i]);
+    if (garbage) for (let i = 0; i < garbage.length; i++) this.garb.push(garbage[i]);
+    if (upto > this.frames) this.frames = upto;
+  }
+
+  /**
+   * 상태 키프레임으로 되돌린다.
+   *
+   * 입력이 통째로 빈 구간(순단 등)은 따라 돌 방법이 없다. 그럴 때 상대가 보낸
+   * 상태를 그대로 받아 이어 가는 통로다 — 건너뛴 구간의 입력은 버린다.
+   */
+  syncTo(snap: GameSnapshot, frame: number): void {
+    // 눌린 채로 남은 방향키가 있으면 새 상태에 끌려 들어간다
+    this.game.releaseDir(-1);
+    this.game.releaseDir(1);
+    this.softHeld = false;
+    this.game.deserialize(snap);
+    this.frame = frame;
+    if (this.frames < frame) this.frames = frame;
+    while (this.ki + 2 < this.keys.length && this.keys[this.ki] < frame) this.ki += 3;
+    while (this.gi + 1 < this.garb.length && this.garb[this.gi] < frame) {
+      const n = this.garb[this.gi + 1];
+      if (!Number.isInteger(n) || n <= 0 || this.gi + 2 + n > this.garb.length) {
+        this.gi = this.garb.length;
+        break;
+      }
+      this.gi += 2 + n;
+    }
   }
 
   /**

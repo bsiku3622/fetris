@@ -60,8 +60,15 @@ interface Player {
   graceTimer: ReturnType<typeof setTimeout> | null;
   /** 이 사람에게 보낸 마지막 메시지 번호 */
   outId: number;
-  /** 최근에 보낸 메시지들 — resume 때 빠진 것만 다시 보낸다 */
-  outBuffer: { id: number; data: string }[];
+  /**
+   * 최근에 보낸 제어 메시지 — resume 때 빠진 것만 다시 보낸다.
+   * 중계와 따로 두는 이유는, 판이 도는 중에는 입력 스트림이 초당 백 개 넘게
+   * 흐르기 때문이다. 한 통에 섞으면 놓치면 안 되는 KO·매치 종료가 게임
+   * 트래픽에 밀려 통째로 빠져버린다.
+   */
+  outControl: { id: number; data: string }[];
+  /** 최근에 중계한 게임 페이로드 */
+  outRelay: { id: number; data: string }[];
   /** 이 사람에게서 마지막으로 처리한 메시지 번호 */
   inId: number;
   isHost: boolean;
@@ -73,6 +80,13 @@ interface Player {
   alive: boolean;
   placement: number | null;
   wins: number;
+  /**
+   * 이 사람이 쓰는 감도. 서버는 내용을 해석하지 않고 매치 시작 때 방에 실어
+   * 보내기만 한다 — 남들이 이 사람 보드를 입력만으로 따라 돌리는 데 필요하다.
+   */
+  handling: unknown;
+  /** 이번 매치에서 이 사람에게 배정한 시드 */
+  seed: number;
 }
 
 interface Room {
@@ -180,8 +194,14 @@ const MIN_PARTICIPANTS = 2;
  * 하려는 것이고, 이 안에 resume하지 못하면 그때 탈락 처리한다.
  */
 const DISCONNECT_GRACE_MS = 15_000;
-/** resume 때 되돌려줄 수 있는 최근 메시지 수 — 이보다 밀리면 복구 불가 */
-const RESUME_BUFFER = 256;
+/** resume 때 되돌려줄 수 있는 최근 제어 메시지 수 */
+const RESUME_CONTROL_BUFFER = 256;
+/**
+ * 중계 페이로드 쪽 상한. 8인 방이면 입력 스트림만 초당 백 개가 넘게 오가므로
+ * 자리 유예(15초)를 덮으려면 이 정도가 필요하다. 여기서 잘린 구간은 상태
+ * 키프레임이 도착할 때 한 번에 메워진다.
+ */
+const RESUME_RELAY_BUFFER = 2048;
 /** 리플레이 재현 상한 — 악의적으로 거대한 로그를 보내 서버를 묶는 걸 막는다 */
 const MAX_REPLAY_FRAMES = 60 * 60 * 30; // 30분(60Hz 기준)
 const MAX_REPLAY_KEYS = 3 * 200_000;
@@ -239,8 +259,11 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     connected: true,
     graceTimer: null,
     outId: 0,
-    outBuffer: [] as { id: number; data: string }[],
+    outControl: [] as { id: number; data: string }[],
+    outRelay: [] as { id: number; data: string }[],
     inId: 0,
+    handling: undefined as unknown,
+    seed: 0,
   });
 
   const rooms = new Map<string, Room>();
@@ -270,8 +293,11 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
   const sendToPlayer = (player: Player, msg: ServerControl): void => {
     const stamped = { ...msg, id: ++player.outId };
     const data = JSON.stringify(stamped);
-    player.outBuffer.push({ id: stamped.id, data });
-    if (player.outBuffer.length > RESUME_BUFFER) player.outBuffer.shift();
+    const relay = msg.t === "relay";
+    const buf = relay ? player.outRelay : player.outControl;
+    buf.push({ id: stamped.id, data });
+    const cap = relay ? RESUME_RELAY_BUFFER : RESUME_CONTROL_BUFFER;
+    if (buf.length > cap) buf.shift();
     if (player.connected && player.ws.readyState === WebSocket.OPEN) player.ws.send(data);
   };
 
@@ -506,7 +532,9 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
   const record = (room: Room, playerId: string, msg: GameMessage): void => {
     const rec = room.recording;
     if (!rec || room.phase !== "playing") return;
-    if (msg?.t !== "board") return;
+    // 보드 상태가 실려 오는 두 가지 — 입력 릴레이의 키프레임과, 입력을 흘리지
+    // 않는 옛 봇의 스냅샷. 서버는 어느 쪽이든 시간축에 그대로 붙여 둔다.
+    if (msg?.t !== "full" && msg?.t !== "board") return;
     const snap = (msg as { snap?: unknown }).snap;
     pushFrame(room, { ms: Date.now() - rec.startedAt, id: playerId, snap });
     // 계획한 자리에 조각이 놓였으면 여기서 걷어낸다
@@ -643,6 +671,15 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     }
     room.phase = "playing";
     room.seed = (Math.random() * 0xffffffff) >>> 0;
+    /*
+      시드를 서버가 나눠준다. 예전엔 조각 순서를 공유하지 않는 방에서 각자가
+      자기 시드를 뽑았는데, 그러면 서버에 재현할 근거가 없어 검증이 통째로
+      꺼졌고 남들도 그 사람 보드를 따라 돌릴 수 없었다.
+    */
+    const share = room.config?.sharePieces !== false;
+    for (const p of roster) {
+      p.seed = share ? room.seed : (Math.random() * 0xffffffff) >>> 0;
+    }
     clearPlans(room);
     // 판을 서버가 직접 받아 적는다. 참가자가 기록을 내주든 말든(리플레이를
     // 지원하지 않는 봇이라도) 판 전체가 남아야 하기 때문이다.
@@ -660,6 +697,12 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       seed: room.seed,
       config: room.config as MatchConfig,
       players: room.participants.slice(),
+      // 서로의 보드를 입력만으로 따라 돌리려면 시드와 감도가 둘 다 필요하다
+      sim: roster.map((p) => ({
+        id: p.id,
+        seed: p.seed,
+        handling: p.handling ?? (room.config as MatchConfig).handling,
+      })),
     });
     broadcastState(room);
   };
@@ -671,8 +714,9 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
    * 어긋나면 제출자에게 알리고 로그를 남긴다(자동 제재는 하지 않는다 —
    * 오탐이 정상 플레이어를 쫓아내는 쪽이 더 나쁘다).
    *
-   * 재현은 CPU를 쓰므로 이벤트 루프 밖으로 미룬다. sharePieces가 꺼져 있으면
-   * 각자 다른 시드로 돌았기 때문에 서버가 재현할 근거가 없어 건너뛴다.
+   * 재현은 CPU를 쓰므로 이벤트 루프 밖으로 미룬다. 시드는 서버가 나눠준 값을
+   * 쓴다 — 조각 순서를 공유하지 않는 방이라도 서버가 각자의 시드를 알고 있어서
+   * 예전처럼 검증을 통째로 건너뛸 필요가 없다.
    *
    * 받은 가비지는 제출자가 함께 신고한다 — 서버는 게임 페이로드를 해석하지 않아
    * 대조할 원본이 없다. 즉 이 검증이 잡는 것은 "제출한 입력이 정말 그 결과를
@@ -697,17 +741,18 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     // 것으로만 그 경기를 볼 수 있는데, 참가자가 검증 제출과 별개로 한 번 더
     // 나눠주기를 기다리면 그렇게 하지 않는 봇의 판은 영영 사라진다.
     // 검증에 이미 필요한 제출 하나로 배포까지 끝낸다.
-    const submittedSeed = Math.floor(Number(raw.seed));
-    // 감도는 개인 설정이므로 제출자가 실제로 쓴 값을 그대로 쓴다. 자기 신고이긴
-    // 하지만 어차피 전부 정상 범위의 설정값이라 이걸로 얻는 이득은 없다.
-    const handling = (raw.handling ?? config.handling) as Handling;
+    // 시드는 서버가 배정한 값이 진실이다(제출자가 고쳐 부를 여지를 남기지 않는다)
+    const seed = player.seed || room.seed;
+    // 감도는 개인 설정이므로 이 사람이 알려온 값을 쓴다. 자기 신고이긴 하지만
+    // 어차피 전부 정상 범위의 설정값이라 이걸로 얻는 이득은 없다.
+    const handling = (player.handling ?? raw.handling ?? config.handling) as Handling;
     broadcast(
       room,
       {
         t: "replay-record",
         matchId: raw.matchId,
         playerId: player.id,
-        seed: Number.isFinite(submittedSeed) ? submittedSeed >>> 0 : room.seed,
+        seed,
         handling,
         frames,
         keys: raw.keys,
@@ -718,11 +763,6 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       player.ws,
     );
 
-    // 재현 대조는 모두가 같은 조각 순서를 받았을 때만 가능하다 —
-    // 시드가 각자 다르면 서버에는 맞춰볼 근거가 없다.
-    if (!config.sharePieces) return;
-
-    const seed = room.seed;
     const nick = player.nick;
     const ws = player.ws;
     setImmediate(() => {
@@ -920,6 +960,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           wins: 0,
           ...newSessionFields(),
         };
+        if (raw.handling && typeof raw.handling === "object") player.handling = raw.handling;
         const room: Room = {
           code,
           players: [player],
@@ -968,10 +1009,13 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
         sockToPlayer.set(ws, { room, player });
         alive.set(ws, 0);
 
-        // 어디까지 받았는지 듣고, 그 뒤에 보낸 것만 다시 보낸다
+        // 어디까지 받았는지 듣고, 그 뒤에 보낸 것만 다시 보낸다.
+        // 제어와 중계를 따로 담아 두었으므로 번호순으로 다시 합쳐 보낸다.
         const lastSeen = Math.floor(Number(raw.lastSeenId));
         const missed = Number.isFinite(lastSeen)
-          ? player.outBuffer.filter((m) => m.id > lastSeen)
+          ? [...player.outControl, ...player.outRelay]
+              .filter((m) => m.id > lastSeen)
+              .sort((a, b) => a.id - b.id)
           : [];
         send(ws, {
           t: "resumed",
@@ -1035,6 +1079,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           wins: 0,
           ...newSessionFields(),
         };
+        if (raw.handling && typeof raw.handling === "object") player.handling = raw.handling;
         room.players.push(player);
         sockToPlayer.set(ws, { room, player });
         sessions.set(player.session, { room, player });
@@ -1098,6 +1143,16 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
         }
         entry.room.config = raw.config;
         broadcastState(entry.room);
+        break;
+      }
+      case "handling": {
+        // 감도는 개인 설정이라 방 설정과 별개다. 서버는 내용을 해석하지 않고
+        // 들고 있다가 매치 시작 때 방에 실어 보낸다.
+        const entry = sockToPlayer.get(ws);
+        if (!entry) return;
+        if (raw.handling && typeof raw.handling === "object") {
+          entry.player.handling = raw.handling;
+        }
         break;
       }
       case "start-match": {

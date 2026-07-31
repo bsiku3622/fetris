@@ -54,9 +54,16 @@ export class Randomizer {
     this.history = [];
   }
 
-  /** 전체 상태 스냅샷(deep copy) */
+  /**
+   * 전체 상태 스냅샷(deep copy).
+   *
+   * a는 부호 없는 32비트로 내보낸다. 내부 계산(`| 0`)에서는 음수가 되기도 하는데
+   * 어차피 restore가 `>>> 0`으로 되돌리므로 값 자체는 같다. 다만 표기가 갈리면
+   * 같은 판인데도 스냅샷 문자열이 달라져, 상태를 그대로 받아 이어 가는 쪽에서
+   * 지문이 어긋난 것처럼 보인다.
+   */
   snapshot(): RandomizerState {
-    return { a: this.a, bag: this.bag.slice(), bagIndex: this.bagIndex, history: this.history.slice() };
+    return { a: this.a >>> 0, bag: this.bag.slice(), bagIndex: this.bagIndex, history: this.history.slice() };
   }
 
   /** 스냅샷 복원 */
