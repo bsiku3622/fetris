@@ -6,7 +6,12 @@
 //   1. `/bot`에 붙어 `bot-hello`로 등록하고 대기(control-plane 연결).
 //   2. 호스트가 봇을 부르면 `bot-invite`(code + ticket)가 온다.
 //   3. 초대마다 `/bot` 연결을 새로 열어 ticket으로 join(data-plane 연결).
-//   4. `match-start`를 받으면 같은 시드로 판을 열고 직접 둔다.
+//   4. `match-start`를 받으면 서버가 나눠준 시드로 판을 열고 직접 둔다.
+//
+// 방에 보내는 것은 **보드가 아니라 누른 키**다. 프레임이 찍힌 입력을 `sync`로
+// 흘려보내면 사람들 화면에서 이 봇의 판이 그대로 다시 돌아간다 — 스냅샷을
+// 뿌리던 때보다 훨씬 가볍고, 조각이 끊기지 않고 실제로 떨어져 보인다.
+// 반대로 상대 판도 같은 방식으로 받아 미러로 돌린다.
 //
 // 두뇌는 "모든 회전 × 모든 열을 놓아보고 점수가 가장 낮은 자리를 고르는" 방식이다.
 // 구멍·굴곡·높이에 가중치를 주는 단순한 평가지만 꽤 오래 버틴다. 여기를 고치는 게
@@ -26,6 +31,7 @@
 
 import { WebSocket } from "ws";
 import { Game, EventType } from "@fetris/engine/game";
+import { BoardMirror } from "@fetris/engine/mirror";
 import { ReplayRecorder, ReplayAction, fingerprint, REPLAY_FORMAT } from "@fetris/engine/replay";
 import { shapeOf } from "@fetris/engine/pieces";
 import { Piece } from "@fetris/engine/types";
@@ -133,6 +139,15 @@ const EMPTY_CMD = {
   hardDrop: false, hold: false, softDropHeld: false,
 };
 
+/** 입력을 흘려보내는 주기(프레임). 사람 클라이언트와 같은 값이다. */
+const STREAM_FRAMES = 4;
+/**
+ * 상태 키프레임 주기(프레임). 순단으로 입력이 통째로 빈 구간이 생기면 남의
+ * 미러가 그 자리에 멈추는데, 이걸 받아야 다시 이어 붙는다.
+ * 스트림 주기의 배수여야 같은 틱에서 스트림이 먼저 나간다.
+ */
+const KEYFRAME_FRAMES = 120;
+
 // ---------------------------------------------------------------------------
 // control-plane — 초대를 기다리는 러너 연결
 // ---------------------------------------------------------------------------
@@ -180,7 +195,7 @@ function connectRunner() {
 function joinAsBot({ code, ticket, nick }) {
   const ws = new WebSocket(botUrl());
   const settings = { ...defaults };
-  /** playerId → 상대 미러(보드 스냅샷을 적용해 둔다) */
+  /** playerId → 상대 미러(받은 입력으로 그 사람 판을 그대로 다시 돌린다) */
   const mirrors = new Map();
   /** 상대별 내가 보낸 공격량 / 나를 때린 시각 */
   const sentTo = new Map();
@@ -189,14 +204,21 @@ function joinAsBot({ code, ticket, nick }) {
   let myId = null;
   let game = null;
   let loop = null;
-  let snapTimer = null;
   let plan = null;
   let alive = [];
   let config = null;
   let sinceDrop = 0;
   let frame = 0;
-  /** 리플레이 기록 — 키 입력과 받은 가비지를 프레임 단위로 남긴다 */
+  /**
+   * 리플레이 기록 — 키 입력과 받은 가비지를 프레임 단위로 남긴다.
+   * 이게 그대로 방에 흘려보내는 스트림이기도 하다.
+   */
   let recorder = null;
+  /** 어디까지 흘려보냈는지 */
+  let sentKeys = 0;
+  let sentIge = 0;
+  let streamAccum = 0;
+  let keyframeAccum = 0;
   let matchId = 0;
   let matchSeed = 0;
   /** 판이 끝나기 전에 떠 놓은 리플레이(톱아웃하면 게임 객체가 먼저 사라진다) */
@@ -259,29 +281,32 @@ function joinAsBot({ code, ticket, nick }) {
       case "attack":
         if (game) {
           game.receiveGarbage({ holes: msg.holes });
-          // 키 입력만으로는 이 판을 되살릴 수 없다 — 받은 가비지도 남겨야 한다
+          // 키 입력만으로는 이 판을 되살릴 수 없다 — 받은 가비지도 남겨야 한다.
+          // 남긴 것이 그대로 스트림에 실려 나가 남의 미러도 같은 판이 된다.
           recorder?.pushGarbage(msg.holes);
         }
         hitBy.set(from, frame);
         break;
-      // 사람 클라이언트는 보드 대신 입력을 흘려보내고, 상태는 낮은 빈도의
-      // 키프레임(full)으로만 온다. 여기서는 elims 전략에 쓸 스택 높이만
-      // 알면 되므로 상태가 실린 메시지만 미러에 얹는다.
-      case "full":
-      case "board": {
-        if (!config) break;
-        let m = mirrors.get(from);
-        if (!m) {
-          m = new Game(config.rule, config.handling, 0);
-          mirrors.set(from, m);
-        }
-        m.deserialize(msg.snap);
+      // 상대가 흘려보낸 입력 — 미러가 그걸로 그 사람 판을 다시 돌린다
+      case "sync":
+        mirrorOf(from)?.feed(msg.upto, msg.keys, msg.ige);
         break;
-      }
+      case "full":
+        mirrorOf(from)?.keyframe(msg.frame, msg.snap);
+        break;
+      // 입력을 흘리지 않는 옛 클라이언트 호환 — 상태만 얹는다
+      case "board":
+        mirrorOf(from)?.snapshot(msg.snap);
+        break;
       case "chat":
         handleChat(msg.nick, msg.text);
         break;
     }
+  }
+
+  /** 상대 미러를 꺼낸다(판이 열리기 전엔 없다) */
+  function mirrorOf(id) {
+    return mirrors.get(id) ?? null;
   }
 
   // ---- 채팅 커맨드 --------------------------------------------------------
@@ -348,7 +373,8 @@ function joinAsBot({ code, ticket, nick }) {
 
     // 시드는 서버가 나눠준다 — 조각 순서를 공유하지 않는 방이라도 서버가 내
     // 시드를 알고 있어야 제출한 기록을 재현해 볼 수 있다
-    const seed = (msg.sim ?? []).find((s) => s.id === myId)?.seed ?? msg.seed;
+    const sim = msg.sim ?? [];
+    const seed = sim.find((s) => s.id === myId)?.seed ?? msg.seed;
     game = new Game(config.rule, config.handling, seed);
     game.attackMultiplier = config.attackMul;
     plan = null;
@@ -358,28 +384,67 @@ function joinAsBot({ code, ticket, nick }) {
     matchSeed = seed;
     recorder = new ReplayRecorder();
     pendingReplay = null;
+    sentKeys = 0;
+    sentIge = 0;
+    streamAccum = 0;
+    keyframeAccum = 0;
+
+    /*
+      상대마다 미러를 세운다. 흘려오는 입력을 같은 시드·감도로 다시 돌리면
+      그 사람 판이 그대로 재현된다 — elims 전략이 보는 스택 높이가 스냅샷
+      주기만큼 낡은 값이 아니라 지금 값이 된다.
+    */
+    mirrors.clear();
+    for (const s of sim) {
+      if (s.id === myId) continue;
+      mirrors.set(
+        s.id,
+        new BoardMirror({
+          rule: config.rule,
+          handling: s.handling ?? config.handling,
+          seed: s.seed,
+          simRate: config.simRate,
+          attackMul: config.attackMul,
+        }),
+      );
+    }
 
     const dt = 60 / config.simRate;
     loop = setInterval(() => step(dt), 1000 / config.simRate);
-    // 내 보드를 방에 알린다(사람들 화면에 보이도록) — 5Hz면 충분하다
-    snapTimer = setInterval(() => {
-      if (game) sendGame({ t: "board", snap: game.serialize() });
-    }, 200);
     log(`판 시작 — seed=${seed} simRate=${config.simRate} pps=${settings.pps}`);
   }
 
   function stopMatch() {
     // 판이 끝나면 서버가 계획을 걷어주므로 여기서 보낼 필요는 없다
     if (loop) clearInterval(loop);
-    if (snapTimer) clearInterval(snapTimer);
     loop = null;
-    snapTimer = null;
     // 톱아웃하면 여기서 판이 먼저 정리된다 — 기록은 그 전에 떠 둬야 한다
     if (game && recorder && !pendingReplay) pendingReplay = captureReplay(game, recorder);
     game = null;
     recorder = null;
     shownPlan = "";
     mirrors.clear();
+  }
+
+  /**
+   * 기록기에 새로 쌓인 만큼을 방에 흘려보낸다.
+   *
+   * `upto`는 "이 프레임까지는 빠짐없이 보냈다"는 경계다. 받는 쪽 미러는 딱
+   * 거기까지만 진행하므로, 이 값을 실제보다 앞서 부르면 남의 화면에서 이 봇의
+   * 판이 어긋난다.
+   */
+  function flushStream() {
+    if (!recorder) return;
+    const msg = { t: "sync", upto: recorder.frame };
+    if (recorder.keys.length > sentKeys) {
+      msg.keys = recorder.keys.slice(sentKeys);
+      sentKeys = recorder.keys.length;
+    }
+    if (recorder.garbage.length > sentIge) {
+      msg.ige = recorder.garbage.slice(sentIge);
+      sentIge = recorder.garbage.length;
+    }
+    sendGame(msg);
   }
 
   /** 지금 상태로 리플레이 한 벌을 만든다(재생·검증에 필요한 조건 전부) */
@@ -450,10 +515,30 @@ function joinAsBot({ code, ticket, nick }) {
     }
     game.events.length = 0;
 
+    // 상대 미러도 받은 데까지 함께 굴린다
+    for (const m of mirrors.values()) {
+      if (m.advance() > 0) m.game.events.length = 0;
+    }
+
     if (game.isGameOver()) {
       log("톱아웃 — ko 신고");
+      flushStream(); // 마지막 조각까지 남들 화면에 닿도록
       send({ t: "ko" });
       stopMatch();
+      return;
+    }
+
+    streamAccum++;
+    if (streamAccum >= STREAM_FRAMES) {
+      streamAccum = 0;
+      flushStream();
+    }
+    // 스트림이 먼저 나간 뒤에 보낸다 — 순서가 뒤집히면 받는 쪽 미러가
+    // 키프레임으로 앞질러 간 다음 지나간 입력을 다시 먹는다
+    keyframeAccum++;
+    if (keyframeAccum >= KEYFRAME_FRAMES) {
+      keyframeAccum = 0;
+      sendGame({ t: "full", frame: recorder.frame, snap: game.serialize() });
     }
   }
 
@@ -545,7 +630,7 @@ function joinAsBot({ code, ticket, nick }) {
         for (const id of live) {
           const m = mirrors.get(id);
           if (!m) continue;
-          const h = m.board.highestRow();
+          const h = m.game.board.highestRow();
           if (h < top) {
             top = h;
             best = id;

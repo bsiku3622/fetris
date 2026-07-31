@@ -144,6 +144,8 @@ WebSocket 압축(`permessage-deflate`)을 **컨텍스트 유지 상태로** 켭�
 
 착석 이후에는 `relay` / `relay-to`로 일반 참가자와 똑같이 게임 메시지를 주고받습니다. 방의 다른 참가자에게는 `PlayerInfo.isBot: true`로 보입니다.
 
+**봇도 보드가 아니라 입력을 흘려보냅니다.** `match-start`의 `sim`에서 자기 시드를 받아 판을 열고, `ReplayRecorder`가 쌓는 로그를 그대로 `sync`로 내보내면 됩니다(사람 클라이언트와 같은 형식). 상대 판은 `@fetris/engine/mirror`의 `BoardMirror`에 받은 대로 먹이면 재현됩니다. 옛 방식의 `{ t: "board", snap }`도 여전히 받아주지만, 그렇게 보내면 남들 화면에서 그 봇의 조각이 뚝뚝 끊겨 보이고 판을 되살릴 수도 없습니다. 참조 구현은 `examples/bot-runner.mjs`에 있습니다.
+
 ### 계획 고스트 (표시 전용)
 
 봇이 "이렇게 놓을 생각"을 반투명 미노로 자기 보드에 띄울 수 있습니다. AI가 가방 단위로 세운 계획을 보여주는 용도입니다.
