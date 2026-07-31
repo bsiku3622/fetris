@@ -961,6 +961,16 @@ function EmptySlot({
               대기 중인 봇이 없어요.
               <br />
               <span style={{ opacity: 0.7, fontWeight: 700 }}>봇 러너를 먼저 띄워야 합니다.</span>
+              <br />
+              {/* 직접 만들어 붙이려는 사람에게 갈 곳을 알려준다 */}
+              <a
+                href="/docs/bot"
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: FUNKY.purple, fontWeight: 800 }}
+              >
+                봇 API 문서 →
+              </a>
             </div>
           ) : (
             <>

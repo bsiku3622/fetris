@@ -1,0 +1,24 @@
+# Fetris
+
+> 브라우저에서 도는 테트리스. TETR.IO급 메커니즘(SRS+ 킥테이블, T-spin 3-corner 판정, B2B Surge, 곱셈 콤보)에 온라인 라스트맨 스탠딩 대전을 얹었습니다. 게임 코어는 순수 TypeScript로 짜인 결정론적 엔진이고, 클라이언트와 릴레이 서버가 같은 엔진을 공유해 서버가 리플레이를 그대로 재현할 수 있습니다.
+
+싱글 모드는 40 Lines · Blitz · Zen · Marathon · 4-Wide · Combo가 있고, 커스텀 방에서 최대 8인 라스트맨 스탠딩을 합니다. 외부 봇이 참가자로 앉을 수 있는 공개 API가 열려 있습니다.
+
+대전 네트워크는 보드를 주고받지 않습니다. 프레임이 찍힌 키 입력을 흘려보내고 받는 쪽이 같은 시드·감도로 다시 돌려 상대 판을 재현합니다(TETR.IO 방식). 엔진이 완전히 결정론적이라 성립하는 구조입니다.
+
+## 문서
+
+- [봇 API](https://fetris.bsiku.dev/docs/bot.md): 릴레이 서버에 봇을 붙이는 방법 전부 — 연결 구조(러너/봇 2단 연결), 제어 메시지 레퍼런스, 입력 릴레이 인코딩과 규칙, BoardMirror로 상대 판 읽기, 계획 고스트, 리플레이 제출, 에러 코드
+- [봇 API (HTML)](https://fetris.bsiku.dev/docs/bot): 같은 내용의 웹 페이지
+
+## 소스
+
+- [저장소](https://github.com/bsiku3622/fetris): npm workspaces 모노레포 — `packages/engine`(결정론적 코어), `apps/frontend`(Canvas2D + React 셸), `apps/backend`(WebSocket 릴레이)
+- [참조 봇 러너](https://github.com/bsiku3622/fetris/blob/main/apps/backend/examples/bot-runner.mjs): 등록부터 실제 플레이까지 도는 최소 구현
+- [릴레이 서버 README](https://github.com/bsiku3622/fetris/blob/main/apps/backend/README.md): 프로토콜 전문, 매치 진행 상태 머신, 리플레이 검증, 배포
+- [엔진 리플레이 모듈](https://github.com/bsiku3622/fetris/blob/main/packages/engine/src/replay.ts): 입력 로그 인코딩과 재현
+- [엔진 미러 모듈](https://github.com/bsiku3622/fetris/blob/main/packages/engine/src/mirror.ts): 받은 입력으로 남의 판을 다시 돌리는 장치
+
+## 선택
+
+- [계획 고스트 상세](https://github.com/bsiku3622/fetris/blob/main/apps/backend/docs/plan-ghosts.md): 봇이 자기 계획을 반투명 미노로 띄우는 표시 전용 기능

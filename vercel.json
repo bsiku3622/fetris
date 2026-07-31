@@ -3,5 +3,16 @@
   "installCommand": "npm install",
   "buildCommand": "npm run build -w fetris",
   "outputDirectory": "apps/frontend/dist",
-  "framework": "vite"
+  "framework": "vite",
+  "cleanUrls": true,
+  "headers": [
+    {
+      "source": "/llms.txt",
+      "headers": [{ "key": "content-type", "value": "text/plain; charset=utf-8" }]
+    },
+    {
+      "source": "/docs/:file*.md",
+      "headers": [{ "key": "content-type", "value": "text/markdown; charset=utf-8" }]
+    }
+  ]
 }
