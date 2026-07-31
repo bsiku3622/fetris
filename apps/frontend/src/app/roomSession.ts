@@ -381,9 +381,13 @@ export function useRoomSession(): RoomSession {
   /**
    * 판 하나를 통째로 만든다.
    *
-   * 바닥은 서버 녹화다 — 서버가 중계하면서 받아 적은 것이라 참가자가 아무것도
-   * 내주지 않아도(리플레이를 지원하지 않는 봇이라도) 판 전체가 남는다.
-   * 그 위에, 검증용 입력 로그를 낸 참가자는 60Hz 정밀 재현으로 승급시킨다.
+   * 바닥은 서버 녹화다 — 중계하는 김에 받아 적은 것이라 참가자의 협조와
+   * 무관하게 존재한다. 입력 스트림까지 받아 적으므로, 본인이 아무것도
+   * 제출하지 않아도(리플레이를 지원하지 않는 봇이라도) 그 판은 60Hz로
+   * 정확히 되살아난다.
+   *
+   * 검증용으로 따로 제출한 사람은 그 기록을 그대로 쓴다 — 지문이 함께 있어
+   * 파일을 열 때 온전한지까지 확인할 수 있기 때문이다.
    */
   const buildMatchReplay = useCallback(async (): Promise<MatchReplayFile> => {
     const net = netRef.current;
@@ -395,10 +399,21 @@ export function useRoomSession(): RoomSession {
     const logged = new Map(records.map((r) => [r.id, r]));
     const players: MatchReplayPlayerEntry[] = rec.players
       .map((p) => {
+        const base = { id: p.id, nick: p.nick, placement: p.placement ?? undefined };
         const log = logged.get(p.id);
-        return log
-          ? { ...log, nick: p.nick, placement: p.placement ?? undefined }
-          : { id: p.id, nick: p.nick, placement: p.placement ?? undefined };
+        if (log) return { ...log, ...base };
+        // 제출은 없지만 서버가 받아 적은 입력이 있으면 그걸로 재현한다
+        if (p.keys && p.frames) {
+          return {
+            ...base,
+            seed: p.seed,
+            handling: p.handling,
+            frames: p.frames,
+            keys: p.keys,
+            garbage: p.garbage,
+          };
+        }
+        return base;
       })
       .sort((a, b) => (a.placement ?? 99) - (b.placement ?? 99));
 

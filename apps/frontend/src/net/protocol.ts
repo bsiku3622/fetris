@@ -214,7 +214,21 @@ type ServerControlBody =
       code: string;
       startedAt: number;
       winnerId: string | null;
-      players: { id: string; nick: string; placement: number | null; isBot: boolean }[];
+      /**
+       * 입력을 흘려보낸 참가자는 서버가 중계하며 받아 적은 로그가 함께 온다 —
+       * 본인이 아무것도 제출하지 않아도 그 판을 60Hz로 되살릴 수 있다.
+       */
+      players: {
+        id: string;
+        nick: string;
+        placement: number | null;
+        isBot: boolean;
+        seed?: number;
+        handling?: Handling;
+        keys?: number[];
+        garbage?: number[];
+        frames?: number;
+      }[];
       truncated: boolean;
       frames: { ms: number; id: string; snap?: GameSnapshot; plan?: PlanGhost[] }[];
     }

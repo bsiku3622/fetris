@@ -273,7 +273,21 @@ type ServerControlBody =
       code: string;
       startedAt: number;
       winnerId: string | null;
-      players: { id: string; nick: string; placement: number | null; isBot: boolean }[];
+      /**
+       * 참가자 목록. 입력을 흘려보낸 사람은 서버가 중계하며 받아 적은 로그가
+       * 함께 실린다 — 그 사람 판은 60Hz로 정확히 되살릴 수 있다.
+       */
+      players: {
+        id: string;
+        nick: string;
+        placement: number | null;
+        isBot: boolean;
+        seed?: number;
+        handling?: unknown;
+        keys?: number[];
+        garbage?: number[];
+        frames?: number;
+      }[];
       /** 상한에 걸려 뒷부분이 잘렸는지 */
       truncated: boolean;
       /** 시간축 위의 장면들 — 보드 스냅샷과 표시용 계획 고스트가 섞여 있다 */

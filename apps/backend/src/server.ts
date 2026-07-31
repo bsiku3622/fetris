@@ -126,6 +126,34 @@ interface Recording {
   bytes: number;
   truncated: boolean;
   frames: RecordedFrame[];
+  /** playerId → 중계하며 받아 적은 입력 스트림 */
+  streams: Map<string, RecordedStream>;
+  /**
+   * 판을 시작할 때의 참가자 명단.
+   *
+   * 방을 떠난 사람은 `room.players`에서 사라지므로, 끝나고 명단을 다시 훑으면
+   * 중간에 나간 참가자가 통째로 빠진다 — 그 사람 판도 분명히 있었는데 기록에는
+   * 없는 셈이 된다. 그래서 시작 시점에 박아둔다.
+   */
+  roster: { id: string; nick: string; isBot: boolean }[];
+}
+
+/**
+ * 참가자 한 명의 입력 로그 — 중계하는 김에 그대로 받아 적은 것이다.
+ *
+ * 이게 있으면 판을 60Hz로 정확히 되살릴 수 있다. 예전에는 참가자가 끝나고
+ * 따로 제출해줘야만 그게 가능했고, 안 내는 참가자(리플레이를 지원하지 않는
+ * 봇, 중간에 나간 사람)의 판은 성긴 스냅샷으로만 남았다.
+ */
+interface RecordedStream {
+  seed: number;
+  handling: unknown;
+  /** [frame, action, down, ...] */
+  keys: number[];
+  /** [frame, n, ...holes, ...] */
+  ige: number[];
+  /** 발신자가 "여기까지는 빠짐없이 보냈다"고 알린 마지막 경계 */
+  frames: number;
 }
 
 /** 시간축 위의 한 장면 — 페이로드는 해석하지 않고 그대로 담는다 */
@@ -146,7 +174,18 @@ interface MatchRecording {
   code: string;
   startedAt: number;
   winnerId: string | null;
-  players: { id: string; nick: string; placement: number | null; isBot: boolean }[];
+  /** 입력 스트림을 흘린 참가자는 그 로그가 함께 실린다 */
+  players: {
+    id: string;
+    nick: string;
+    placement: number | null;
+    isBot: boolean;
+    seed?: number;
+    handling?: unknown;
+    keys?: number[];
+    garbage?: number[];
+    frames?: number;
+  }[];
   truncated: boolean;
   frames: RecordedFrame[];
 }
@@ -529,33 +568,90 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     pushFrame(room, { ms: Date.now() - rec.startedAt, id: playerId, plan: ghosts });
   };
 
-  const record = (room: Room, playerId: string, msg: GameMessage): void => {
+  /**
+   * 중계하는 김에 입력을 그대로 받아 적는다.
+   *
+   * 페이로드를 해석하는 건 아니다 — 숫자 배열을 뒤에 이어 붙일 뿐, 그게 무슨
+   * 조작인지는 여전히 서버의 관심 밖이다. 다만 이걸 갖고 있으면 참가자가
+   * 아무것도 내주지 않아도 판을 60Hz로 정확히 되살릴 수 있다.
+   */
+  const recordStream = (room: Room, player: Player, msg: GameMessage): void => {
+    const rec = room.recording;
+    if (!rec || rec.truncated) return;
+    let s = rec.streams.get(player.id);
+    if (!s) {
+      s = {
+        seed: player.seed,
+        handling: player.handling ?? room.config?.handling,
+        keys: [],
+        ige: [],
+        frames: 0,
+      };
+      rec.streams.set(player.id, s);
+    }
+    const keys = (msg as { keys?: unknown }).keys;
+    const ige = (msg as { ige?: unknown }).ige;
+    const upto = Math.floor(Number((msg as { upto?: unknown }).upto));
+    if (Array.isArray(keys)) {
+      for (const k of keys) s.keys.push(Number(k));
+      rec.bytes += keys.length * 4;
+    }
+    if (Array.isArray(ige)) {
+      for (const g of ige) s.ige.push(Number(g));
+      rec.bytes += ige.length * 4;
+    }
+    if (Number.isFinite(upto) && upto > s.frames) s.frames = upto;
+    if (rec.bytes > MAX_RECORDING_BYTES) {
+      rec.truncated = true;
+      console.warn(`[fetris-be] 녹화 상한 도달 — room=${room.code} match=${rec.matchId}`);
+    }
+  };
+
+  const record = (room: Room, player: Player, msg: GameMessage): void => {
     const rec = room.recording;
     if (!rec || room.phase !== "playing") return;
+    if (msg?.t === "sync") {
+      recordStream(room, player, msg);
+      return;
+    }
     // 보드 상태가 실려 오는 두 가지 — 입력 릴레이의 키프레임과, 입력을 흘리지
     // 않는 옛 봇의 스냅샷. 서버는 어느 쪽이든 시간축에 그대로 붙여 둔다.
     if (msg?.t !== "full" && msg?.t !== "board") return;
     const snap = (msg as { snap?: unknown }).snap;
-    pushFrame(room, { ms: Date.now() - rec.startedAt, id: playerId, snap });
+    pushFrame(room, { ms: Date.now() - rec.startedAt, id: player.id, snap });
     // 계획한 자리에 조각이 놓였으면 여기서 걷어낸다
-    prunePlacedPlans(room, playerId, snap);
+    prunePlacedPlans(room, player.id, snap);
   };
 
   /** 진행 중 녹화를 내보낼 수 있는 형태로 굳힌다 */
   const freezeRecording = (room: Room, winnerId: string | null): MatchRecording | null => {
     const rec = room.recording;
-    if (!rec || rec.frames.length === 0) return null;
+    if (!rec || (rec.frames.length === 0 && rec.streams.size === 0)) return null;
     return {
       matchId: rec.matchId,
       code: room.code,
       startedAt: rec.startedAt,
       winnerId,
-      players: participantsOf(room).map((p) => ({
-        id: p.id,
-        nick: p.nick,
-        placement: p.placement,
-        isBot: p.isBot,
-      })),
+      players: rec.roster.map((r) => {
+        const s = rec.streams.get(r.id);
+        // 아직 방에 있으면 확정된 순위를 붙인다(나간 사람은 알 수 없다)
+        const live = room.players.find((p) => p.id === r.id);
+        return {
+          id: r.id,
+          nick: r.nick,
+          placement: live?.placement ?? null,
+          isBot: r.isBot,
+          ...(s
+            ? {
+                seed: s.seed,
+                handling: s.handling,
+                keys: s.keys,
+                garbage: s.ige,
+                frames: s.frames,
+              }
+            : {}),
+        };
+      }),
       truncated: rec.truncated,
       frames: rec.frames,
     };
@@ -689,6 +785,8 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       bytes: 0,
       truncated: false,
       frames: [],
+      streams: new Map(),
+      roster: roster.map((p) => ({ id: p.id, nick: p.nick, isBot: p.isBot })),
     };
     room.lastRecording = null;
     broadcast(room, {
@@ -1346,7 +1444,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       case "relay": {
         const entry = sockToPlayer.get(ws);
         if (!entry) return;
-        record(entry.room, entry.player.id, raw.msg);
+        record(entry.room, entry.player, raw.msg);
         broadcast(entry.room, { t: "relay", from: entry.player.id, msg: raw.msg }, ws);
         break;
       }

@@ -517,6 +517,78 @@ describe("매치 진행", () => {
     watcher.close();
   });
 
+  it("중계하는 김에 입력을 받아 적어, 제출이 없어도 판을 되살릴 수 있다", async () => {
+    // 리플레이를 지원하지 않는 봇이 정확히 이 경우다. 예전에는 그런 참가자의
+    // 판이 성긴 스냅샷으로만 남아 조각이 뚝뚝 끊겼다.
+    const { host, code, state } = await createRoom(url);
+    const hostId = state.players[0].id;
+    host.send({ t: "config", config: TEST_CONFIG });
+    const guest = await joinRoom(url, code, "G1");
+    await host.waitState((st) => st.players.length === 2);
+    host.drain();
+    guest.drain();
+
+    host.send({ t: "start-match" });
+    const start = await host.waitFor("match-start");
+    await guest.waitFor("match-start");
+    const guestId = start.players.find((id) => id !== hostId) as string;
+
+    // 클라이언트가 하는 것과 같은 모양으로 입력을 흘려보낸다
+    host.send({ t: "relay", msg: { t: "sync", upto: 4, keys: [1, 7, 1] } });
+    host.send({ t: "relay", msg: { t: "sync", upto: 8, keys: [5, 0, 1, 7, 0, 0] } });
+    host.send({ t: "relay", msg: { t: "sync", upto: 12, ige: [9, 2, 3, 3] } });
+    // 왕복을 돌려 서버가 위 메시지를 다 처리했음을 보장한다
+    host.send({ t: "list-runners" });
+    await host.waitFor("runners");
+
+    guest.send({ t: "ko" });
+    await host.waitFor("match-end");
+
+    host.send({ t: "get-recording" });
+    const rec = await host.waitFor("recording");
+    const mine = rec.players.find((p) => p.id === hostId);
+    expect(mine?.frames).toBe(12);
+    expect(mine?.keys).toEqual([1, 7, 1, 5, 0, 1, 7, 0, 0]);
+    expect(mine?.garbage).toEqual([9, 2, 3, 3]);
+    // 되살리려면 시드와 감도도 함께 있어야 한다
+    expect(mine?.seed).toBe(start.sim.find((s) => s.id === hostId)?.seed);
+    expect(mine?.handling).toEqual(TEST_CONFIG.handling);
+
+    // 아무것도 흘리지 않은 참가자는 로그 없이 이름만 남는다
+    const theirs = rec.players.find((p) => p.id === guestId);
+    expect(theirs?.keys).toBeUndefined();
+
+    host.close();
+    guest.close();
+  });
+
+  it("중간에 나간 참가자도 녹화에 남는다", async () => {
+    // 명단을 끝나고 다시 훑으면 나간 사람이 통째로 빠진다 — 그 사람 판도
+    // 분명히 있었는데 기록에는 없는 셈이 된다.
+    const { host, guests } = await readyRoom(2); // 3명
+    const start = await startMatch(host, guests);
+    const leaverId = start.players[2];
+
+    guests[1].send({ t: "relay", msg: { t: "sync", upto: 6, keys: [2, 7, 1] } });
+    guests[1].send({ t: "list-runners" });
+    await guests[1].waitFor("runners");
+    guests[1].send({ t: "leave" });
+    await host.waitState((s) => s.players.length === 2);
+
+    guests[0].send({ t: "ko" });
+    await host.waitFor("match-end");
+
+    host.send({ t: "get-recording" });
+    const rec = await host.waitFor("recording");
+    expect(rec.players.map((p) => p.id).sort()).toEqual(start.players.slice().sort());
+    const gone = rec.players.find((p) => p.id === leaverId);
+    expect(gone?.keys).toEqual([2, 7, 1]);
+    expect(gone?.frames).toBe(6);
+
+    host.close();
+    guests[0].close();
+  });
+
   it("참가자별 시드와 감도를 매치 시작에 함께 실어 보낸다", async () => {
     // 서로의 보드를 입력만으로 따라 돌리려면 둘 다 있어야 한다 —
     // 시드가 조각 순서를, 감도가 키의 해석을 정한다.
