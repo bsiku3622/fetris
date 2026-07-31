@@ -33,6 +33,17 @@ export class NetClient {
   myId: string | null = null;
   /** 서버가 알려준 최신 방 상태 */
   room: RoomState | null = null;
+  /**
+   * 이 자리로 되돌아올 때 쓰는 토큰. 소켓이 끊겨도 이게 있으면 새로 입장하는
+   * 대신 같은 자리로 복귀할 수 있다.
+   */
+  session: string | null = null;
+  /** 서버에서 마지막으로 받은 메시지 번호 — resume 때 여기부터 다시 받는다 */
+  private lastSeenId = 0;
+  /** 내가 보낸 메시지 번호 */
+  private cid = 0;
+  /** 아직 서버가 받았다고 확인해주지 않은 메시지들 */
+  private pending: { cid: number; msg: ClientControl }[] = [];
 
   // 게임 메시지 채널(MultiTransport용)
   private msgCb: ((m: GameMessage, from?: string) => void) | null = null;
@@ -52,6 +63,8 @@ export class NetClient {
   // 제어 이벤트
   onCreated?: (code: string) => void;
   onJoined?: (code: string) => void;
+  /** 끊겼던 자리로 복귀했다 */
+  onResumed?: (code: string) => void;
   /** 방 상태가 갱신될 때마다(입퇴장·역할·설정·페이즈) */
   onRoomState?: (state: RoomState) => void;
   onMatchStart?: (matchId: number, seed: number, config: MatchConfig, players: string[]) => void;
@@ -138,17 +151,32 @@ export class NetClient {
     } catch {
       return;
     }
+    if (typeof msg.id === "number") this.lastSeenId = msg.id;
     switch (msg.t) {
       case "created":
         this.myId = msg.myId;
+        this.session = msg.session;
         this.applyState(msg.state);
         this.onCreated?.(msg.code);
         break;
       case "joined":
         this.myId = msg.myId;
+        this.session = msg.session;
         this.applyState(msg.state);
         this.onJoined?.(msg.code);
         break;
+      case "resumed": {
+        this.myId = msg.myId;
+        // 서버가 못 받은 것만 다시 보낸다
+        const resend = this.pending.filter((p) => p.cid > msg.ackClientId);
+        this.pending = resend;
+        this.applyState(msg.state);
+        this.onResumed?.(msg.code);
+        for (const p of resend) {
+          if (this.ws && this.state === "open") this.ws.send(JSON.stringify(p.msg));
+        }
+        break;
+      }
       case "state":
         this.applyState(msg.state);
         break;
@@ -203,7 +231,24 @@ export class NetClient {
   }
 
   private sendControl(msg: ClientControl): void {
-    if (this.ws && this.state === "open") this.ws.send(JSON.stringify(msg));
+    // resume은 순번 밖이다 — 복구 절차 자체가 순번을 정리하는 메시지라서다
+    if (msg.t === "resume") {
+      if (this.ws && this.state === "open") this.ws.send(JSON.stringify(msg));
+      return;
+    }
+    const stamped = { ...msg, cid: ++this.cid };
+    this.pending.push({ cid: stamped.cid, msg: stamped });
+    if (this.pending.length > 256) this.pending.shift();
+    if (this.ws && this.state === "open") this.ws.send(JSON.stringify(stamped));
+  }
+
+  /**
+   * 끊겼던 자리로 복귀를 시도한다. 성공하면 onResumed가 불리고, 자리가 이미
+   * 정리됐으면 실패해 새로 입장해야 한다.
+   */
+  resume(): void {
+    if (!this.session) return;
+    this.sendControl({ t: "resume", token: this.session, lastSeenId: this.lastSeenId });
   }
 
   // ---- 방 ------------------------------------------------------------------

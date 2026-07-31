@@ -121,6 +121,8 @@ export function useRoomSession(): RoomSession {
   const matchStartRef = useRef<MatchStartInfo | null>(null);
   /** 재연결에 필요한 마지막 접속 정보 */
   const lastConnect = useRef<{ url: string; code: string; nick: string } | null>(null);
+  /** 끊겼을 때 원래 자리로 돌아가기 위한 토큰 */
+  const sessionToken = useRef<string | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectTries = useRef(0);
   /** 사용자가 직접 나간 경우엔 재연결하지 않는다 */
@@ -156,6 +158,7 @@ export function useRoomSession(): RoomSession {
         scheduleReconnect();
       };
       net.onRoomState = (s) => {
+        sessionToken.current = net.session;
         // 입퇴장을 채팅에 흘린다
         const now = new Map(s.players.map((p) => [p.id, p.nick] as const));
         for (const [id, nick] of now) {
@@ -255,19 +258,37 @@ export function useRoomSession(): RoomSession {
     const attempt = ++reconnectTries.current;
     const delay = Math.min(8000, 1000 * attempt);
     setError(`연결이 끊겨 다시 접속하는 중… (${attempt}/5)`);
+    const token = sessionToken.current;
     reconnectTimer.current = setTimeout(async () => {
       const net = new NetClient(info.url);
+      net.session = token;
       netRef.current = net;
       wire(net);
-      net.onJoined = (c) => {
+      const settle = (c: string) => {
         setCode(c);
         setMyId(net.myId);
         setError("");
         reconnectTries.current = 0;
       };
+      net.onJoined = settle;
+      net.onResumed = settle;
+      /*
+        먼저 원래 자리로 복귀를 시도한다. 매치 중이었다면 서버가 잠깐 자리를
+        잡아두고 있으므로 판에서 밀려나지 않는다. 자리가 이미 정리됐으면
+        resume-failed가 오고, 그때 새로 입장한다.
+      */
+      net.onError = (reason) => {
+        if (reason === "resume-failed") {
+          net.session = null;
+          net.joinRoom(info.code, info.nick);
+          return;
+        }
+        setError(humanError(reason));
+      };
       try {
         await net.connect();
-        net.joinRoom(info.code, info.nick);
+        if (token) net.resume();
+        else net.joinRoom(info.code, info.nick);
       } catch {
         scheduleReconnect();
       }

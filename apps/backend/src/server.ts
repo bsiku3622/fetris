@@ -50,6 +50,20 @@ function genRunnerId(): string {
 interface Player {
   ws: WebSocket;
   id: string;
+  /**
+   * 이 자리로 되돌아올 때 쓰는 비밀 값. 소켓이 끊겨도 이 토큰이 있으면
+   * 같은 자리에 다시 앉을 수 있다.
+   */
+  session: string;
+  connected: boolean;
+  /** 유예 안에 안 돌아오면 탈락시키는 타이머 */
+  graceTimer: ReturnType<typeof setTimeout> | null;
+  /** 이 사람에게 보낸 마지막 메시지 번호 */
+  outId: number;
+  /** 최근에 보낸 메시지들 — resume 때 빠진 것만 다시 보낸다 */
+  outBuffer: { id: number; data: string }[];
+  /** 이 사람에게서 마지막으로 처리한 메시지 번호 */
+  inId: number;
   isHost: boolean;
   nick: string;
   isBot: boolean;
@@ -161,6 +175,13 @@ const MAX_BOT_CAPACITY = 16;
 /** 순위표를 보여주고 대기실로 돌아가기까지 */
 const RESULTS_MS = 6000;
 const MIN_PARTICIPANTS = 2;
+/**
+ * 소켓이 끊긴 참가자의 자리를 잡아두는 시간. 순단으로 판에서 밀려나지 않게
+ * 하려는 것이고, 이 안에 resume하지 못하면 그때 탈락 처리한다.
+ */
+const DISCONNECT_GRACE_MS = 15_000;
+/** resume 때 되돌려줄 수 있는 최근 메시지 수 — 이보다 밀리면 복구 불가 */
+const RESUME_BUFFER = 256;
 /** 리플레이 재현 상한 — 악의적으로 거대한 로그를 보내 서버를 묶는 걸 막는다 */
 const MAX_REPLAY_FRAMES = 60 * 60 * 30; // 30분(60Hz 기준)
 const MAX_REPLAY_KEYS = 3 * 200_000;
@@ -191,6 +212,8 @@ export interface RelayServerOptions {
   botTokensPath?: string;
   /** 순위표 표시 시간(ms). 테스트에서 줄여 쓴다. */
   resultsMs?: number;
+  /** 끊긴 참가자의 자리를 잡아두는 시간(ms). 테스트에서 줄여 쓴다. */
+  graceMs?: number;
 }
 
 export interface RelayServer {
@@ -208,17 +231,48 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     legacyToken: opts.botToken,
   });
   const resultsMs = opts.resultsMs ?? RESULTS_MS;
+  const graceMs = opts.graceMs ?? DISCONNECT_GRACE_MS;
+
+  /** 새로 앉는 사람의 세션 관련 초기값 */
+  const newSessionFields = () => ({
+    session: randomUUID(),
+    connected: true,
+    graceTimer: null,
+    outId: 0,
+    outBuffer: [] as { id: number; data: string }[],
+    inId: 0,
+  });
 
   const rooms = new Map<string, Room>();
   const sockToPlayer = new Map<WebSocket, { room: Room; player: Player }>();
+  /** 세션 토큰 → 그 자리. 끊긴 사람이 되돌아올 때 찾는다 */
+  const sessions = new Map<string, { room: Room; player: Player }>();
   const runners = new Map<WebSocket, BotRunner>();
   const pendingBots = new Map<string, PendingBot>();
   const botSockets = new WeakSet<WebSocket>();
   /** 소켓별 연속 pong 미수신 횟수(하트비트용) */
   const alive = new WeakMap<WebSocket, number>();
 
+  /**
+   * 한 사람에게 보낸다. 자리가 있는 사람에게는 증가하는 번호를 붙이고 최근 것을
+   * 남겨둔다 — 끊겼다 붙었을 때 빠진 것만 다시 보내기 위해서다.
+   */
   const send = (ws: WebSocket, msg: ServerControl): void => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+    const entry = sockToPlayer.get(ws);
+    if (!entry) {
+      // 아직 자리가 없는 소켓(입장 전·봇 러너)은 번호 없이 그냥 보낸다
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+      return;
+    }
+    sendToPlayer(entry.player, msg);
+  };
+
+  const sendToPlayer = (player: Player, msg: ServerControl): void => {
+    const stamped = { ...msg, id: ++player.outId };
+    const data = JSON.stringify(stamped);
+    player.outBuffer.push({ id: stamped.id, data });
+    if (player.outBuffer.length > RESUME_BUFFER) player.outBuffer.shift();
+    if (player.connected && player.ws.readyState === WebSocket.OPEN) player.ws.send(data);
   };
 
   const runnerInfo = (r: BotRunner): BotRunnerInfo => ({
@@ -281,9 +335,8 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
    * JSON으로 만드는 건 인원이 늘수록 그대로 CPU 낭비가 된다(보드 스냅샷은 1KB가 넘는다).
    */
   const broadcast = (room: Room, msg: ServerControl, exclude?: WebSocket): void => {
-    const data = JSON.stringify(msg);
     for (const p of room.players) {
-      if (p.ws !== exclude && p.ws.readyState === WebSocket.OPEN) p.ws.send(data);
+      if (p.ws !== exclude) sendToPlayer(p, msg);
     }
   };
 
@@ -297,6 +350,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     alive: p.alive,
     placement: p.placement,
     wins: p.wins,
+    connected: p.connected,
   });
 
   const stateOf = (room: Room): RoomState => ({
@@ -729,11 +783,50 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     rooms.delete(room.code);
   };
 
+  /**
+   * 소켓이 끊겼다. 대기실이면 그냥 내보내지만, 판이 도는 중이라면 잠깐 자리를
+   * 잡아둔다 — 순단 한 번에 판에서 밀려나지 않게 하려는 것이다. 유예 안에
+   * resume하지 못하면 그때 정식으로 내보낸다.
+   */
+  const handleDisconnect = (ws: WebSocket): void => {
+    const entry = sockToPlayer.get(ws);
+    if (!entry) return;
+    const { room, player } = entry;
+    const inMatch = room.phase !== "lobby" && room.participants.includes(player.id);
+
+    // 자리를 잡아둘 이유가 없으면 바로 정리
+    if (!inMatch || player.isBot) {
+      teardownPlayer(ws);
+      return;
+    }
+
+    sockToPlayer.delete(ws);
+    player.connected = false;
+    player.graceTimer = setTimeout(() => {
+      player.graceTimer = null;
+      // 아직도 안 돌아왔다 — 이제 정말 내보낸다
+      if (!player.connected) dropPlayer(room, player);
+    }, graceMs);
+    player.graceTimer.unref?.();
+    broadcastState(room);
+  };
+
   const teardownPlayer = (ws: WebSocket): void => {
     const entry = sockToPlayer.get(ws);
     if (!entry) return;
     sockToPlayer.delete(ws);
     const { room, player } = entry;
+    dropPlayer(room, player);
+  };
+
+  /** 방에서 완전히 들어낸다(유예가 끝났거나 스스로 나갔거나) */
+  const dropPlayer = (room: Room, player: Player): void => {
+    if (player.graceTimer) {
+      clearTimeout(player.graceTimer);
+      player.graceTimer = null;
+    }
+    sessions.delete(player.session);
+    if (!room.players.includes(player)) return;
     const wasParticipant =
       room.phase === "playing" &&
       room.participants.includes(player.id) &&
@@ -825,6 +918,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           alive: true,
           placement: null,
           wins: 0,
+          ...newSessionFields(),
         };
         const room: Room = {
           code,
@@ -845,7 +939,51 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
         };
         rooms.set(code, room);
         sockToPlayer.set(ws, { room, player });
-        send(ws, { t: "created", code, myId: playerId, state: stateOf(room) });
+        sessions.set(player.session, { room, player });
+        send(ws, { t: "created", code, myId: playerId, state: stateOf(room), session: player.session });
+        break;
+      }
+      case "resume": {
+        const token = typeof raw.token === "string" ? raw.token : "";
+        const seat = sessions.get(token);
+        if (!seat || !rooms.has(seat.room.code) || !seat.room.players.includes(seat.player)) {
+          // 자리가 이미 정리됐다 — 새로 입장하는 수밖에 없다
+          send(ws, { t: "error", reason: "resume-failed" });
+          return;
+        }
+        const { room, player } = seat;
+
+        // 옛 소켓이 아직 살아 있으면(중복 접속) 그쪽을 정리한다
+        if (player.ws !== ws && player.ws.readyState === WebSocket.OPEN) {
+          sockToPlayer.delete(player.ws);
+          player.ws.close(4000, "resumed-elsewhere");
+        }
+        if (player.graceTimer) {
+          clearTimeout(player.graceTimer);
+          player.graceTimer = null;
+        }
+        sockToPlayer.delete(player.ws);
+        player.ws = ws;
+        player.connected = true;
+        sockToPlayer.set(ws, { room, player });
+        alive.set(ws, 0);
+
+        // 어디까지 받았는지 듣고, 그 뒤에 보낸 것만 다시 보낸다
+        const lastSeen = Math.floor(Number(raw.lastSeenId));
+        const missed = Number.isFinite(lastSeen)
+          ? player.outBuffer.filter((m) => m.id > lastSeen)
+          : [];
+        send(ws, {
+          t: "resumed",
+          code: room.code,
+          myId: player.id,
+          state: stateOf(room),
+          ackClientId: player.inId,
+        });
+        for (const m of missed) {
+          if (ws.readyState === WebSocket.OPEN) ws.send(m.data);
+        }
+        broadcastState(room);
         break;
       }
       case "join": {
@@ -895,10 +1033,12 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           alive: false,
           placement: null,
           wins: 0,
+          ...newSessionFields(),
         };
         room.players.push(player);
         sockToPlayer.set(ws, { room, player });
-        send(ws, { t: "joined", code: room.code, myId: playerId, state: stateOf(room) });
+        sessions.set(player.session, { room, player });
+        send(ws, { t: "joined", code: room.code, myId: playerId, state: stateOf(room), session: player.session });
         broadcastState(room);
         break;
       }
@@ -1194,14 +1334,21 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       } catch {
         return;
       }
-      if (msg && typeof msg.t === "string") handle(ws, msg);
+      if (!msg || typeof msg.t !== "string") return;
+      // 이미 처리한 메시지가 다시 오면(재전송) 흘려보낸다
+      const seat = sockToPlayer.get(ws);
+      if (seat && typeof msg.cid === "number") {
+        if (msg.cid <= seat.player.inId) return;
+        seat.player.inId = msg.cid;
+      }
+      handle(ws, msg);
     });
     ws.on("close", () => {
-      teardownPlayer(ws);
+      handleDisconnect(ws);
       teardownRunner(ws);
     });
     ws.on("error", () => {
-      teardownPlayer(ws);
+      handleDisconnect(ws);
       teardownRunner(ws);
     });
   });

@@ -30,6 +30,8 @@ export interface PlayerInfo {
   placement: number | null;
   /** 이 방에 머무는 동안 쌓인 우승 횟수 */
   wins: number;
+  /** 지금 소켓이 붙어 있는지(순단으로 끊긴 사람은 잠시 false) */
+  connected: boolean;
 }
 
 /**
@@ -89,8 +91,8 @@ export type GameMessage =
    */
   | { t: "replay-share"; file: ReplayFile };
 
-/** 클라이언트 → 서버 제어 메시지 */
-export type ClientControl =
+/** 클라이언트 → 서버 제어 메시지. cid는 재전송 판별용 순번이다. */
+type ClientControlBody =
   | { t: "create"; maxPlayers?: number; nick?: string }
   | { t: "join"; code: string; nick?: string }
   | { t: "leave" }
@@ -130,12 +132,18 @@ export type ClientControl =
    * 표시 전용 계획 고스트. set은 통째로 교체, add는 추가/갱신(같은 id면 덮어씀),
    * remove는 id로 골라 삭제. 상태는 서버가 들고 있다가 방에 뿌린다.
    */
-  | { t: "plan"; set?: PlanGhost[]; add?: PlanGhost[]; remove?: string[] };
+  | { t: "plan"; set?: PlanGhost[]; add?: PlanGhost[]; remove?: string[] }
+  /** 끊겼던 자리로 복귀 */
+  | { t: "resume"; token: string; lastSeenId?: number };
 
-/** 서버 → 클라이언트 제어 메시지 */
-export type ServerControl =
-  | { t: "created"; code: string; myId: string; state: RoomState }
-  | { t: "joined"; code: string; myId: string; state: RoomState }
+export type ClientControl = ClientControlBody & { cid?: number };
+
+/** 서버 → 클라이언트 제어 메시지. id는 resume 때 어디까지 받았는지 대조용이다. */
+type ServerControlBody =
+  | { t: "created"; code: string; myId: string; state: RoomState; session: string }
+  | { t: "joined"; code: string; myId: string; state: RoomState; session: string }
+  /** resume 성공 — 같은 자리로 돌아왔다 */
+  | { t: "resumed"; code: string; myId: string; state: RoomState; ackClientId: number }
   | { t: "state"; state: RoomState }
   | { t: "match-start"; matchId: number; seed: number; config: MatchConfig; players: string[] }
   | { t: "ko"; playerId: string; placement: number; remaining: number }
@@ -179,6 +187,8 @@ export type ServerControl =
   | { t: "relay"; from: string; msg: GameMessage }
   | { t: "bot-pending"; ticket: string; nick: string; runnerId: string }
   | { t: "runners"; runners: BotRunnerInfo[] };
+
+export type ServerControl = ServerControlBody & { id?: number };
 
 export type AnyMessage = ClientControl | ServerControl;
 

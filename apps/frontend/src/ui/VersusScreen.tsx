@@ -864,6 +864,8 @@ function PlayerRow({
         {player.isHost && <Badge color="yellow">호스트</Badge>}
         {me && <Badge color="sky">나</Badge>}
         {player.role === "spectator" && <Badge color="neutral">관전</Badge>}
+        {/* 순단으로 끊긴 사람 — 자리는 잡아둔 상태다 */}
+        {!player.connected && <Badge color="pink">연결 끊김</Badge>}
       </span>
       {canKick && (
         <button

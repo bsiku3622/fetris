@@ -19,6 +19,10 @@ export async function startTestServer(
 /** 메시지를 버퍼링하며 다음 메시지를 await 할 수 있는 테스트 클라이언트 */
 export class Client {
   ws: WebSocket;
+  /** 서버가 내준 세션 토큰(복귀용) */
+  session: string | null = null;
+  /** 마지막으로 받은 메시지 번호 */
+  lastSeenId = 0;
   private queue: ServerControl[] = [];
   private waiter: ((m: ServerControl) => void) | null = null;
 
@@ -26,6 +30,8 @@ export class Client {
     this.ws = ws;
     ws.on("message", (d) => {
       const m = JSON.parse(d.toString()) as ServerControl;
+      if (typeof m.id === "number") this.lastSeenId = m.id;
+      if (m.t === "created" || m.t === "joined") this.session = m.session;
       if (this.waiter) {
         const w = this.waiter;
         this.waiter = null;

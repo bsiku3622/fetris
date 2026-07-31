@@ -56,6 +56,11 @@ export interface PlayerInfo {
   placement: number | null;
   /** 이 방에 머무는 동안 쌓인 우승 횟수 */
   wins: number;
+  /**
+   * 지금 소켓이 붙어 있는지. 순단으로 끊긴 사람은 false로 잠시 자리를 잡아두고,
+   * 유예 안에 resume하지 못하면 그때 탈락한다.
+   */
+  connected: boolean;
 }
 
 /**
@@ -104,8 +109,13 @@ export interface BotRunnerInfo {
   label?: string;
 }
 
-/** 클라이언트 → 서버 */
-export type ClientControl =
+/**
+ * 클라이언트 → 서버.
+ *
+ * 모든 메시지에 증가하는 `cid`를 붙일 수 있다. resume 때 서버가 "여기까지 봤다"고
+ * 알려주면 클라가 그 뒤로 보냈던 것만 다시 보내면 된다.
+ */
+type ClientControlBody =
   | { t: "create"; maxPlayers?: number; nick?: string }
   /** ticket이 있으면 add-bot으로 예약된 슬롯에 착석(봇 경로 전용) */
   | { t: "join"; code: string; nick?: string; ticket?: string }
@@ -171,12 +181,25 @@ export type ClientControl =
    */
   | { t: "get-recording" }
   /** 봇 러너 등록(봇 경로 전용) */
-  | { t: "bot-hello"; name?: string; capacity?: number };
+  | { t: "bot-hello"; name?: string; capacity?: number }
+  /**
+   * 끊겼던 세션으로 되돌아간다. 새로 입장하는 게 아니라 **같은 자리로 복귀**한다.
+   * lastSeenId까지는 받았다는 뜻이므로 서버는 그 뒤 메시지만 다시 보낸다.
+   */
+  | { t: "resume"; token: string; lastSeenId?: number };
+
+export type ClientControl = ClientControlBody & { cid?: number };
 
 /** 서버 → 클라이언트 */
-export type ServerControl =
-  | { t: "created"; code: string; myId: string; state: RoomState }
-  | { t: "joined"; code: string; myId: string; state: RoomState }
+type ServerControlBody =
+  | { t: "created"; code: string; myId: string; state: RoomState; session: string }
+  | { t: "joined"; code: string; myId: string; state: RoomState; session: string }
+  /**
+   * resume 성공 — 같은 자리로 돌아왔다.
+   * ackClientId는 서버가 마지막으로 처리한 클라 메시지 번호다. 클라는 그 뒤로
+   * 보냈던 것을 다시 보내면 된다.
+   */
+  | { t: "resumed"; code: string; myId: string; state: RoomState; ackClientId: number }
   /** 방 상태가 바뀔 때마다(입퇴장·역할·설정·페이즈) 전체 스냅샷 */
   | { t: "state"; state: RoomState }
   /** 매치 개시 — 참가자는 이 시드로 동시에 시작한다 */
@@ -238,3 +261,9 @@ export type ServerControl =
   | { t: "bot-invite"; code: string; ticket: string; nick: string }
   /** 서버 → 호스트: add-bot 접수됨(착석하면 state로 반영된다) */
   | { t: "bot-pending"; ticket: string; nick: string; runnerId: string };
+
+/**
+ * 서버가 보내는 모든 메시지에는 증가하는 `id`가 붙는다(세션이 있는 경우).
+ * 끊겼다 붙었을 때 어디까지 받았는지 대조해 빠진 것만 다시 보내기 위한 것이다.
+ */
+export type ServerControl = ServerControlBody & { id?: number };

@@ -7,12 +7,14 @@ import { STANDARD_RULESET } from "@fetris/engine/config";
 
 // 결과 표시를 짧게 줄여 실제 전이를 기다릴 수 있게 한다
 const RESULTS = 120;
+// 끊긴 자리를 잡아두는 유예도 짧게
+const GRACE = 250;
 
 let server: RelayServer;
 let url: string;
 
 beforeAll(async () => {
-  const started = await startTestServer({ resultsMs: RESULTS });
+  const started = await startTestServer({ resultsMs: RESULTS, graceMs: GRACE });
   server = started.server;
   url = started.url;
 });
@@ -157,12 +159,17 @@ describe("매치 진행", () => {
     late.close();
   });
 
-  it("매치 중 이탈은 탈락으로 처리된다", async () => {
+  it("매치 중 끊기면 잠깐 자리를 잡아뒀다가, 안 돌아오면 탈락시킨다", async () => {
     const { host, guests } = await readyRoom(2); // 3명
     await startMatch(host, guests);
 
     guests[0].close();
-    const ko = await host.waitFor("ko");
+    // 곧바로 탈락시키지 않는다 — 순단 한 번에 판에서 밀려나면 안 되기 때문
+    const held = await host.waitState((s) => s.players.some((p) => !p.connected));
+    expect(held.players.filter((p) => p.role === "player")).toHaveLength(3);
+
+    // 유예가 지나면 그때 탈락
+    const ko = await host.waitFor("ko", 2000);
     expect(ko.remaining).toBe(2);
 
     // 남은 한 명이 죽으면 호스트 우승
@@ -172,6 +179,93 @@ describe("매치 진행", () => {
 
     host.close();
     guests[1].close();
+  });
+
+  it("유예 안에 돌아오면 같은 자리로 복귀한다", async () => {
+    const { host, code } = await createRoom(url);
+    host.send({ t: "config", config: TEST_CONFIG });
+    const guest = await joinRoom(url, code, "G1");
+    await host.waitState((s) => s.players.length === 2);
+    const token = guest.session as string;
+    expect(token).toBeTruthy();
+    host.drain();
+
+    host.send({ t: "start-match" });
+    const start = await host.waitFor("match-start");
+    await guest.waitFor("match-start");
+    const guestId = start.players.find((id) => id !== start.players[0]) as string;
+
+    // 순단 — 소켓만 끊는다
+    const lastSeen = guest.lastSeenId;
+    guest.close();
+    await host.waitState((s) => s.players.some((p) => !p.connected));
+
+    // 같은 자리로 복귀
+    const back = await Client.connect(url);
+    back.send({ t: "resume", token, lastSeenId: lastSeen });
+    const resumed = await back.waitFor("resumed");
+    expect(resumed.myId).toBe(guestId);
+    expect(resumed.code).toBe(code);
+
+    // 자리가 유지됐고 다시 연결됨으로 표시된다
+    const st = await host.waitState((s) => s.players.every((p) => p.connected));
+    expect(st.players.filter((p) => p.role === "player")).toHaveLength(2);
+
+    // 탈락시키는 ko는 오지 않는다
+    await expect(host.waitFor("ko", 600)).rejects.toThrow();
+
+    host.close();
+    back.close();
+  });
+
+  it("자리가 이미 정리됐으면 복귀에 실패한다", async () => {
+    const { host, code } = await createRoom(url);
+    const guest = await joinRoom(url, code, "G1");
+    await host.waitState((s) => s.players.length === 2);
+    const token = guest.session as string;
+
+    // 대기실에서 끊기면 자리를 잡아두지 않는다
+    guest.close();
+    await host.waitState((s) => s.players.length === 1);
+
+    const back = await Client.connect(url);
+    back.send({ t: "resume", token, lastSeenId: 0 });
+    const err = await back.waitFor("error");
+    expect(err.reason).toBe("resume-failed");
+
+    host.close();
+    back.close();
+  });
+
+  it("복귀하면 끊긴 사이에 놓친 메시지를 다시 받는다", async () => {
+    const { host, code } = await createRoom(url);
+    host.send({ t: "config", config: TEST_CONFIG });
+    const guest = await joinRoom(url, code, "G1");
+    const extra = await joinRoom(url, code, "G2");
+    await host.waitState((s) => s.players.length === 3);
+    const token = guest.session as string;
+    host.drain();
+
+    host.send({ t: "start-match" });
+    await host.waitFor("match-start");
+    const lastSeen = guest.lastSeenId;
+    guest.close();
+    await host.waitState((s) => s.players.some((p) => !p.connected));
+
+    // 끊긴 사이에 사건이 하나 벌어진다
+    extra.send({ t: "ko" });
+    await host.waitFor("ko");
+
+    // 복귀하면 그 사이 것도 번호순으로 되받는다
+    const back = await Client.connect(url);
+    back.send({ t: "resume", token, lastSeenId: lastSeen });
+    await back.waitFor("resumed");
+    const missedKo = await back.waitFor("ko", 1000);
+    expect(missedKo.playerId).toBeTruthy();
+
+    host.close();
+    extra.close();
+    back.close();
   });
 
   it("호스트가 설정을 바꾸면 방 전체에 반영된다", async () => {
