@@ -783,7 +783,8 @@ function ResultsView({ room }: { room: RoomSession }) {
             gap: 4,
             margin: "12px 0",
             minWidth: 260,
-            maxHeight: "40vh",
+            // 주소창이 떠 있는 태블릿·모바일에서도 보이는 높이 기준으로 자른다
+            maxHeight: "40dvh",
             overflowY: "auto",
           }}
         >

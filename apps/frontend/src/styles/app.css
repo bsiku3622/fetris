@@ -10,11 +10,22 @@
   box-sizing: border-box;
 }
 
+/*
+  화면 높이는 dvh로 잡는다.
+
+  모바일·태블릿 브라우저에서 100vh는 주소창이 **숨겨졌을 때**의 높이다. 주소창이
+  떠 있는 동안에는 그만큼 아래가 잘리는데, overflow:hidden이라 스크롤도 안 돼서
+  방의 "매치 시작" 버튼처럼 맨 아래에 있는 것에 손이 닿지 않는다. dvh는 지금
+  실제로 보이는 높이라 이 문제가 없다.
+
+  dvh를 모르는 브라우저를 위해 vh/%를 먼저 선언해 폴백으로 남긴다.
+*/
 html,
 body,
 #root {
   margin: 0;
   height: 100%;
+  height: 100dvh;
   width: 100%;
   overflow: hidden;
   background: var(--fx-bg);
@@ -26,7 +37,9 @@ body,
 
 .fx-app {
   height: 100vh;
-  width: 100vw;
+  height: 100dvh;
+  /* 100vw는 스크롤바 폭까지 포함해 가로로 새어나간다 — 부모를 그대로 채운다 */
+  width: 100%;
   display: flex;
   flex-direction: column;
 }
@@ -149,6 +162,7 @@ body,
   gap: 1rem;
   /* 인원이 많은 방의 순위표처럼 내용이 길어져도 화면 밖으로 나가지 않게 */
   max-height: 88vh;
+  max-height: 88dvh;
   overflow-y: auto;
 }
 .fx-panel h2 {
