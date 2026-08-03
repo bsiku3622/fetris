@@ -165,7 +165,7 @@ export class Game {
     // 가비지 구멍 생성기 — 피스 가방과 상관없게 시드를 분리
     this.garbageGen = new GarbageGen((this.seed ^ 0x9e3779b9) >>> 0, rule.cols, rule.garbageMessiness);
     this.stats = this.freshStats();
-    this.phaseTimer = 60; // 1초 Ready
+    this.phaseTimer = rule.readyFrames ?? 60; // 기본 1초 Ready
   }
 
   private freshStats(): Stats {

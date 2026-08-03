@@ -40,6 +40,11 @@ export function MatchStage({
 
   const [focusId, setFocusId] = useState<string | null>(opponents[0] ?? null);
   const [strategy, setStrategy] = useState<TargetStrategy>("random");
+  /**
+   * 시작 카운트다운. 엔진이 판을 열며 입력을 잠가두는 Ready 구간(4초)에 맞춰
+   * 3·2·1을 센다. 보드마다 그리지 않고 무대 정중앙에 하나만 띄운다.
+   */
+  const [count, setCount] = useState(0);
   /** 이미 KO 연출을 태운 상대 — 중복 실행 방지 */
   const koneRef = useRef<Set<string>>(new Set());
 
@@ -73,7 +78,11 @@ export function MatchStage({
   // ---- 레이아웃 결정 -------------------------------------------------------
   // 1대1(봇 포함)은 좌우로 나란히 크게. 내가 죽고 둘만 남은 결승도 마찬가지다.
   // 셋 이상일 때만 "주역 하나 + 썸네일" 구성을 쓴다.
-  const duel = !spectating && opponents.length === 1;
+  //
+  // 상대가 하나뿐이면 내가 죽었든 아니든 좌우 배치가 맞다. 여기서 관전 여부를
+  // 따지면 KO되는 순간 레이아웃이 통째로 갈아엎히면서 남은 보드 하나가 화면
+  // 가운데로 튀어나오는데, 판이 끝나는 순간에 그게 일어나면 아주 지저분하다.
+  const duel = opponents.length === 1;
   // 관전 중이고 둘만 남았으면 좌우로 크게 본다
   const finalTwo = spectating && stageOpponents.length === 2;
   const sideBySide = duel || finalTwo;
@@ -123,6 +132,11 @@ export function MatchStage({
         transport: net.transport(),
         opponents,
         sim: match.sim,
+        // 이름은 캔버스가 필드 바로 아래에 그린다 — DOM으로는 이만큼 붙일 수 없다
+        myLabel: { text: byId(myId)?.nick ?? "나", color: FUNKY.sky },
+        labels: Object.fromEntries(
+          opponents.map((id, i) => [id, { text: byId(id)?.nick ?? `P${i + 2}`, color: colorOf(i) }]),
+        ),
         strategy: "random",
         undoEnabled: match.config.undo,
         spectating: iAmSpectator,
@@ -149,6 +163,17 @@ export function MatchStage({
     };
     // 매치 하나당 한 번만 만든다 — 의존성에 화면 상태를 넣으면 판이 리셋된다
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [match.matchId]);
+
+  // 판이 열리면 3·2·1. 첫 1초는 라운드 전환 슬라이드가 걷히는 구간이라 비워 둔다.
+  useEffect(() => {
+    const timers = [1000, 2000, 3000, 4000].map((ms, i) =>
+      setTimeout(() => setCount(i < 3 ? 3 - i : 0), ms),
+    );
+    return () => {
+      for (const t of timers) clearTimeout(t);
+      setCount(0);
+    };
   }, [match.matchId]);
 
   // ---- 서버가 알린 KO를 연출로 반영 ---------------------------------------
@@ -266,20 +291,15 @@ export function MatchStage({
             <BoardPane
               canvasRef={localCanvasRef}
               onCanvas={(el) => sessionRef.current?.rebindLocal(el)}
-              label={byId(myId)?.nick ?? "나"}
-              color={FUNKY.sky}
             />
           </div>
           {duelOpponents.map((id) => (
             <div key={id} style={{ flex: "1 1 50%", display: "flex", position: "relative" }}>
               <OppPane
                 id={id}
-                label={byId(id)?.nick ?? "상대"}
-                color={colorOf(opponents.indexOf(id))}
                 refs={oppCanvasRefs}
                 onCanvas={(el) => sessionRef.current?.rebindRemote(id, el)}
                 onClick={() => setFocusId(id)}
-                focused={focusId === id && finalTwo}
               />
               {koBadge(id)}
             </div>
@@ -329,20 +349,15 @@ export function MatchStage({
               <BoardPane
                 canvasRef={localCanvasRef}
                 onCanvas={(el) => sessionRef.current?.rebindLocal(el)}
-                label={byId(myId)?.nick ?? "나"}
-                color={FUNKY.sky}
               />
             </div>
             {spectating && mainOpponent && (
               <div style={{ width: "100%", maxWidth: 520, height: "100%", display: "flex", position: "relative" }}>
                 <OppPane
                   id={mainOpponent}
-                  label={byId(mainOpponent)?.nick ?? "상대"}
-                  color={colorOf(opponents.indexOf(mainOpponent))}
                   refs={oppCanvasRefs}
                   onCanvas={(el) => sessionRef.current?.rebindRemote(mainOpponent, el)}
                   onClick={() => {}}
-                  focused
                 />
               </div>
             )}
@@ -361,18 +376,15 @@ export function MatchStage({
                 minWidth: 0,
               }}
             >
-              {thumbs.map((id, idx) => (
+              {thumbs.map((id) => (
                 // display:flex가 없으면 .fx-versus-pane의 flex:1이 먹지 않아
                 // 캔버스 높이가 0으로 찌그러진다
                 <div key={id} style={{ position: "relative", display: "flex", minWidth: 0, minHeight: 0 }}>
                   <OppPane
                     id={id}
-                    label={byId(id)?.nick ?? `P${idx + 2}`}
-                    color={colorOf(opponents.indexOf(id))}
                     refs={oppCanvasRefs}
                     onCanvas={(el) => sessionRef.current?.rebindRemote(id, el)}
                     onClick={() => setFocusId(id)}
-                    focused={focusId === id}
                   />
                   {koBadge(id)}
                 </div>
@@ -387,8 +399,9 @@ export function MatchStage({
         <div
           style={{
             position: "absolute",
-            left: 12,
-            bottom: 12,
+            left: "50%",
+            transform: "translateX(-50%)",
+            bottom: 10,
             display: "flex",
             gap: 6,
             zIndex: 8,
@@ -414,17 +427,45 @@ export function MatchStage({
         </div>
       )}
 
+      {/* 시작 카운트다운 — 무대 정중앙에 하나만 */}
+      {count > 0 && (
+        <div
+          key={count}
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9,
+            pointerEvents: "none",
+            fontWeight: 900,
+            fontSize: "clamp(5rem, 16vw, 13rem)",
+            lineHeight: 1,
+            letterSpacing: "-0.05em",
+            fontVariantNumeric: "tabular-nums",
+            color: "#fff",
+            textShadow: "0 4px 24px rgba(0,0,0,0.85)",
+            animation: "fx-count 1000ms ease-out both",
+          }}
+        >
+          {count}
+        </div>
+      )}
+
       {/* 관전 안내 */}
       {spectating && (
         <div
           style={{
             position: "absolute",
-            left: 12,
+            left: "50%",
+            transform: "translateX(-50%)",
             bottom: 12,
             zIndex: 8,
             fontWeight: 900,
             fontSize: "0.8rem",
             color: FUNKY.danger,
+            whiteSpace: "nowrap",
           }}
         >
           {iAmSpectator ? "관전 중" : "KO · 관전 중"} — 보드를 클릭하면 크게 봅니다
@@ -438,20 +479,13 @@ export function MatchStage({
 function BoardPane({
   canvasRef,
   onCanvas,
-  label,
-  color,
 }: {
   canvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   /** 레이아웃이 바뀌어 캔버스가 새로 만들어지면 세션에 다시 붙인다 */
   onCanvas: (el: HTMLCanvasElement) => void;
-  label: string;
-  color: string;
 }) {
   return (
-    <div className="fx-versus-pane" style={{ borderColor: color, flex: 1 }}>
-      <div className="fx-versus-label" style={{ color, borderColor: color }}>
-        {label}
-      </div>
+    <div className="fx-versus-pane" style={{ flex: 1 }}>
       <div className="fx-canvas-wrap">
         <canvas
           ref={(el) => {
@@ -466,35 +500,21 @@ function BoardPane({
 
 function OppPane({
   id,
-  label,
-  color,
   refs,
   onCanvas,
   onClick,
-  focused,
 }: {
   id: string;
-  label: string;
-  color: string;
   refs: React.MutableRefObject<Map<string, HTMLCanvasElement>>;
   onCanvas: (el: HTMLCanvasElement) => void;
   onClick: () => void;
-  focused: boolean;
 }) {
   return (
     <div
       onClick={onClick}
       className="fx-versus-pane"
-      style={{
-        borderColor: focused ? FUNKY.danger : color,
-        flex: 1,
-        minWidth: 0,
-        cursor: "pointer",
-      }}
+      style={{ flex: 1, minWidth: 0, cursor: "pointer" }}
     >
-      <div className="fx-versus-label" style={{ color, borderColor: color }}>
-        {label}
-      </div>
       <div className="fx-canvas-wrap">
         <canvas
           ref={(el) => {

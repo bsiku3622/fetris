@@ -26,6 +26,14 @@ export interface GfxOptions {
   bloom: boolean;
   showHold: boolean;
   nextCount: number;
+  /**
+   * 캔버스가 자기 배경을 칠할지. 대전에서는 끈다 — 보드마다 배경을 칠하면
+   * 사이에 경계가 생겨 화면이 뚝뚝 끊겨 보인다. 그때는 무대 뒤에 배경을
+   * 하나만 깔고, 캔버스는 투명하게 겹쳐 놓는다.
+   */
+  backdrop?: boolean;
+  /** 보드 아래에 붙일 이름표 — 필드 바로 밑에 붙어야 해서 캔버스가 그린다 */
+  label?: { text: string; color: string; alpha?: number };
 }
 
 export const DEFAULT_GFX: GfxOptions = {
@@ -116,7 +124,8 @@ export class Renderer {
 
     // 배경 — 저해상도 오프스크린에 캐싱해 blit (매 프레임 풀스크린 그라데이션 비용 제거)
     this.glowLevel = gfx.glow ?? 0.4;
-    this.renderBackground(W, H, gfx.bgIntensity ?? 0.6);
+    if (gfx.backdrop === false) ctx.clearRect(0, 0, W, H);
+    else this.renderBackground(W, H, gfx.bgIntensity ?? 0.6);
 
     // 레이아웃: 프레임은 필드(rows)에만. 스폰존(EXTRA)은 필드 위 배경 영역에 피스만 보임.
     const EXTRA = 2; // 필드 위 스폰존 행 수(배경에 그려짐)
@@ -254,9 +263,15 @@ export class Renderer {
     // 액션 텍스트 (필드 왼쪽)
     if (action) action.draw(ctx, bx - pad * 1.5, fieldTop, cell);
 
-    // READY / GO 카운트다운 (필드 중앙)
+    // 시작 카운트다운 (필드 중앙)
+    //
+    // Ready를 길게 잡은 판(대전 라운드 전환)은 3·2·1로 센다. 기본 1초짜리
+    // 판은 셀 것이 없으므로 예전대로 READY?/GO!를 띄운다.
     const rt = game.readyTimer;
-    if (rt >= 0) {
+    // Ready를 길게 잡은 판(대전)은 보드마다 숫자를 그리지 않는다 —
+    // 화면 정중앙에 하나만 띄우는 편이 조용하고, 무대가 그걸 맡는다.
+    const counted = (game.rule.readyFrames ?? 60) > 60;
+    if (rt >= 0 && !counted) {
       const txt = rt > 20 ? "READY?" : "GO!";
       const color = rt > 20 ? FUNKY.purple : FUNKY.green;
       ctx.save();
@@ -287,8 +302,30 @@ export class Renderer {
     // 사이드 통계 (테트리오식) — 필드 좌우 테두리에 붙여서. 좌측은 우측정렬, 우측은 좌측정렬.
     if (hud) {
       const statBottom = fieldTop + fieldH - cell * 0.35;
-      if (hud.left.length) this.drawStatStack(hud.left, bx - pad * 1.4, statBottom, cell, "right");
+      /*
+        왼쪽 통계는 가비지 게이지와 같은 편에 선다. 필드 기준으로만 띄우면
+        게이지 바에 글자가 달라붙어 둘 다 읽기 어려우므로, 게이지 폭만큼 더
+        물러난 자리에서 시작한다.
+      */
+      const meterW = game.rule.garbageEnabled ? Math.max(8, Math.round(cell * 0.55)) : 0;
+      const meterGap = game.rule.garbageEnabled ? Math.max(3, Math.round(cell * 0.16)) : 0;
+      const leftX = bx - meterW - meterGap - Math.round(cell * 0.45);
+      if (hud.left.length) this.drawStatStack(hud.left, leftX, statBottom, cell, "right");
       if (hud.right.length) this.drawStatStack(hud.right, bx + boardW + pad * 1.4, statBottom, cell, "left");
+    }
+
+    // 이름 — 필드 바로 아래. DOM 라벨로는 보드와 이만큼 붙일 수 없다.
+    if (gfx.label) {
+      ctx.save();
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      const fs = Math.max(10, Math.round(cell * 0.62));
+      ctx.font = `900 ${fs}px Pretendard, system-ui, sans-serif`;
+      ctx.globalAlpha = gfx.label.alpha ?? 1;
+      ctx.fillStyle = gfx.label.color;
+      ctx.letterSpacing = `${Math.round(fs * 0.12)}px`;
+      ctx.fillText(gfx.label.text.toUpperCase(), bx + boardW / 2, fieldTop + fieldH + cell * 0.34);
+      ctx.restore();
     }
 
     ctx.restore();

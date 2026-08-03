@@ -5,9 +5,10 @@ import type { RuleSet, KicksetName, SpinBonusName, GarbageHoleMode, RandomizerNa
 import { isTauri, lanStart, lanStop, lanDiscover } from "../net/lan";
 import type { LanInfo } from "../net/lan";
 import type { BotRunnerInfo, MatchConfig, PlayerInfo } from "../net/protocol";
-import type { RoomSession } from "../app/roomSession";
+import type { MatchEndInfo, RoomSession } from "../app/roomSession";
 import type { MatchReplayFile } from "@fetris/engine/replay";
 import { MatchStage } from "./MatchStage";
+import { RoundTransition, OPEN_MS } from "./RoundTransition";
 import { Row, Slider, Toggle } from "./controls";
 import type { Handling } from "@fetris/engine/types";
 import { FUNKY } from "../render/theme";
@@ -155,6 +156,9 @@ export function VersusScreen({
     randomizer: c.randomizer,
     nextCount: c.nextCount,
     allow180: c.allow180,
+    // 판이 열릴 때 입력을 잠가두는 시간. 첫 1초는 라운드 전환 슬라이드가
+    // 걷히는 구간이고, 남은 3초가 3·2·1이다.
+    readyFrames: 240,
   });
 
   const configFrom = (c: Cfg): MatchConfig => ({
@@ -217,6 +221,24 @@ export function VersusScreen({
     }));
   }, [remoteConfig, isHost]);
 
+  /*
+    라운드 전환 연출은 matchEnd보다 오래 산다. 슬라이드는 **다음 판이 실제로
+    열린 뒤에** 걷혀야 하고(그래야 두 보드가 준비된 채 드러난다), 걷히는 동안도
+    화면에 남아 있어야 하기 때문이다.
+  */
+  const [roundBreak, setRoundBreak] = useState<MatchEndInfo | null>(null);
+  const breakEnd = room.matchEnd;
+  useEffect(() => {
+    if (breakEnd?.nextRound) setRoundBreak(breakEnd);
+  }, [breakEnd]);
+  const nextMatchId = room.matchStart?.matchId ?? -1;
+  const breakOpened = !!roundBreak && nextMatchId > roundBreak.matchId;
+  useEffect(() => {
+    if (!breakOpened) return;
+    const t = setTimeout(() => setRoundBreak(null), OPEN_MS + 120);
+    return () => clearTimeout(t);
+  }, [breakOpened]);
+
   const host = async (urlOverride?: string) => {
     await room.connect(urlOverride ?? serverUrl, "host", { maxPlayers, nick: myNick, handling: h });
   };
@@ -272,7 +294,15 @@ export function VersusScreen({
     return (
       <div style={{ position: "relative", width: "100%", height: "100%" }}>
         <MatchStage settings={settings} room={room} match={room.matchStart} />
-        {state.phase === "results" && room.matchEnd && <ResultsView room={room} />}
+        {/*
+          다음 판이 이어지는 중이면 결과표 대신 라운드 전환 연출을 태운다.
+          판이 정말 끝났을 때(시리즈 종료·단판)는 리플레이 내려받기와 대기실
+          이동이 필요하므로 기존 결과 화면을 그대로 쓴다.
+        */}
+        {roundBreak && <RoundTransition room={room} end={roundBreak} opened={breakOpened} />}
+        {state.phase === "results" && room.matchEnd && !room.matchEnd.nextRound && (
+          <ResultsView room={room} />
+        )}
       </div>
     );
   }
@@ -742,109 +772,123 @@ function MatchReplayButton({ room, align }: { room: RoomSession; align: "center"
   );
 }
 
+/**
+ * 판이 정말 끝났을 때의 결과 화면.
+ *
+ * 시리즈 도중의 라운드 전환(RoundTransition)과 달리 여기서 멈춰 서서 결과를
+ * 곱씹는 자리이므로, 승패를 크게 알리고 순위·리플레이·대기실 이동을 함께 둔다.
+ * 승리 문구는 글자 하나씩 떨어져 박히고, 뒤에서 빛살이 돌고, 조각들이 흩날린다.
+ */
 function ResultsView({ room }: { room: RoomSession }) {
   const end = room.matchEnd!;
   const players = room.state?.players ?? [];
   const nickOf = (id: string) => players.find((p) => p.id === id)?.nick ?? "―";
+  const winsOf = (id: string) => players.find((p) => p.id === id)?.wins ?? 0;
   const iWon = end.winnerId === room.myId;
-  const isHost = !!players.find((p) => p.id === room.myId)?.isHost;
   const firstTo = room.state?.config?.firstTo ?? 0;
   // 시리즈(FT)까지 끝난 판이면 한 판 승리보다 크게 알린다
   const series = end.seriesWinnerId;
   const iTookSeries = series === room.myId;
 
-  // 대전 화면 위에 겹쳐 뜬다(.fx-overlay가 absolute inset:0). 배경을 옅게 깔아
-  // 마지막 보드가 뒤로 비쳐 보이게 둔다 — 판이 어떻게 끝났는지가 결과표만큼 중요하다.
+  const champion = series ?? end.winnerId;
+  const mine = champion === room.myId;
+  /** 이긴 사람의 화면은 금빛, 진 사람은 차갑게 */
+  const tone = champion ? (mine ? FUNKY.yellow : FUNKY.sky) : FUNKY.inkMuted;
+  const word = champion ? (mine ? "WINNER" : "DEFEAT") : "DRAW";
+  const kicker = series ? `FT${firstTo} 시리즈 종료` : champion ? "매치 종료" : "무승부";
+
   return (
-    <div className="fx-overlay" style={{ background: "rgba(12, 8, 24, 0.55)" }}>
-      <div className="fx-panel" style={{ minWidth: 340 }}>
-        {series ? (
-          <>
-            <div style={{ fontSize: "0.72rem", fontWeight: 900, letterSpacing: "0.12em", color: FUNKY.yellow }}>
-              FT{firstTo} 시리즈 종료
-            </div>
-            <h2 style={{ color: iTookSeries ? FUNKY.yellow : FUNKY.sky, marginBottom: 4 }}>
-              🏆 {iTookSeries ? "시리즈 우승!" : `${nickOf(series)} 시리즈 우승`}
-            </h2>
-          </>
-        ) : (
-          <h2 style={{ color: iWon ? FUNKY.green : FUNKY.sky, marginBottom: 4 }}>
-            {iWon ? "WINNER!" : end.winnerId ? `${nickOf(end.winnerId)} 승리` : "무승부"}
-          </h2>
-        )}
-        {/*
-          순위는 참가자 수만큼 늘어난다. 꽉 찬 방이면 목록만으로 패널이 화면을
-          넘겨 아래 버튼이 손에 닿지 않으므로, 목록 쪽만 스크롤시킨다.
-        */}
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 4,
-            margin: "12px 0",
-            minWidth: 260,
-            // 주소창이 떠 있는 태블릿·모바일에서도 보이는 높이 기준으로 자른다
-            maxHeight: "40dvh",
-            overflowY: "auto",
-          }}
-        >
-          {end.standings.map((s) => (
-            <div
-              key={s.playerId}
+    <div className="fx-win" style={{ color: tone }}>
+      <div className="fx-win-rays" />
+      <div className="fx-win-beam" />
+      {/* 흩날리는 조각 — 이긴 화면에서만 */}
+      {mine && (
+        <div className="fx-win-fall" aria-hidden>
+          {CONFETTI.map((c, i) => (
+            <span
+              key={i}
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "6px 10px",
-                border: `2px solid ${s.placement === 1 ? FUNKY.yellow : "var(--funky-line)"}`,
-                fontWeight: 800,
-                background: s.playerId === room.myId ? "rgba(0,0,0,0.06)" : "transparent",
+                left: `${c.x}%`,
+                background: c.color,
+                animationDelay: `${c.delay}ms`,
+                animationDuration: `${c.dur}ms`,
+                width: c.size,
+                height: c.size,
               }}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className="fx-win-body">
+        <div className="fx-win-kicker">{kicker}</div>
+
+        {/* 글자 하나씩 박힌다 */}
+        <div className="fx-win-word">
+          {word.split("").map((ch, i) => (
+            <span key={i} style={{ animationDelay: `${90 + i * 65}ms` }}>
+              {ch}
+            </span>
+          ))}
+        </div>
+
+        {champion && (
+          <div className="fx-win-who">
+            {nickOf(champion)}
+            {firstTo > 0 && (
+              <b>
+                {winsOf(champion)}
+                <i>/{firstTo}</i>
+              </b>
+            )}
+          </div>
+        )}
+
+        <div className="fx-win-rows">
+          {end.standings.slice(0, 8).map((st, i) => (
+            <div
+              key={st.playerId}
+              className={
+                "fx-win-row" +
+                (st.placement === 1 ? " is-top" : "") +
+                (st.playerId === room.myId ? " is-me" : "")
+              }
+              style={{ animationDelay: `${520 + i * 80}ms` }}
             >
-              <span style={{ fontWeight: 900, color: s.placement === 1 ? FUNKY.yellow : "inherit", minWidth: 28 }}>
-                #{s.placement}
-              </span>
-              <span style={{ flex: 1 }}>{nickOf(s.playerId)}</span>
-              {/* 시리즈 중이면 몇 승째인지가 순위보다 중요하다 */}
-              {firstTo > 0 && (
-                <Badge color="yellow">
-                  {players.find((p) => p.id === s.playerId)?.wins ?? 0}/{firstTo}승
-                </Badge>
-              )}
-              {s.playerId === room.myId && <Badge color="sky">나</Badge>}
+              <span className="fx-win-rank">{st.placement}</span>
+              <span className="fx-win-name">{nickOf(st.playerId)}</span>
+              {firstTo > 0 && <span className="fx-win-wins">{winsOf(st.playerId)}</span>}
             </div>
           ))}
         </div>
-        <MatchReplayButton room={room} align="center" />
 
-        {end.nextRound ? (
-          <>
-            <Button variant="primary" size="lg" onClick={() => room.skipResults()}>
-              바로 다음 판
-            </Button>
-            {isHost && (
-              <Button variant="neutral" size="md" onClick={() => room.abortSeries()}>
-                시리즈 그만두기
-              </Button>
-            )}
-            <Text variant="chrome" muted style={{ fontSize: "0.78rem" }}>
-              FT{firstTo} 진행 중 — 누르지 않아도 잠시 후 다음 판이 시작됩니다
-            </Text>
-          </>
-        ) : (
-          <>
-            <Button variant="primary" size="lg" onClick={() => room.skipResults()}>
-              대기실로 돌아가기
-            </Button>
-            <Text variant="chrome" muted style={{ fontSize: "0.78rem" }}>
-              누르지 않아도 잠시 후 자동으로 돌아갑니다
-            </Text>
-          </>
-        )}
+        <div className="fx-win-tools">
+          <MatchReplayButton room={room} align="center" />
+          <Button variant="primary" size="lg" onClick={() => room.skipResults()}>
+            대기실로 돌아가기
+          </Button>
+          <Text variant="chrome" muted style={{ fontSize: "0.78rem" }}>
+            누르지 않아도 잠시 후 자동으로 돌아갑니다
+          </Text>
+        </div>
       </div>
+      {/* 아무도 안 쓰지만 값은 읽어 둔다 — 표기 분기에 쓰인다 */}
+      <span hidden>{String(iWon || iTookSeries)}</span>
     </div>
   );
 }
+
+/** 흩날리는 조각 — 위치·속도를 미리 굳혀 두고 CSS가 떨어뜨린다 */
+const CONFETTI = Array.from({ length: 34 }, (_, i) => {
+  const palette = [FUNKY.pink, FUNKY.yellow, FUNKY.cyan, FUNKY.green, FUNKY.orange, FUNKY.purple];
+  return {
+    x: (i * 37) % 100,
+    color: palette[i % palette.length],
+    delay: (i * 173) % 2200,
+    dur: 2600 + ((i * 311) % 2200),
+    size: 6 + ((i * 7) % 9),
+  };
+});
 
 // ---- 조각 컴포넌트 ---------------------------------------------------------
 

@@ -362,8 +362,8 @@ npm run dev                                   # 게임 클라이언트 :1420</co
     <tbody>
       <tr><td><code>{ t: "bot-hello", name?, capacity? }</code></td><td>러너 등록. <code>capacity</code>는 1~16</td></tr>
       <tr><td><code>{ t: "join", code, ticket, nick?, handling? }</code></td><td>티켓으로 착석</td></tr>
-      <tr><td><code>{ t: "relay", msg }</code></td><td>발신자 제외 방 전체에 게임 메시지 중계</td></tr>
-      <tr><td><code>{ t: "relay-to", targetId, msg }</code></td><td>특정 참가자에게만 중계</td></tr>
+      <tr><td><code>{ t: "relay", msg, mid? }</code></td><td>발신자 제외 방 전체에 게임 메시지 중계</td></tr>
+      <tr><td><code>{ t: "relay-to", targetId, msg, mid? }</code></td><td>특정 참가자에게만 중계</td></tr>
       <tr><td><code>{ t: "plan", set? | add? | remove? }</code></td><td>표시 전용 계획 고스트</td></tr>
       <tr><td><code>{ t: "ko" }</code></td><td>내가 톱아웃했다는 자기 신고</td></tr>
       <tr><td><code>{ t: "replay", … }</code></td><td>판이 끝난 뒤 기록 제출</td></tr>
@@ -511,12 +511,13 @@ function flushStream() {
   sendGame(msg);
 }</code></pre>
 
-  <p>지켜야 할 것 네 가지:</p>
+  <p>지켜야 할 것 다섯 가지:</p>
   <ol>
     <li><strong><code>upto</code>는 약속입니다.</strong> "이 프레임까지는 빠짐없이 보냈다"는 뜻이고, 받는 쪽 미러는 딱 거기까지만 진행합니다. 실제보다 앞서 부르면 남의 화면에서 내 판이 어긋납니다.</li>
     <li><strong>스트림을 먼저, 키프레임을 나중에.</strong> 순서가 뒤집히면 미러가 키프레임으로 앞질러 간 다음 지나간 입력을 다시 먹습니다. 키프레임 주기를 스트림 주기의 배수로 두면 자연히 지켜집니다.</li>
     <li><strong>받은 가비지도 남기세요.</strong> 대전은 키 입력만으로 판이 결정되지 않습니다. <code>recorder.pushGarbage(holes)</code>를 <code>game.receiveGarbage(...)</code>와 같은 자리에서 부르세요.</li>
     <li><strong>톱아웃 직전에 한 번 더 흘려보내세요.</strong> 안 그러면 마지막 몇 프레임이 남들 화면에 닿지 않습니다.</li>
+    <li><strong>중계 봉투에 <code>mid</code>(지금 판 번호)를 붙이세요.</strong> 판이 바뀌는 찰나에 지난 판 입력을 흘리면 상대의 새 미러가 그걸 먹고 보드가 통째로 어긋납니다. 서버가 이 번호를 지금 판과 대조해 걸러줍니다 — <code>{ t: "relay", msg, mid: matchId }</code>. 판과 무관한 채팅에는 붙이지 마세요.</li>
   </ol>
 
   <h3 id="raw-input">입력은 호출한 그대로 남기세요</h3>

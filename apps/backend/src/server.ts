@@ -227,6 +227,13 @@ const BOT_JOIN_TIMEOUT_MS = 15_000;
 const MAX_BOT_CAPACITY = 16;
 /** 순위표를 보여주고 대기실로 돌아가기까지 */
 const RESULTS_MS = 6000;
+/**
+ * 시리즈에서 다음 판까지의 간격. 라운드 전환 연출에서 보드가 가라앉고
+ * 슬라이드가 닫혀 점수를 보여주는 데까지가 여기 들어간다. 카운트다운은 새 판이
+ * 열린 뒤(엔진 Ready) 몫이라 포함되지 않는다.
+ * 기다리기 싫으면 누구든 skip-results로 건너뛸 수 있다.
+ */
+const ROUND_BREAK_MS = 5600;
 const MIN_PARTICIPANTS = 2;
 /**
  * 소켓이 끊긴 참가자의 자리를 잡아두는 시간. 순단으로 판에서 밀려나지 않게
@@ -290,6 +297,8 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     legacyToken: opts.botToken,
   });
   const resultsMs = opts.resultsMs ?? RESULTS_MS;
+  // 테스트는 resultsMs만 줄이므로, 그때는 라운드 간격도 같이 줄어든다
+  const roundBreakMs = opts.resultsMs ?? ROUND_BREAK_MS;
   const graceMs = opts.graceMs ?? DISCONNECT_GRACE_MS;
 
   /** 새로 앉는 사람의 세션 관련 초기값 */
@@ -684,6 +693,9 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       firstTo > 0 && !seriesWinner && rosterOf(room).length >= MIN_PARTICIPANTS;
     room.nextRound = nextRound;
 
+    // 다음 판이 이어지면 전환 연출이 들어갈 만큼 사이를 벌린다
+    const breakMs = nextRound ? roundBreakMs : resultsMs;
+
     // 판이 끝나면 화면에 남은 계획은 의미가 없다 — 서버가 걷는다.
     // (녹화가 굳기 전에 지워야 "마지막에 지웠다"는 것까지 기록에 남는다)
     clearPlans(room);
@@ -697,10 +709,13 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       winnerId: winner?.id ?? null,
       standings,
       nextRound,
+      // 다음 판이 언제 열리는지 알려준다 — 클라이언트가 라운드 전환 연출을
+      // 그 시각에 딱 맞춰 끝내야 카운트다운이 겉돌지 않는다
+      ...(nextRound ? { nextIn: breakMs } : {}),
       ...(seriesWinner ? { seriesWinnerId: seriesWinner.id } : {}),
     });
     broadcastState(room);
-    room.resultsTimer = setTimeout(() => afterResults(room), resultsMs);
+    room.resultsTimer = setTimeout(() => afterResults(room), breakMs);
     room.resultsTimer.unref?.();
   };
 
@@ -1010,6 +1025,19 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     runners.delete(ws);
     cancelPending((pending) => pending.runner === runner);
   };
+
+  /**
+   * 지난 판의 게임 페이로드인가.
+   *
+   * 판이 바뀌는 찰나에는 아직 match-start를 못 본 참가자가 지난 판 입력을
+   * 흘려보낸다. 그게 상대의 새 미러에 들어가면 몇 천 프레임을 한꺼번에
+   * 앞질러 돌며 보드가 통째로 어긋난다. 봉투에 붙은 번호만 보고 걸러낸다
+   * (페이로드는 여전히 들여다보지 않는다).
+   *
+   * 번호가 없는 메시지(채팅, 아직 안 고친 봇)는 그대로 통과시킨다.
+   */
+  const isStale = (room: Room, mid: unknown): boolean =>
+    typeof mid === "number" && mid !== room.matchId;
 
   const runnerAvailable = (r: BotRunner): boolean =>
     r.active < r.capacity && r.ws.readyState === WebSocket.OPEN;
@@ -1444,15 +1472,28 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       case "relay": {
         const entry = sockToPlayer.get(ws);
         if (!entry) return;
+        if (isStale(entry.room, raw.mid)) return;
         record(entry.room, entry.player, raw.msg);
-        broadcast(entry.room, { t: "relay", from: entry.player.id, msg: raw.msg }, ws);
+        broadcast(
+          entry.room,
+          { t: "relay", from: entry.player.id, msg: raw.msg, ...(raw.mid !== undefined ? { mid: raw.mid } : {}) },
+          ws,
+        );
         break;
       }
       case "relay-to": {
         const entry = sockToPlayer.get(ws);
         if (!entry) return;
+        if (isStale(entry.room, raw.mid)) return;
         const target = entry.room.players.find((p) => p.id === raw.targetId);
-        if (target) send(target.ws, { t: "relay", from: entry.player.id, msg: raw.msg });
+        if (target) {
+          send(target.ws, {
+            t: "relay",
+            from: entry.player.id,
+            msg: raw.msg,
+            ...(raw.mid !== undefined ? { mid: raw.mid } : {}),
+          });
+        }
         break;
       }
       case "leave": {

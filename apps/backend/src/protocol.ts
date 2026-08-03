@@ -128,8 +128,16 @@ type ClientControlBody =
   /** ticket이 있으면 add-bot으로 예약된 슬롯에 착석(봇 경로 전용) */
   | { t: "join"; code: string; nick?: string; ticket?: string; handling?: unknown }
   | { t: "leave" }
-  | { t: "relay"; msg: GameMessage }
-  | { t: "relay-to"; targetId: string; msg: GameMessage }
+  /**
+   * mid는 이 페이로드가 **몇 번째 판의 것인지**다. 판이 바뀌는 찰나에는 아직
+   * 새 판을 모르는 참가자가 지난 판 입력을 흘릴 수 있고, 그게 상대의 새 미러에
+   * 들어가면 보드가 엉뚱하게 돌아간다. 서버가 지금 판과 대조해 걸러낸다.
+   *
+   * 페이로드를 들여다보는 건 아니다 — 봉투에 붙은 번호만 본다.
+   * 판과 무관한 것(채팅)에는 붙지 않으며, 없으면 그냥 통과시킨다.
+   */
+  | { t: "relay"; msg: GameMessage; mid?: number }
+  | { t: "relay-to"; targetId: string; msg: GameMessage; mid?: number }
   /** 참가자 ↔ 관전자 전환(lobby 전용) */
   | { t: "set-role"; role: PlayerRole }
   /** 호스트 전용: 매치 설정 갱신 */
@@ -245,6 +253,8 @@ type ServerControlBody =
       standings: { playerId: string; placement: number }[];
       /** 결과 화면이 걷히면 서버가 다음 판을 이어 연다(FT 시리즈 진행 중) */
       nextRound?: boolean;
+      /** 다음 판이 열리기까지 남은 시간(ms). 라운드 전환 연출을 여기 맞춘다. */
+      nextIn?: number;
       seriesWinnerId?: string;
     }
   /**
@@ -294,7 +304,8 @@ type ServerControlBody =
       frames: { ms: number; id: string; snap?: unknown; plan?: unknown }[];
     }
   | { t: "error"; reason: string }
-  | { t: "relay"; from: string; msg: GameMessage }
+  /** mid가 있으면 그 판의 페이로드다 — 받는 쪽도 지금 판과 다르면 버린다 */
+  | { t: "relay"; from: string; msg: GameMessage; mid?: number }
   /** 러너 등록 완료 */
   | { t: "bot-ready"; runner: BotRunnerInfo }
   /** list-runners 응답 — 지금 붙일 수 있는 러너들 */

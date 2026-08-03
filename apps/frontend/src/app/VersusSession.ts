@@ -51,6 +51,10 @@ export interface VersusSessionOptions {
   transport: MultiTransport;
   /** 이번 매치 상대들(나 제외) */
   opponents: string[];
+  /** 보드 아래 붙일 이름 — playerId → { 이름, 색 } */
+  labels?: Record<string, { text: string; color: string }>;
+  /** 내 보드 이름표 */
+  myLabel?: { text: string; color: string };
   /** 참가자별 시드·감도 — 상대 보드를 입력만으로 따라 돌리는 데 쓴다 */
   sim?: readonly MatchSimParams[];
   /** 시작 타깃 전략 */
@@ -80,6 +84,9 @@ export class VersusSession {
   private gfx: GfxOptions;
   /** 상대 보드용 — 고스트를 진하게 */
   private remoteGfx: GfxOptions;
+  /** playerId → 보드 아래 이름표 */
+  private labels: Record<string, { text: string; color: string }>;
+  private myLabel?: { text: string; color: string };
   private cbs: VersusCallbacks;
   private shakeMag = 0;
   private spikeValue = 0;
@@ -103,10 +110,14 @@ export class VersusSession {
     cbs: VersusCallbacks = {},
   ) {
     this.cbs = cbs;
-    this.gfx = opts.gfx;
+    // 대전에서는 캔버스가 자기 배경을 칠하지 않는다 — 무대 뒤에 배경 하나만
+    // 깔고 보드들을 투명하게 얹어야 사이에 경계가 생기지 않는다
+    this.gfx = { ...opts.gfx, backdrop: false };
+    this.labels = opts.labels ?? {};
+    this.myLabel = opts.myLabel;
     // 상대 보드는 대개 썸네일이라 작다. 고스트가 "어디에 놓을 생각인지"를
     // 알려주는 가장 눈에 띄는 단서라, 내 보드보다 진하게 그린다.
-    this.remoteGfx = { ...opts.gfx, ghostOpacity: Math.max(opts.gfx.ghostOpacity, 0.55) };
+    this.remoteGfx = { ...opts.gfx, backdrop: false, ghostOpacity: Math.max(opts.gfx.ghostOpacity, 0.55) };
     this.remoteCanvases = new Map(remoteCanvases);
     this.match = new VersusMatch({
       rule: opts.rule,
@@ -467,8 +478,8 @@ export class VersusSession {
   }
 
   setGfx(gfx: GfxOptions): void {
-    this.gfx = gfx;
-    this.remoteGfx = { ...gfx, ghostOpacity: Math.max(gfx.ghostOpacity, 0.55) };
+    this.gfx = { ...gfx, backdrop: false };
+    this.remoteGfx = { ...gfx, backdrop: false, ghostOpacity: Math.max(gfx.ghostOpacity, 0.55) };
   }
 
   private onRender(localGame: Game, alpha: number, fps: number): void {
@@ -499,7 +510,7 @@ export class VersusSession {
     // KO 뒤에도 몇 프레임은 그린다 — 캔버스가 무너지는 연출 동안 보드가 남아야 한다.
     // 관전자는 애초에 자기 보드가 없으므로 건너뛴다.
     if (!this.spectating) {
-      this.localRenderer.render(localGame, alpha, this.gfx, this.particles, this.actionText, this.damage, this.lastHud, localGame.pendingGarbage, localGame.readyGarbage);
+      this.localRenderer.render(localGame, alpha, { ...this.gfx, label: this.myLabel }, this.particles, this.actionText, this.damage, this.lastHud, localGame.pendingGarbage, localGame.readyGarbage);
     }
     // 원격: 각 상대 미러 단순 렌더(이펙트 없음, 게이지·성적은 표시)
     for (const [playerId, renderer] of this.remoteRenderers) {
@@ -507,7 +518,8 @@ export class VersusSession {
       if (!remoteGame) continue;
       // 크게 뜬 보드에만 성적을 붙인다(썸네일에는 자리가 없다)
       const hud = this.focusIds.has(playerId) ? remoteHud(remoteGame) : undefined;
-      renderer.render(remoteGame, 0, this.remoteGfx, undefined, undefined, undefined, hud, remoteGame.pendingGarbage, remoteGame.readyGarbage, this.match.plans.get(playerId));
+      const label = this.labels[playerId];
+      renderer.render(remoteGame, 0, { ...this.remoteGfx, label }, undefined, undefined, undefined, hud, remoteGame.pendingGarbage, remoteGame.readyGarbage, this.match.plans.get(playerId));
     }
 
     // 위험 경고음 — 스택이 천장 근처면 주기적으로 삐

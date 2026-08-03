@@ -229,7 +229,13 @@ function joinAsBot({ code, ticket, nick }) {
   const send = (m) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
   };
-  const sendGame = (msg) => send({ t: "relay", msg });
+  /*
+    게임 페이로드에는 몇 번째 판인지 붙인다. 판이 바뀌는 찰나에 지난 판 입력을
+    흘리면 상대의 새 미러가 그걸 먹고 보드가 통째로 어긋나는데, 서버가 이 번호를
+    보고 걸러준다. 판과 무관한 채팅에는 붙이지 않는다.
+  */
+  const sendGame = (msg) =>
+    send(msg.t === "chat" ? { t: "relay", msg } : { t: "relay", msg, mid: matchId });
   const say = (text) => sendGame({ t: "chat", nick, text });
 
   ws.on("open", () => send({ t: "join", code, ticket, nick }));
@@ -508,7 +514,7 @@ function joinAsBot({ code, ticket, nick }) {
       if (e.type === EventType.Attack && e.cells?.length) {
         const target = pickTarget();
         if (target) {
-          send({ t: "relay-to", targetId: target, msg: { t: "attack", holes: [...e.cells] } });
+          send({ t: "relay-to", targetId: target, msg: { t: "attack", holes: [...e.cells] }, mid: matchId });
           sentTo.set(target, (sentTo.get(target) ?? 0) + e.cells.length);
         }
       }

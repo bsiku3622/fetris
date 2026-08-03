@@ -35,6 +35,14 @@ export class NetClient {
   /** 서버가 알려준 최신 방 상태 */
   room: RoomState | null = null;
   /**
+   * 지금 뛰고 있는 판 번호.
+   *
+   * `room.matchId`를 그대로 쓰면 안 된다 — 서버는 match-start를 먼저 보내고 방
+   * 상태를 뒤이어 보내므로, 그 사이에는 방 상태가 아직 지난 판을 가리킨다.
+   * 게임 페이로드에 붙이는 번호는 그 틈에도 정확해야 한다.
+   */
+  private matchId = 0;
+  /**
    * 이 자리로 되돌아올 때 쓰는 토큰. 소켓이 끊겨도 이게 있으면 새로 입장하는
    * 대신 같은 자리로 복귀할 수 있다.
    */
@@ -82,6 +90,7 @@ export class NetClient {
     standings: { playerId: string; placement: number }[],
     seriesWinnerId?: string,
     nextRound?: boolean,
+    nextIn?: number,
   ) => void;
   /** 누군가의 계획 고스트가 바뀌었다 */
   onPlanState?: (playerId: string, ghosts: PlanGhost[]) => void;
@@ -163,17 +172,20 @@ export class NetClient {
       case "created":
         this.myId = msg.myId;
         this.session = msg.session;
+        this.matchId = msg.state.matchId;
         this.applyState(msg.state);
         this.onCreated?.(msg.code);
         break;
       case "joined":
         this.myId = msg.myId;
         this.session = msg.session;
+        this.matchId = msg.state.matchId;
         this.applyState(msg.state);
         this.onJoined?.(msg.code);
         break;
       case "resumed": {
         this.myId = msg.myId;
+        this.matchId = msg.state.matchId;
         // 서버가 못 받은 것만 다시 보낸다
         const resend = this.pending.filter((p) => p.cid > msg.ackClientId);
         this.pending = resend;
@@ -188,13 +200,15 @@ export class NetClient {
         this.applyState(msg.state);
         break;
       case "match-start":
+        // 방 상태보다 먼저 오므로 여기서 판 번호를 갱신해야 틈이 없다
+        this.matchId = msg.matchId;
         this.onMatchStart?.(msg.matchId, msg.seed, msg.config, msg.players, msg.sim ?? []);
         break;
       case "ko":
         this.onKO?.(msg.playerId, msg.placement, msg.remaining);
         break;
       case "match-end":
-        this.onMatchEnd?.(msg.matchId, msg.winnerId, msg.standings, msg.seriesWinnerId, msg.nextRound);
+        this.onMatchEnd?.(msg.matchId, msg.winnerId, msg.standings, msg.seriesWinnerId, msg.nextRound, msg.nextIn);
         break;
       case "plan-state":
         this.onPlanState?.(msg.playerId, msg.ghosts);
@@ -231,6 +245,9 @@ export class NetClient {
         break;
       }
       case "relay":
+        // 지난 판의 페이로드는 버린다. 서버도 걸러주지만, 배포 시차로 아직
+        // 옛 서버에 붙어 있을 수 있어 받는 쪽에서도 한 번 본다.
+        if (typeof msg.mid === "number" && msg.mid !== this.matchId) break;
         this.onGameMessage?.(msg.msg, msg.from);
         this.msgCb?.(msg.msg, msg.from);
         break;
@@ -358,11 +375,20 @@ export class NetClient {
 
   // ---- 게임 메시지 ---------------------------------------------------------
 
+  /**
+   * 이 페이로드가 판에 매인 것인가. 채팅은 판과 무관하니 번호를 붙이지 않는다 —
+   * 붙이면 판이 바뀌는 순간에 말이 씹힌다.
+   */
+  private static matchScoped(msg: GameMessage): boolean {
+    return msg.t !== "chat";
+  }
+
   sendGame(msg: GameMessage): void {
-    this.sendControl({ t: "relay", msg });
+    if (NetClient.matchScoped(msg)) this.sendControl({ t: "relay", msg, mid: this.matchId });
+    else this.sendControl({ t: "relay", msg });
   }
   sendGameTo(targetId: string, msg: GameMessage): void {
-    this.sendControl({ t: "relay-to", targetId, msg });
+    this.sendControl({ t: "relay-to", targetId, msg, mid: this.matchId });
   }
 
   disconnect(): void {

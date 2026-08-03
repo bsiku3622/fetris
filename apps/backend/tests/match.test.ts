@@ -562,6 +562,51 @@ describe("매치 진행", () => {
     guest.close();
   });
 
+  it("지난 판의 게임 메시지는 중계하지 않는다", async () => {
+    // 판이 바뀌는 찰나에 아직 match-start를 못 본 참가자가 지난 판 입력을
+    // 흘린다. 그게 상대의 새 미러에 들어가면 몇 천 프레임을 앞질러 돌며
+    // 보드가 통째로 어긋난다.
+    const { host, guests } = await readyRoom(1);
+    const start = await startMatch(host, guests);
+    host.drain();
+
+    // 지난 판 번호를 달고 오면 버린다
+    guests[0].send({ t: "relay", mid: start.matchId - 1, msg: { t: "sync", upto: 9999, keys: [1] } });
+    // 이번 판 번호는 통과한다
+    guests[0].send({ t: "relay", mid: start.matchId, msg: { t: "sync", upto: 8, keys: [2] } });
+
+    const relayed = await host.waitFor("relay");
+    expect(relayed.msg).toEqual({ t: "sync", upto: 8, keys: [2] });
+    // 버려진 게 뒤늦게 따라오지 않는다
+    await expect(host.waitFor("relay", 400)).rejects.toThrow();
+
+    // 번호를 안 붙인 메시지(채팅·옛 봇)는 그대로 통과한다
+    guests[0].send({ t: "relay", msg: { t: "chat", nick: "G1", text: "hi" } });
+    const chat = await host.waitFor("relay");
+    expect(chat.msg.t).toBe("chat");
+
+    host.close();
+    guests[0].close();
+  });
+
+  it("지난 판의 공격은 상대에게 닿지 않는다", async () => {
+    const { host, guests } = await readyRoom(1);
+    const start = await startMatch(host, guests);
+    const hostId = start.players.find((id) => id !== undefined) as string;
+    host.drain();
+
+    guests[0].send({
+      t: "relay-to",
+      targetId: hostId,
+      mid: start.matchId - 1,
+      msg: { t: "attack", holes: [1, 2, 3] },
+    });
+    await expect(host.waitFor("relay", 400)).rejects.toThrow();
+
+    host.close();
+    guests[0].close();
+  });
+
   it("중간에 나간 참가자도 녹화에 남는다", async () => {
     // 명단을 끝나고 다시 훑으면 나간 사람이 통째로 빠진다 — 그 사람 판도
     // 분명히 있었는데 기록에는 없는 셈이 된다.
