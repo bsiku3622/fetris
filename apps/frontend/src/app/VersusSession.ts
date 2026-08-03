@@ -163,7 +163,7 @@ export class VersusSession {
 
     // 지난 판의 KO 연출이 남아 있을 수 있다 — 새 판은 멀쩡한 보드로 연다
     VersusSession.revive(localCanvas);
-    this.localRenderer = new Renderer(localCanvas);
+    this.localRenderer = new Renderer(localCanvas, true);
     this.localRenderer.resize();
     // 알려진 roster 상대 canvas를 미리 렌더러로 등록
     for (const id of this.remoteCanvases.keys()) this.bindRemoteRenderer(id);
@@ -235,7 +235,7 @@ export class VersusSession {
     const canvas = this.remoteCanvases.get(playerId);
     if (!canvas) return;
     VersusSession.revive(canvas);
-    const renderer = new Renderer(canvas);
+    const renderer = new Renderer(canvas, true);
     renderer.resize();
     this.remoteRenderers.set(playerId, renderer);
   }
@@ -263,7 +263,7 @@ export class VersusSession {
     if (this.localCanvas === canvas) return;
     this.localCanvas = canvas;
     VersusSession.revive(canvas);
-    this.localRenderer = new Renderer(canvas);
+    this.localRenderer = new Renderer(canvas, true);
     this.localRenderer.resize();
   }
 

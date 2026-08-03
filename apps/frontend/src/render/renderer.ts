@@ -88,9 +88,16 @@ export class Renderer {
   private garbageMeterValue = 0; // 가비지 게이지 애니메이션 보간값(현재 표시 줄수)
   private garbagePulse = 0; // 게이지 cap 도달/증가 시 펄스(0..1, 감쇠)
 
-  constructor(canvas: HTMLCanvasElement) {
+  /**
+   * @param transparent 캔버스를 투명하게 둘지.
+   *
+   * 기본은 불투명(alpha: false)이다 — 자기 배경을 직접 칠하는 화면에서는 그게
+   * 빠르다. 다만 불투명 컨텍스트에서는 `clearRect`가 투명이 아니라 **검정**을
+   * 칠하므로, 배경을 뒤에 깔고 캔버스를 겹치는 대전 화면에서는 반드시 켜야 한다.
+   */
+  constructor(canvas: HTMLCanvasElement, transparent = false) {
     this.canvas = canvas;
-    const ctx = canvas.getContext("2d", { alpha: false });
+    const ctx = canvas.getContext("2d", { alpha: transparent });
     if (!ctx) throw new Error("2D context 생성 실패");
     this.ctx = ctx;
   }
