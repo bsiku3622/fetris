@@ -156,9 +156,6 @@ export function VersusScreen({
     randomizer: c.randomizer,
     nextCount: c.nextCount,
     allow180: c.allow180,
-    // 판이 열릴 때 입력을 잠가두는 시간. 첫 1초는 라운드 전환 슬라이드가
-    // 걷히는 구간이고, 남은 3초가 3·2·1이다.
-    readyFrames: 240,
   });
 
   const configFrom = (c: Cfg): MatchConfig => ({

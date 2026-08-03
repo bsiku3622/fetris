@@ -165,7 +165,7 @@ export class Game {
     // 가비지 구멍 생성기 — 피스 가방과 상관없게 시드를 분리
     this.garbageGen = new GarbageGen((this.seed ^ 0x9e3779b9) >>> 0, rule.cols, rule.garbageMessiness);
     this.stats = this.freshStats();
-    this.phaseTimer = rule.readyFrames ?? 60; // 기본 1초 Ready
+    this.phaseTimer = 60; // 1초 Ready
   }
 
   private freshStats(): Stats {
@@ -199,9 +199,7 @@ export class Game {
     this.holdPiece = Piece.None;
     this.canHold = true;
     this.phase = Phase.Ready;
-    // 생성자와 같은 값을 써야 한다 — 여기만 1초로 박아 두면 판을 다시 열 때만
-    // 시작 대기가 짧아져, 같은 방에서 사람마다 시작 시점이 어긋난다
-    this.phaseTimer = this.rule.readyFrames ?? 60;
+    this.phaseTimer = 60;
     this.gravityAccum = 0;
     this.lockTimer = 0;
     this.lockResetCount = 0;

@@ -9,11 +9,15 @@ import type { MatchEndInfo, RoomSession } from "../app/roomSession";
 //  1. 보드가 무너지는 연출이 **완전히 끝날 때까지 기다린다.** 두 동작이 겹치면
 //     무슨 일이 일어나는지 읽히지 않는다.
 //  2. 양끝에서 슬라이드가 닫히며 좌(나)·우(상대) 점수를 크게 보여준다.
-//  3. 슬라이드는 **다음 판이 실제로 열린 뒤에** 걷힌다. 그래야 열리는 순간
+//  3. 닫힌 문 뒤에서 3·2·1을 센다. 마지막 숫자가 꺼지는 순간 다음 판이 열린다.
+//  4. 슬라이드는 **다음 판이 실제로 열린 뒤에** 걷힌다. 그래야 열리는 순간
 //     두 보드가 새 판으로 준비된 채 드러난다 — 빈 화면이나 뒤늦게 튀어나오는
 //     보드를 보여주지 않는다.
-//  4. 3·2·1은 여기서 그리지 않는다. 새 판의 Ready 구간에 엔진이 캔버스에
-//     직접 세므로 프레임 단위로 정확하고, 화면도 조용하다.
+//
+// 카운트다운을 여기서 세는 이유가 있다. 시작 대기를 룰에 실어 각자 세게 하면,
+// 그 항목을 모르는 참가자(안 고친 봇)만 먼저 두기 시작한다 — 모르는 필드는 그냥
+// 무시되기 때문이다. **출발 신호는 `match-start`가 도착하는 순간**이고, 여기서는
+// 그 순간에 맞춰 숫자만 보여준다.
 //
 // 3인 이상은 슬라이드 대신 화면 전체가 검게 덮이고 순위가 흰 글씨로 뜬다(TOP 5).
 //
@@ -25,6 +29,10 @@ import type { MatchEndInfo, RoomSession } from "../app/roomSession";
 const FALL_MS = 1000;
 /** 슬라이드가 걷히는 데 걸리는 시간 — 부모가 이만큼 더 붙들어 준다 */
 export const OPEN_MS = 700;
+/** 숫자 하나가 쓰는 시간 */
+const TICK_MS = 1000;
+/** 카운트다운이 차지하는 구간 — 다음 판 시작 직전 3초 */
+const COUNT_MS = TICK_MS * 3;
 /** 한 번에 보여주는 순위 최대 인원 */
 const TOP_N = 5;
 
@@ -53,6 +61,8 @@ export function RoundTransition({
   /** 보드가 가라앉기를 기다렸다가 닫는다 */
   const [shut, setShut] = useState(false);
   const [slam, setSlam] = useState(false);
+  /** 3 → 2 → 1. 0이면 아직 카운트다운 전 */
+  const [count, setCount] = useState(0);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   useEffect(() => {
@@ -65,11 +75,17 @@ export function RoundTransition({
         t.push(setTimeout(() => setSlam(false), 440));
       }, FALL_MS + 530),
     );
+    // 마지막 숫자가 꺼지는 순간이 다음 판 시작이다 — 끝에서부터 역산한다
+    const startsIn = Math.max(0, end.nextIn ?? 7600);
+    const countAt = Math.max(FALL_MS, startsIn - COUNT_MS);
+    for (let i = 0; i < 3; i++) {
+      t.push(setTimeout(() => setCount(3 - i), countAt + i * TICK_MS));
+    }
     return () => {
       for (const x of t) clearTimeout(x);
       timers.current = [];
     };
-  }, []);
+  }, [end.nextIn]);
 
   /**
    * 승수는 다음 판이 열리면서 방 상태가 갱신돼도 그대로여야 한다 — 연출이
@@ -117,6 +133,7 @@ export function RoundTransition({
         {wing("r", theirs.playerId, FUNKY.pink, end.winnerId === theirs.playerId)}
         {shut && !opened && <div className="fx-rt-seam" />}
         {slam && <div className="fx-rt-flash" />}
+        {!opened && <Countdown n={count} />}
         {shut && !opened && <Tools room={room} isHost={isHost} />}
       </div>
     );
@@ -150,6 +167,17 @@ export function RoundTransition({
           {!opened && <Tools room={room} isHost={isHost} />}
         </div>
       )}
+      {!opened && <Countdown n={count} />}
+    </div>
+  );
+}
+
+/** 3 · 2 · 1 — 조용하게. 숫자 하나만 가운데에 뜬다. */
+function Countdown({ n }: { n: number }) {
+  if (n <= 0) return null;
+  return (
+    <div className="fx-rt-count" key={n}>
+      <b>{n}</b>
     </div>
   );
 }

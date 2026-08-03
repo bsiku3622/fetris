@@ -95,11 +95,6 @@ export interface RuleSet {
   lockDelay: number; // 프레임
   lockResets: number; // 이동/회전 reset 최대 횟수
   are: number; // 스폰 지연 프레임
-  /**
-   * 판을 열 때 입력을 잠가두는 시간(프레임). 없으면 60(1초).
-   * 대전은 라운드 전환에서 3·2·1을 보여줘야 해서 더 길게 잡는다.
-   */
-  readyFrames?: number;
   lineClearAre: number; // 라인클리어 지연 프레임
   // b2b/콤보
   b2bMode: "surge" | "chaining" | "none";

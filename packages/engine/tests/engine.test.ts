@@ -278,23 +278,3 @@ describe("pieces", () => {
   });
 });
 
-describe("시작 대기(Ready)", () => {
-  it("판을 다시 열어도 룰이 정한 만큼 기다린다", () => {
-    /*
-      reset이 1초로 박아 두면, 판을 다시 여는 쪽(리플레이 되감기 등)만 시작
-      대기가 짧아져 원본과 다른 전개가 나온다.
-    */
-    const rule = { ...STANDARD_RULESET, readyFrames: 240 };
-    const g = new Game(rule, DEFAULT_HANDLING, 1);
-    expect(g.readyTimer).toBe(240);
-    g.reset(1);
-    expect(g.readyTimer).toBe(240);
-  });
-
-  it("정하지 않으면 1초를 기다린다", () => {
-    const g = new Game(STANDARD_RULESET, DEFAULT_HANDLING, 1);
-    expect(g.readyTimer).toBe(60);
-    g.reset(1);
-    expect(g.readyTimer).toBe(60);
-  });
-});

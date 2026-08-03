@@ -228,12 +228,17 @@ const MAX_BOT_CAPACITY = 16;
 /** 순위표를 보여주고 대기실로 돌아가기까지 */
 const RESULTS_MS = 6000;
 /**
- * 시리즈에서 다음 판까지의 간격. 라운드 전환 연출에서 보드가 가라앉고
- * 슬라이드가 닫혀 점수를 보여주는 데까지가 여기 들어간다. 카운트다운은 새 판이
- * 열린 뒤(엔진 Ready) 몫이라 포함되지 않는다.
+ * 시리즈에서 다음 판까지의 간격. 라운드 전환 연출이 통째로 여기 들어간다 —
+ * 보드가 가라앉고, 슬라이드가 닫혀 점수를 보여주고, 3·2·1을 센 뒤 슬라이드가
+ * 걷히는 순간이 곧 다음 판 시작이다.
+ *
+ * **출발 신호는 `match-start`다.** 시작 대기를 룰에 실어 각자 세게 하면, 그
+ * 항목을 모르는 참가자(안 고친 봇)만 먼저 두기 시작한다 — 모르는 필드는 그냥
+ * 무시되기 때문이다. 메시지가 도착하는 순간을 출발로 삼으면 그럴 일이 없다.
+ *
  * 기다리기 싫으면 누구든 skip-results로 건너뛸 수 있다.
  */
-const ROUND_BREAK_MS = 5600;
+const ROUND_BREAK_MS = 7600;
 const MIN_PARTICIPANTS = 2;
 /**
  * 소켓이 끊긴 참가자의 자리를 잡아두는 시간. 순단으로 판에서 밀려나지 않게
@@ -709,6 +714,9 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       winnerId: winner?.id ?? null,
       standings,
       nextRound,
+      // 다음 판이 언제 열리는지 알려준다 — 전환 연출의 카운트다운이 그 순간에
+      // 딱 떨어져야 숫자가 겉돌지 않는다
+      ...(nextRound ? { nextIn: breakMs } : {}),
       ...(seriesWinner ? { seriesWinnerId: seriesWinner.id } : {}),
     });
     broadcastState(room);

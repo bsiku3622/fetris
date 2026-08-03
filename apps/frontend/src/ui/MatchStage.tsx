@@ -40,11 +40,6 @@ export function MatchStage({
 
   const [focusId, setFocusId] = useState<string | null>(opponents[0] ?? null);
   const [strategy, setStrategy] = useState<TargetStrategy>("random");
-  /**
-   * 시작 카운트다운. 엔진이 판을 열며 입력을 잠가두는 Ready 구간(4초)에 맞춰
-   * 3·2·1을 센다. 보드마다 그리지 않고 무대 정중앙에 하나만 띄운다.
-   */
-  const [count, setCount] = useState(0);
   /** 이미 KO 연출을 태운 상대 — 중복 실행 방지 */
   const koneRef = useRef<Set<string>>(new Set());
 
@@ -163,17 +158,6 @@ export function MatchStage({
     };
     // 매치 하나당 한 번만 만든다 — 의존성에 화면 상태를 넣으면 판이 리셋된다
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [match.matchId]);
-
-  // 판이 열리면 3·2·1. 첫 1초는 라운드 전환 슬라이드가 걷히는 구간이라 비워 둔다.
-  useEffect(() => {
-    const timers = [1000, 2000, 3000, 4000].map((ms, i) =>
-      setTimeout(() => setCount(i < 3 ? 3 - i : 0), ms),
-    );
-    return () => {
-      for (const t of timers) clearTimeout(t);
-      setCount(0);
-    };
   }, [match.matchId]);
 
   // ---- 서버가 알린 KO를 연출로 반영 ---------------------------------------
@@ -424,32 +408,6 @@ export function MatchStage({
               {i + 1} {TARGET_LABELS[s]}
             </button>
           ))}
-        </div>
-      )}
-
-      {/* 시작 카운트다운 — 무대 정중앙에 하나만 */}
-      {count > 0 && (
-        <div
-          key={count}
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 9,
-            pointerEvents: "none",
-            fontWeight: 900,
-            fontSize: "clamp(5rem, 16vw, 13rem)",
-            lineHeight: 1,
-            letterSpacing: "-0.05em",
-            fontVariantNumeric: "tabular-nums",
-            color: "#fff",
-            textShadow: "0 4px 24px rgba(0,0,0,0.85)",
-            animation: "fx-count 1000ms ease-out both",
-          }}
-        >
-          {count}
         </div>
       )}
 

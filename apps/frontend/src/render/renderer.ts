@@ -270,15 +270,9 @@ export class Renderer {
     // 액션 텍스트 (필드 왼쪽)
     if (action) action.draw(ctx, bx - pad * 1.5, fieldTop, cell);
 
-    // 시작 카운트다운 (필드 중앙)
-    //
-    // Ready를 길게 잡은 판(대전 라운드 전환)은 3·2·1로 센다. 기본 1초짜리
-    // 판은 셀 것이 없으므로 예전대로 READY?/GO!를 띄운다.
+    // READY / GO 카운트다운 (필드 중앙)
     const rt = game.readyTimer;
-    // Ready를 길게 잡은 판(대전)은 보드마다 숫자를 그리지 않는다 —
-    // 화면 정중앙에 하나만 띄우는 편이 조용하고, 무대가 그걸 맡는다.
-    const counted = (game.rule.readyFrames ?? 60) > 60;
-    if (rt >= 0 && !counted) {
+    if (rt >= 0) {
       const txt = rt > 20 ? "READY?" : "GO!";
       const color = rt > 20 ? FUNKY.purple : FUNKY.green;
       ctx.save();
