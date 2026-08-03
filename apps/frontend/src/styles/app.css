@@ -1307,9 +1307,15 @@ body,
 /* 글자 하나씩 위에서 박힌다 */
 .fx-win-word {
   display: flex;
-  font-size: clamp(3rem, 12vw, 9rem);
+  font-size: clamp(2.4rem, 9vw, 6.5rem);
   font-weight: 900;
   line-height: 0.94;
+  letter-spacing: 0.02em;
+  color: currentColor;
+}
+/* 승리 문구만 크고 두껍게 */
+.fx-win.is-win .fx-win-word {
+  font-size: clamp(3rem, 12vw, 9rem);
   letter-spacing: -0.03em;
   color: #fff;
   -webkit-text-stroke: 5px #000;
@@ -1317,6 +1323,15 @@ body,
 }
 .fx-win-word span {
   display: inline-block;
+  /* 담담한 기본 — 아래에서 살짝 올라와 자리를 잡는다 */
+  animation: fx-win-settle 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes fx-win-settle {
+  0% { transform: translateY(14px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+/* 이긴 화면에서만 글자가 위에서 박히고 빛난다 */
+.fx-win.is-win .fx-win-word span {
   text-shadow: 0 0 40px currentColor;
   animation: fx-win-drop 460ms cubic-bezier(0.2, 1.5, 0.35, 1) both;
 }

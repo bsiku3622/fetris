@@ -793,15 +793,18 @@ function ResultsView({ room }: { room: RoomSession }) {
   const champion = series ?? end.winnerId;
   const mine = champion === room.myId;
   /** 이긴 사람의 화면은 금빛, 진 사람은 차갑게 */
-  const tone = champion ? (mine ? FUNKY.yellow : FUNKY.sky) : FUNKY.inkMuted;
+  const tone = champion ? (mine ? FUNKY.yellow : "#8d86a8") : "#8d86a8";
   const word = champion ? (mine ? "WINNER" : "DEFEAT") : "DRAW";
   const kicker = series ? `FT${firstTo} 시리즈 종료` : champion ? "매치 종료" : "무승부";
 
+  /*
+    잔치는 이긴 사람 몫이다. 빛살·띠·조각은 승리 화면에만 붙이고, 패배와
+    무승부는 같은 뼈대에 담담하게 둔다 — 진 화면이 화려하면 놀리는 것처럼 보인다.
+  */
   return (
-    <div className="fx-win" style={{ color: tone }}>
-      <div className="fx-win-rays" />
-      <div className="fx-win-beam" />
-      {/* 흩날리는 조각 — 이긴 화면에서만 */}
+    <div className={`fx-win${mine ? " is-win" : ""}`} style={{ color: tone }}>
+      {mine && <div className="fx-win-rays" />}
+      {mine && <div className="fx-win-beam" />}
       {mine && (
         <div className="fx-win-fall" aria-hidden>
           {CONFETTI.map((c, i) => (

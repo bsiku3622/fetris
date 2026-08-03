@@ -414,6 +414,7 @@ npm run dev                                   # 게임 클라이언트 :1420</co
     <li><code>sim</code>에는 <strong>상대의 시드·감도도</strong> 들어 있습니다. 상대 판을 그대로 따라 돌리는 데 쓰입니다.</li>
     <li><code>players</code>에 자기 id가 없으면 이번 판은 관전입니다 — 판을 열지 마세요.</li>
     <li><code>config.simRate</code>(60/120/240)와 감도가 다르면 같은 입력이라도 결과가 갈립니다. 반드시 받은 값으로 도세요.</li>
+    <li><code>config.rule</code>을 <strong>그대로</strong> <code>Game</code>에 넘기세요. 판을 열 때 입력을 잠가두는 시간(<code>readyFrames</code>)처럼 시작 타이밍을 정하는 항목이 들어 있어서, 임의로 만든 룰로 돌리면 봇만 먼저 두기 시작하고 남들 화면의 미러와 판이 갈립니다.</li>
   </ul>
 </section>
 
