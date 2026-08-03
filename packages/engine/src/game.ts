@@ -199,7 +199,9 @@ export class Game {
     this.holdPiece = Piece.None;
     this.canHold = true;
     this.phase = Phase.Ready;
-    this.phaseTimer = 60;
+    // 생성자와 같은 값을 써야 한다 — 여기만 1초로 박아 두면 판을 다시 열 때만
+    // 시작 대기가 짧아져, 같은 방에서 사람마다 시작 시점이 어긋난다
+    this.phaseTimer = this.rule.readyFrames ?? 60;
     this.gravityAccum = 0;
     this.lockTimer = 0;
     this.lockResetCount = 0;
