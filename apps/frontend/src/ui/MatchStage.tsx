@@ -53,7 +53,18 @@ export function MatchStage({
    * 마지막 보드는 결과와 함께 계속 보여야 하므로 여기서 화면을 얼려 둔다.
    */
   const ended = !!room.matchEnd;
-  const aliveOpponents = opponents.filter((id) => byId(id)?.alive !== false);
+  /**
+   * 로스터가 이번 판의 것인가.
+   *
+   * 서버는 match-start를 먼저 보내고 방 상태를 뒤이어 보낸다. 그 사이 한 렌더
+   * 동안은 **지난 판에서 죽은 사람이 그대로 죽은 걸로 보인다.** 그걸 믿으면
+   * 새 판이 열리자마자 멀쩡한 상대에게 KO 연출을 태워, 보드가 투명해진 채
+   * 화면 밖으로 밀려나 새까만 칸만 남는다(시리즈 다음 판에서 나던 증상).
+   */
+  const rosterReady = room.state?.matchId === match.matchId;
+  const aliveOpponents = rosterReady
+    ? opponents.filter((id) => byId(id)?.alive !== false)
+    : opponents;
   /** 판이 끝나기 직전에 살아 있던 상대들 — 끝난 뒤 레이아웃은 이 구성을 유지한다 */
   const lastAliveRef = useRef<string[]>(aliveOpponents);
   if (!ended) lastAliveRef.current = aliveOpponents;
@@ -82,6 +93,10 @@ export function MatchStage({
     const lc = localCanvasRef.current;
     const net = room.net;
     if (!lc || !net) return;
+
+    // 지난 판에 떨군 사람들 기억을 비운다 — 안 그러면 시리즈 다음 판부터
+    // "이미 처리했다"고 보고 KO 연출이 아예 뜨지 않는다
+    koneRef.current.clear();
 
     const remoteCanvases = new Map<string, HTMLCanvasElement>();
     for (const id of opponents) {
@@ -140,6 +155,8 @@ export function MatchStage({
   useEffect(() => {
     const session = sessionRef.current;
     if (!session) return;
+    // 지난 판의 로스터로 이번 판 사람을 떨구지 않는다
+    if (!rosterReady) return;
     for (const id of opponents) {
       const p = byId(id);
       if (!p || p.alive || koneRef.current.has(id)) continue;
@@ -152,7 +169,7 @@ export function MatchStage({
         setFocusId(opponents.find((o) => o !== id && byId(o)?.alive !== false) ?? null);
       }
     }
-  }, [players, opponents, focusId, ended]);
+  }, [players, opponents, focusId, ended, rosterReady]);
 
   // 판이 끝나면 우승자 보드를 크게 남긴다(내가 이겼으면 내 보드가 그대로 주역이다)
   useEffect(() => {

@@ -150,6 +150,8 @@ export class VersusSession {
       this.bindRemoteRenderer(playerId);
     };
 
+    // 지난 판의 KO 연출이 남아 있을 수 있다 — 새 판은 멀쩡한 보드로 연다
+    VersusSession.revive(localCanvas);
     this.localRenderer = new Renderer(localCanvas);
     this.localRenderer.resize();
     // 알려진 roster 상대 canvas를 미리 렌더러로 등록
@@ -202,11 +204,26 @@ export class VersusSession {
     for (const r of this.remoteRenderers.values()) r.resize();
   }
 
+  /**
+   * KO 연출로 캔버스에 직접 박아 둔 인라인 스타일을 걷어낸다.
+   *
+   * 연출은 엘리먼트에 직접 쓰기 때문에 판이 끝나도 그대로 남는다. 시리즈에서
+   * 다음 판이 같은 캔버스를 다시 쓰면 보드가 투명해진 채 화면 밖에 머물러,
+   * 뒤의 스테이지 배경만 보이는 새까만 칸이 된다. 캔버스를 새로 잡을 때마다
+   * 원래대로 되돌린다.
+   */
+  private static revive(canvas: HTMLCanvasElement): void {
+    canvas.style.transition = "";
+    canvas.style.transform = "";
+    canvas.style.opacity = "";
+  }
+
   /** playerId에 등록된 canvas가 있으면 Renderer를 만들어 바인딩(중복 방지). */
   private bindRemoteRenderer(playerId: string): void {
     if (this.remoteRenderers.has(playerId)) return;
     const canvas = this.remoteCanvases.get(playerId);
     if (!canvas) return;
+    VersusSession.revive(canvas);
     const renderer = new Renderer(canvas);
     renderer.resize();
     this.remoteRenderers.set(playerId, renderer);
@@ -234,6 +251,7 @@ export class VersusSession {
   rebindLocal(canvas: HTMLCanvasElement): void {
     if (this.localCanvas === canvas) return;
     this.localCanvas = canvas;
+    VersusSession.revive(canvas);
     this.localRenderer = new Renderer(canvas);
     this.localRenderer.resize();
   }
