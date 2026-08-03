@@ -30,6 +30,11 @@ const SPRINT_STEPS = 20;
  * 그때마다 화면이 튀므로, 따라잡을 수 없을 만큼 벌어졌을 때만 쓴다.
  */
 const RESYNC_LEAD = 12;
+/**
+ * 조각 수가 이만큼까지 벌어지는 건 지연으로 설명된다. 넘어가면 어긋난 것이다.
+ * 스트림이 4프레임마다 오므로 그 사이에 놓일 수 있는 조각은 많아야 한둘이다.
+ */
+const DRIFT_TOLERANCE = 2;
 
 export interface MirrorOptions {
   rule: RuleSet;
@@ -98,17 +103,39 @@ export class BoardMirror {
   }
 
   /**
-   * 상태 키프레임. 입력이 통째로 빈 구간(순단)은 따라 돌 방법이 없으므로,
-   * 그렇게 벌어졌을 때만 상태를 그대로 받아 이어 간다.
+   * 상태 키프레임.
+   *
+   * 두 경우에 받아 적는다.
+   *
+   *  1. **프레임이 크게 밀렸을 때** — 입력이 통째로 빈 구간(순단)은 따라 돌
+   *     방법이 없으므로 상태를 그대로 받아 이어 간다.
+   *  2. **내용이 어긋났을 때** — 프레임은 맞는데 판이 다르다면 상대가 나와
+   *     다른 조건으로 돌고 있다는 뜻이다(엔진 버전이 달라 룰 하나를 무시하는
+   *     봇 같은 경우). 그대로 두면 미러가 제 갈 길로 흘러가 **그럴듯한 가짜
+   *     판**을 그린다 — 어긋난 줄도 모르고 보게 되므로 진짜 상태로 되돌린다.
    */
   keyframe(frame: number, snap: GameSnapshot): void {
     if (this.mode === "snapshot") {
       this.player.game.deserialize(snap);
       return;
     }
-    if (this.mode === "stream" && frame <= this.player.frame + RESYNC_LEAD) return;
+    if (this.mode === "stream" && !this.stale(frame, snap)) return;
     this.player.syncTo(snap, frame);
     this.mode = "stream";
+  }
+
+  /** 이 키프레임으로 되돌려야 하는 상태인가 */
+  private stale(frame: number, snap: GameSnapshot): boolean {
+    if (frame > this.player.frame + RESYNC_LEAD) return true;
+    const theirs = snap?.stats?.piecesPlaced;
+    if (typeof theirs !== "number") return false;
+    const mine = this.player.game.stats.piecesPlaced;
+    /*
+      미러는 스트림이 도착하는 만큼 늘 몇 프레임 뒤에 있으므로, 그 사이에 조각이
+      놓였으면 상대가 한둘 앞서는 건 정상이다. 그 폭을 넘어서거나 미러가 오히려
+      앞서 있다면 지연으로는 설명되지 않는다 — 어긋난 것이다.
+    */
+    return mine > theirs || theirs - mine > DRIFT_TOLERANCE;
   }
 
   /** 옛 방식(보드 스냅샷만 보내는 봇) — 받은 그대로 얹는다 */

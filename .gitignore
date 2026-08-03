@@ -6,3 +6,6 @@ node_modules/
 # Claude Code 세션 상태
 .claude/
 .vercel
+
+# Playwright MCP 임시 산출물(스냅샷·콘솔 로그)
+.playwright-mcp/

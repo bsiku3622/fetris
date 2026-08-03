@@ -127,18 +127,53 @@ describe("BoardMirror", () => {
     expect(fingerprint(mirror.game)).toBe(fingerprint(game));
   });
 
+  it("판이 어긋나면 키프레임으로 되돌린다", () => {
+    /*
+      상대가 나와 다른 조건으로 돌고 있으면(엔진 버전이 달라 룰 하나를 무시하는
+      봇 같은 경우) 프레임은 맞는데 판이 갈린다. 그대로 두면 미러가 제 갈 길로
+      흘러가 그럴듯한 가짜 판을 그린다 — 어긋난 줄도 모르고 보게 된다.
+    */
+    const { rec } = playSource(300);
+    const mirror = newMirror();
+    mirror.feed(200, rec.keys, rec.garbage);
+    drain(mirror);
+
+    // 실제 상대는 훨씬 많이 놓은 상태였다
+    const truth = playSource(300).game;
+    expect(truth.stats.piecesPlaced).toBeGreaterThan(mirror.game.stats.piecesPlaced + 2);
+
+    mirror.keyframe(mirror.frame, truth.serialize());
+    expect(mirror.game.stats.piecesPlaced).toBe(truth.stats.piecesPlaced);
+  });
+
+  it("지연으로 설명되는 차이는 그냥 둔다", () => {
+    /*
+      미러는 스트림이 도착하는 만큼 늘 몇 프레임 뒤에 있어서, 그 사이에 놓인
+      조각만큼 상대가 앞선다. 그때마다 상태를 갈아끼우면 화면이 튄다.
+      되돌렸는지는 frame이 넘어갔는지로 본다(syncTo가 frame을 옮긴다).
+    */
+    const { rec } = playSource(300);
+    const mirror = newMirror();
+    mirror.feed(300, rec.keys, rec.garbage);
+    drain(mirror);
+    const at = mirror.frame;
+
+    const lagging = mirror.game.serialize();
+    lagging.stats = { ...lagging.stats, piecesPlaced: lagging.stats.piecesPlaced + 1 };
+    mirror.keyframe(at + 3, lagging);
+    expect(mirror.frame).toBe(at);
+  });
+
   it("몇 프레임 뒤처진 정도로는 키프레임을 쓰지 않는다", () => {
-    // 매번 상태를 갈아끼우면 그때마다 화면이 튄다.
+    // 내용이 같은데 프레임만 조금 앞선 키프레임은 무시한다.
     const { rec } = playSource(200);
     const mirror = newMirror();
     mirror.feed(100, rec.keys, rec.garbage);
     drain(mirror);
     expect(mirror.frame).toBe(100);
 
-    const other = new Game(RULE, DEFAULT_HANDLING, 999);
-    mirror.keyframe(105, other.serialize());
+    mirror.keyframe(105, mirror.game.serialize());
     expect(mirror.frame).toBe(100);
-    expect(fingerprint(mirror.game)).not.toBe(fingerprint(other));
   });
 
   it("스냅샷만 오는 상대는 시뮬을 돌리지 않는다", () => {
