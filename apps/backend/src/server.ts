@@ -709,9 +709,6 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       winnerId: winner?.id ?? null,
       standings,
       nextRound,
-      // 다음 판이 언제 열리는지 알려준다 — 클라이언트가 라운드 전환 연출을
-      // 그 시각에 딱 맞춰 끝내야 카운트다운이 겉돌지 않는다
-      ...(nextRound ? { nextIn: breakMs } : {}),
       ...(seriesWinner ? { seriesWinnerId: seriesWinner.id } : {}),
     });
     broadcastState(room);

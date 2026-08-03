@@ -195,8 +195,6 @@ type ServerControlBody =
       standings: { playerId: string; placement: number }[];
       /** 결과 화면이 걷히면 서버가 다음 판을 이어 연다(FT 시리즈 진행 중) */
       nextRound?: boolean;
-      /** 다음 판이 열리기까지 남은 시간(ms). 라운드 전환 연출을 여기 맞춘다. */
-      nextIn?: number;
       /** 있으면 시리즈(FT)까지 끝났다는 뜻 */
       seriesWinnerId?: string;
     }

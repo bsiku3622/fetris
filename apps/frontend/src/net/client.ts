@@ -90,7 +90,6 @@ export class NetClient {
     standings: { playerId: string; placement: number }[],
     seriesWinnerId?: string,
     nextRound?: boolean,
-    nextIn?: number,
   ) => void;
   /** 누군가의 계획 고스트가 바뀌었다 */
   onPlanState?: (playerId: string, ghosts: PlanGhost[]) => void;
@@ -208,7 +207,7 @@ export class NetClient {
         this.onKO?.(msg.playerId, msg.placement, msg.remaining);
         break;
       case "match-end":
-        this.onMatchEnd?.(msg.matchId, msg.winnerId, msg.standings, msg.seriesWinnerId, msg.nextRound, msg.nextIn);
+        this.onMatchEnd?.(msg.matchId, msg.winnerId, msg.standings, msg.seriesWinnerId, msg.nextRound);
         break;
       case "plan-state":
         this.onPlanState?.(msg.playerId, msg.ghosts);
