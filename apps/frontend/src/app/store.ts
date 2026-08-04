@@ -33,6 +33,13 @@ export interface Settings {
   audio: AudioOptions;
   perf: LoopPerfOptions;
   rulesets: Record<GameModeName, RuleSet>;
+  /**
+   * 빠른 시작 — 혼자 하는 판의 3·2·1을 1초 안에 끝낸다.
+   *
+   * 대전에는 적용되지 않는다. 시작 대기는 참가자 모두가 같은 길이로 세야 하고,
+   * 혼자만 짧게 세면 그만큼 먼저 움직이게 된다.
+   */
+  expertStart: boolean;
 }
 
 /** 랜덤 기본 닉네임 — 매 새 설치마다 다르게 */
@@ -58,6 +65,7 @@ export function defaultSettings(): Settings {
     gfx: { ...DEFAULT_GFX },
     audio: { ...DEFAULT_AUDIO },
     perf: { ...DEFAULT_PERF },
+    expertStart: false,
     rulesets: {
       sprint: defaultRuleset("sprint"),
       blitz: defaultRuleset("blitz"),

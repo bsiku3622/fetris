@@ -12,7 +12,7 @@ import { InputManager } from "@fetris/engine/input";
 import type { KeyMap } from "@fetris/engine/input";
 import { Mode } from "@fetris/engine/modes";
 import { saveZenState, loadZenState, clearZenState } from "./store";
-import { countdownAt } from "./countdown";
+import { countdownAt, EXPERT_READY_FRAMES } from "./countdown";
 import type { HudInfo, ModeResult } from "@fetris/engine/modes";
 import type { Handling, GameModeName, RuleSet } from "@fetris/engine/types";
 import { SpinType, Piece } from "@fetris/engine/types";
@@ -38,6 +38,8 @@ export interface SessionOptions {
   audio: AudioOptions;
   perf: LoopPerfOptions;
   seed: number;
+  /** 빠른 시작 — 3·2·1을 1초 안에 끝낸다(혼자 하는 판 전용) */
+  expertStart?: boolean;
 }
 
 export class GameSession {
@@ -70,8 +72,15 @@ export class GameSession {
     const zenLike = modeName === "zen" || modeName === "fourwide" || modeName === "combo";
     this.game.undoEnabled = modeName === "zen" || modeName === "fourwide"; // Combo는 되돌리기 비활성(가비지 보충 일관성)
     this.game.topOutResets = zenLike; // 막히면 게임오버 대신 필드 리셋
+    // 혼자 하는 판이라 남과 맞출 것이 없다 — 원하면 대기를 1초로 줄인다
+    if (opts.expertStart) this.game.readyFrames = EXPERT_READY_FRAMES;
     this.mode.setup(this.game);
     if (modeName === "zen") this.restoreZen();
+    /*
+      이어하기로 얹은 상태에는 "이미 시작했다"는 페이즈까지 들어 있다. 그대로 두면
+      조각이 곧바로 떨어지므로, 보드는 이어받되 카운트다운은 처음부터 다시 건다.
+    */
+    this.game.restartCountdown();
     this.renderer = new Renderer(canvas);
     this.renderer.resize();
     this.particles.intensity = opts.gfx.particles;
@@ -168,7 +177,7 @@ export class GameSession {
    * 그려지고 소리도 겹쳐 울린다.
    */
   private tickCountdown(game: Game): void {
-    const n = countdownAt(game.readyTimer);
+    const n = countdownAt(game.readyTimer, game.readyFrames);
     if (n === this.countdown) return;
     this.countdown = n;
     if (n > 0) this.sound.play("count");

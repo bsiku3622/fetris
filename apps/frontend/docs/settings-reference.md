@@ -58,6 +58,15 @@ UI는 두 그룹으로 분리:
 - Countdown on/off
 - Auto-retry (40L/Blitz)
 
+### Expert Mode — 빠른 시작 (`settings.expertStart`, Performance 탭)
+
+판이 열리기 전 3·2·1을 1초 안에 끝낸다(기본 4초). 엔진이 시작 전 입력을 잠그는
+프레임(`Game.readyFrames`)을 240 → 60으로 줄이는 것이고, 카운트다운 숫자는 그
+길이를 넷으로 나눠 계산하므로 3·2·1은 그대로 나오고 간격만 좁아진다.
+
+**대전에는 적용되지 않는다.** 시작 대기는 참가자 전원이 같은 길이로 세야 하고,
+혼자만 짧게 세면 그만큼 먼저 움직이게 된다. 대전은 언제나 `READY_FRAMES`를 쓴다.
+
 ## 6. Custom/모드 룰 (모드별 RuleSet)
 gravity, gravity increase/margin, lock delay, kickset(SRS+/SRS/SRS-X/none),
 spin bonus(none/t-spins/all-mini/all-mini+/all), bag type(7/14/classic/pairs/random),

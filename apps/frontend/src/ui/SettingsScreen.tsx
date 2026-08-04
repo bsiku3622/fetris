@@ -320,6 +320,12 @@ export function SettingsScreen({
               <Row label="Low-latency 입력">
                 <Toggle value={settings.perf.lowLatency} onChange={(v) => setPerf({ lowLatency: v })} />
               </Row>
+              <Row
+                label="Expert Mode — 빠른 시작"
+                desc="혼자 하는 판의 3·2·1을 1초 안에 끝냅니다. 대전은 참가자가 모두 같은 시점에 출발해야 하므로 적용되지 않습니다."
+              >
+                <Toggle value={settings.expertStart} onChange={(v) => updateSettings({ expertStart: v })} />
+              </Row>
             </div>
           </Tabs.Panel>
 

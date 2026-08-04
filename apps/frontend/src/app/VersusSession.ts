@@ -510,7 +510,8 @@ export class VersusSession {
 
   /** 숫자가 넘어가는 순간에만 알린다 — 매 프레임 알리면 소리가 겹친다 */
   private tickCountdown(localGame: Game): void {
-    const n = countdownAt(this.countdownSource(localGame).readyTimer);
+    const src = this.countdownSource(localGame);
+    const n = countdownAt(src.readyTimer, src.readyFrames);
     if (n === this.countdown) return;
     this.countdown = n;
     if (n > 0) this.sound.play("count");

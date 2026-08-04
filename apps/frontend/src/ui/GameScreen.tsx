@@ -46,6 +46,7 @@ export function GameScreen({
         audio: settings.audio,
         perf: settings.perf,
         seed,
+        expertStart: settings.expertStart,
       },
       {
         onHud: applyHud,

@@ -132,6 +132,40 @@ describe("Game 통합", () => {
     expect(g.cur).not.toBe(Piece.None);
   });
 
+  it("이어하기로 상태를 얹어도 카운트다운은 처음부터 다시 돈다", () => {
+    /*
+      deserialize는 판이 돌던 시점을 통째로 복원하느라 페이즈까지 Playing으로
+      돌려놓는다. 그대로 두면 이어하기(Zen)에서 조각이 곧바로 떨어져, 다른 모드와
+      달리 3·2·1 없이 시작해 버린다. 이어받는 것은 쌓아둔 보드지 "이미 시작했다"는
+      사실이 아니다.
+    */
+    const played = new Game({ ...STANDARD_RULESET }, { ...DEFAULT_HANDLING }, 42);
+    for (let i = 0; i < READY_FRAMES + 40; i++) played.update(1, undefined, 0);
+    expect(played.phase).toBe(Phase.Playing);
+
+    const resumed = new Game({ ...STANDARD_RULESET }, { ...DEFAULT_HANDLING }, 42);
+    resumed.deserialize(played.serialize());
+    expect(resumed.phase).toBe(Phase.Playing); // 복원 직후엔 이미 시작한 상태다
+
+    resumed.restartCountdown();
+    expect(resumed.phase).toBe(Phase.Ready);
+    expect(resumed.readyTimer).toBe(READY_FRAMES);
+    // 보드는 그대로 이어받는다
+    expect(resumed.stats.piecesPlaced).toBe(played.stats.piecesPlaced);
+  });
+
+  it("혼자 하는 판은 시작 대기를 줄일 수 있다", () => {
+    // 남과 맞출 것이 없으므로 짧게 세도 된다(대전에서는 쓰지 않는다)
+    const g = new Game({ ...STANDARD_RULESET }, { ...DEFAULT_HANDLING }, 42);
+    g.readyFrames = 60;
+    g.restartCountdown();
+    expect(g.readyTimer).toBe(60);
+
+    for (let i = 0; i < 60; i++) g.update(1, undefined, 0);
+    expect(g.phase).toBe(Phase.Playing);
+    expect(g.cur).not.toBe(Piece.None);
+  });
+
   it("하드드롭이 피스를 락하고 다음 피스로", () => {
     const g = new Game({ ...STANDARD_RULESET, are: 0 }, { ...DEFAULT_HANDLING, safelock: false }, 7);
     for (let i = 0; i < READY_FRAMES + 1; i++) g.update(1, undefined, 0);

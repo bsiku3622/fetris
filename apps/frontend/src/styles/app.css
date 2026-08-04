@@ -496,15 +496,20 @@ input[type="range"] {
   justify-content: flex-end;
 }
 
-/* 슬라이더 — 홈은 어둡게 파고, 손잡이 하나만 색을 갖는다 */
+/*
+  슬라이더.
+
+  홈을 어둡게 파두면 어두운 바탕에 묻혀 손잡이만 공중에 뜬 것처럼 보인다 —
+  어디서 어디까지 움직이는 것인지 읽히지 않는다. 홈 자체를 옅은 흰빛으로 둔다.
+*/
 .fx-slider {
   -webkit-appearance: none;
   appearance: none;
   width: 140px;
   height: 6px;
   border-radius: 999px;
-  background: var(--funky-sunken);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.16);
+  border: none;
   outline: none;
 }
 .fx-slider::-webkit-slider-thumb {
@@ -774,9 +779,10 @@ input[type="range"] {
 .fx-mode-card {
   position: relative;
   overflow: hidden;
-  border: var(--funky-border);
+  /* 무대와 밝기가 비슷하면 칸의 경계가 사라진다 — 선을 한 단계 세운다 */
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: var(--funky-radius);
-  background: #211a36;
+  background: #2a2244;
   box-shadow: var(--funky-shadow-sm);
   padding: 0.95rem 1.05rem;
   cursor: pointer;
@@ -799,8 +805,8 @@ input[type="range"] {
 }
 .fx-mode-card:hover {
   transform: translateY(-3px);
-  background: #2c2449;
-  border-color: rgba(255, 255, 255, 0.32);
+  background: #372d58;
+  border-color: rgba(255, 255, 255, 0.42);
   box-shadow: var(--funky-shadow-md);
 }
 .fx-mode-card:hover::before {

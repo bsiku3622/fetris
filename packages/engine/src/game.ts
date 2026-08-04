@@ -28,16 +28,15 @@ export const enum Phase {
 /**
  * 판이 열리고 첫 조각이 내려오기까지 잠가 두는 프레임 수.
  *
- * 앞의 1초는 화면이 정리될 여유다 — 시리즈 도중이면 라운드 전환의 장막이
- * 이 사이에 걷힌다. 남은 3초가 3·2·1이고, 0이 되는 순간이 GO다.
+ * 앞의 1/4은 화면이 정리될 여유다 — 시리즈 도중이면 라운드 전환의 장막이
+ * 이 사이에 걷힌다. 남은 3/4이 3·2·1이고, 0이 되는 순간이 GO다.
  *
- * 이 값은 **모두가 같아야 한다.** 서로 다른 길이로 세면 먼저 센 쪽이 그만큼
- * 일찍 움직인다. 시작 신호는 서버의 `match-start`가 도착하는 순간이고,
+ * **대전에서는 모두가 같은 값을 써야 한다.** 서로 다른 길이로 세면 먼저 센 쪽이
+ * 그만큼 일찍 움직인다. 시작 신호는 서버의 `match-start`가 도착하는 순간이고,
  * 여기서부터의 대기는 엔진이 프레임으로 세므로 simRate와도 무관하다.
+ * 혼자 하는 판은 남과 맞출 것이 없으므로 `Game.readyFrames`로 줄일 수 있다.
  */
 export const READY_FRAMES = 240;
-/** 카운트다운 숫자가 보이기 시작하는 지점 — 그 앞은 화면이 정리되는 여유 */
-export const COUNTDOWN_FRAMES = 180;
 
 export const enum EventType {
   Spawn,
@@ -142,6 +141,11 @@ export class Game {
   softActive = false; // 소프트드롭 중 여부(렌더 반투명용)
 
   phase: Phase = Phase.Ready;
+  /**
+   * 판이 열리기까지 잠가 둘 프레임. 혼자 하는 판에서만 줄인다 —
+   * 대전에서 이걸 건드리면 짧게 센 사람이 그만큼 먼저 움직인다.
+   */
+  readyFrames = READY_FRAMES;
   private gravityAccum = 0;
   private lockTimer = 0;
   private lockResetCount = 0;
@@ -179,7 +183,7 @@ export class Game {
     // 가비지 구멍 생성기 — 피스 가방과 상관없게 시드를 분리
     this.garbageGen = new GarbageGen((this.seed ^ 0x9e3779b9) >>> 0, rule.cols, rule.garbageMessiness);
     this.stats = this.freshStats();
-    this.phaseTimer = READY_FRAMES;
+    this.phaseTimer = this.readyFrames;
   }
 
   private freshStats(): Stats {
@@ -213,7 +217,7 @@ export class Game {
     this.holdPiece = Piece.None;
     this.canHold = true;
     this.phase = Phase.Ready;
-    this.phaseTimer = READY_FRAMES;
+    this.phaseTimer = this.readyFrames;
     this.gravityAccum = 0;
     this.lockTimer = 0;
     this.lockResetCount = 0;
@@ -226,6 +230,18 @@ export class Game {
 
   setHandling(h: Handling): void {
     this.handling.setHandling(h);
+  }
+
+  /**
+   * 보드는 그대로 두고 시작 카운트다운만 처음부터 다시 건다.
+   *
+   * 이어하기(Zen)처럼 저장된 상태를 얹은 뒤에 쓴다 — `deserialize`는 판이 돌던
+   * 시점을 통째로 복원하므로 페이즈까지 Playing으로 돌려놓아, 그대로 두면 조각이
+   * 곧바로 떨어진다. 이어받는 것은 쌓아둔 보드지 "이미 시작했다"는 사실이 아니다.
+   */
+  restartCountdown(): void {
+    this.phase = Phase.Ready;
+    this.phaseTimer = this.readyFrames;
   }
 
   /** Zen/4-Wide/Combo 톱아웃 시 필드 리셋 — 보드·스코어·홀드·가방까지 깨끗이 초기화.
