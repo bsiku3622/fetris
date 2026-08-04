@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { GameModeName } from "@fetris/engine/types";
 import { loadSettings, saveSettings, defaultSettings } from "./store";
 import type { Settings } from "./store";
@@ -27,10 +27,19 @@ export function App() {
     saveSettings(settings);
   }, [settings]);
 
-  // 매치가 시작되면 어디에 있든 대전 화면으로 소환한다
+  /*
+    매치가 시작되면 어디에 있든 대전 화면으로 소환한다 — 단 **판마다 한 번만**.
+
+    `matchStart`는 대전 화면이 계속 참조하므로 판이 끝나도 비워지지 않는다.
+    "값이 있으면 소환"으로 두면 지난 판 정보 때문에 대기실에서 다른 화면으로
+    갈 수가 없다 — Zen을 눌러도 즉시 되돌려져 버튼이 죽은 것처럼 보인다.
+  */
   const pending = room.matchStart;
+  const summoned = useRef(-1);
   useEffect(() => {
-    if (pending && screen.name !== "versus") setScreen({ name: "versus" });
+    if (!pending || summoned.current === pending.matchId) return;
+    summoned.current = pending.matchId;
+    if (screen.name !== "versus") setScreen({ name: "versus" });
   }, [pending, screen.name]);
 
   const updateSettings = useCallback((patch: Partial<Settings> | ((s: Settings) => Settings)) => {
