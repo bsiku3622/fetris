@@ -352,7 +352,7 @@ export function VersusScreen({
           </div>
 
           {isTauri() && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: "2px dashed rgba(0,0,0,0.2)", paddingTop: 12 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: "1px dashed rgba(255,255,255,0.16)", paddingTop: 12 }}>
               <Text variant="chrome" muted>LAN 직결 — 인터넷 없이 (비행기 · USB/Thunderbolt)</Text>
               <Button variant="success" size="lg" onClick={hostLan}>
                 LAN 방 만들기 (호스트)
@@ -421,7 +421,7 @@ export function VersusScreen({
             </div>
 
             {lanInfo && isHost && (
-              <div style={{ marginTop: 8, padding: "8px 10px", border: `2px solid ${FUNKY.green}`, fontWeight: 800, fontSize: "0.8rem" }}>
+              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, border: `1px solid ${FUNKY.green}`, background: "rgba(0,194,42,0.1)", fontWeight: 800, fontSize: "0.8rem" }}>
                 <div style={{ opacity: 0.6, fontSize: "0.65rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>LAN 주소</div>
                 {lanInfo.addrs.map((a) => (
                   <div key={a} style={{ fontVariantNumeric: "tabular-nums" }}>
@@ -457,7 +457,7 @@ export function VersusScreen({
             </div>
 
             {spectators.length > 0 && (
-              <div style={{ marginTop: 14, paddingTop: 10, borderTop: "2px dashed rgba(0,0,0,0.15)" }}>
+              <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px dashed rgba(255,255,255,0.14)" }}>
                 <div
                   style={{
                     fontSize: "0.68rem",
@@ -475,10 +475,11 @@ export function VersusScreen({
                     <span
                       key={p.id}
                       style={{
-                        padding: "3px 8px",
-                        border: "2px solid var(--funky-line)",
-                        opacity: p.id === room.myId ? 1 : 0.65,
-                        background: p.id === room.myId ? FUNKY.sunken : "transparent",
+                        padding: "3px 9px",
+                        borderRadius: 999,
+                        border: "1px solid var(--funky-line)",
+                        opacity: p.id === room.myId ? 1 : 0.6,
+                        background: p.id === room.myId ? "rgba(255,255,255,0.08)" : "transparent",
                       }}
                     >
                       {p.nick}
@@ -491,7 +492,7 @@ export function VersusScreen({
 
             {/* 직전 판 리플레이 — 결과 화면을 놓쳐도 여기서 받을 수 있다 */}
             {room.canDownloadMatch && (
-              <div style={{ marginTop: 14, paddingTop: 10, borderTop: "2px dashed rgba(0,0,0,0.15)" }}>
+              <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px dashed rgba(255,255,255,0.14)" }}>
                 <MatchReplayButton room={room} align="flex-start" />
               </div>
             )}
@@ -751,9 +752,10 @@ function MatchReplayButton({ room, align }: { room: RoomSession; align: "center"
           alignItems: "center",
           gap: 8,
           padding: "6px 12px",
-          border: "2px solid var(--funky-line)",
+          border: "1px solid var(--funky-line)",
+          borderRadius: 8,
           background: "var(--funky-surface)",
-          boxShadow: "2px 2px 0 var(--funky-line)",
+          color: "var(--funky-ink)",
           fontWeight: 800,
           fontSize: "0.78rem",
           cursor: busy ? "progress" : "pointer",
@@ -920,7 +922,8 @@ function PlayerRow({
 }) {
   return (
     <div className="fx-player-box" style={{ opacity: player.role === "spectator" ? 0.6 : 1 }}>
-      <span className="fx-player-box__swatch" style={{ background: color }} />
+      {/* color까지 함께 줘야 점이 자기 색으로 번진다(글로우가 currentColor를 쓴다) */}
+      <span className="fx-player-box__swatch" style={{ background: color, color }} />
       <span className="fx-player-box__name">{player.nick}</span>
       {/* 배지는 줄어들지 않는다 — 줄어들면 글자가 이름 위로 겹쳐 올라온다 */}
       <span style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto", whiteSpace: "nowrap" }}>
@@ -939,12 +942,15 @@ function PlayerRow({
             marginLeft: "auto",
             flex: "0 0 auto",
             whiteSpace: "nowrap",
-            border: "2px solid var(--funky-line)",
+            border: "1px solid var(--funky-line)",
+            borderRadius: 6,
             background: "transparent",
+            color: "var(--funky-ink-muted)",
+            fontFamily: "inherit",
             fontWeight: 900,
             fontSize: "0.7rem",
             cursor: "pointer",
-            padding: "2px 6px",
+            padding: "2px 7px",
           }}
         >
           내보내기
@@ -983,12 +989,12 @@ function EmptySlot({
   return (
     <div style={{ position: "relative" }}>
       <div className="fx-player-box" style={{ opacity: 0.5, borderStyle: "dashed" }}>
-        <span className="fx-player-box__swatch" style={{ background: "transparent", border: "2px dashed var(--funky-line)" }} />
+        <span className="fx-player-box__swatch" style={{ background: "rgba(255,255,255,0.22)", boxShadow: "none" }} />
         <span className="fx-player-box__name" style={{ opacity: 0.6 }}>{unlimited ? "봇 부르기" : "빈 자리"}</span>
         {canFill && (
           <button
             onClick={toggle}
-            style={{ marginLeft: "auto", border: "2px solid var(--funky-line)", background: open ? FUNKY.sky : "transparent", fontWeight: 900, fontSize: "0.7rem", cursor: "pointer", padding: "2px 6px" }}
+            style={{ marginLeft: "auto", border: `1px solid ${open ? "transparent" : "var(--funky-line)"}`, borderRadius: 6, background: open ? FUNKY.sky : "transparent", color: open ? "#14101f" : "var(--funky-ink-muted)", fontFamily: "inherit", fontWeight: 900, fontSize: "0.7rem", cursor: "pointer", padding: "2px 7px" }}
           >
             + 봇
           </button>
@@ -1004,9 +1010,11 @@ function EmptySlot({
             zIndex: 20,
             minWidth: 200,
             marginTop: 4,
-            border: "2px solid var(--funky-line)",
-            background: "var(--funky-surface)",
-            boxShadow: "4px 4px 0 rgba(0,0,0,0.25)",
+            border: "1px solid var(--funky-line)",
+            borderRadius: 10,
+            overflow: "hidden",
+            background: "rgba(26,20,44,0.97)",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
             fontSize: "0.75rem",
             fontWeight: 800,
           }}
@@ -1042,7 +1050,8 @@ function EmptySlot({
                     textAlign: "left",
                     padding: "8px 12px",
                     border: "none",
-                    borderBottom: "1px solid rgba(0,0,0,0.12)",
+                    borderBottom: "1px solid rgba(255,255,255,0.08)",
+                    color: "var(--funky-ink)",
                     background: "transparent",
                     cursor: "pointer",
                     font: "inherit",
@@ -1136,7 +1145,18 @@ function ChatBox({
 }
 
 const fieldRow: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr", alignItems: "center", gap: "1rem", fontWeight: 800, fontSize: "0.9rem" };
-const inputStyle: React.CSSProperties = { width: "100%", padding: "0.55rem 0.75rem", border: "2px solid var(--funky-line)", borderRadius: 0, background: "var(--funky-surface)", fontWeight: 800, fontSize: "1rem" };
+/** 공용 입력과 같은 재질 — 어두운 홈에 옅은 선 */
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "0.5rem 0.7rem",
+  border: "1px solid var(--funky-line)",
+  borderRadius: 8,
+  background: "var(--funky-sunken)",
+  color: "var(--funky-ink)",
+  fontFamily: "inherit",
+  fontWeight: 800,
+  fontSize: "0.95rem",
+};
 
 function NumField({
   label, value, onChange, disabled, min = 0, max, step = 0.1,

@@ -123,10 +123,11 @@ export function SettingsScreen({
             <div className="fx-section">
               <Row label="닉네임" desc="대전 방에서 다른 플레이어에게 보이는 이름 (최대 16자)">
                 <input
+                  className="fx-input"
                   value={settings.profile.nickname}
                   maxLength={16}
                   onChange={(e) => updateSettings((s) => ({ ...s, profile: { ...s.profile, nickname: e.target.value } }))}
-                  style={{ padding: "0.5rem 0.7rem", border: "3px solid #000", borderRadius: 8, fontWeight: 800, fontSize: "1rem", width: 220 }}
+                  style={{ width: 220 }}
                 />
               </Row>
             </div>

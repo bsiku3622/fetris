@@ -158,9 +158,29 @@ export function GameScreen({
 
 function ResultRow({ label, value, big }: { label: string; value: string; big?: boolean }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", borderBottom: "2px solid #000", paddingBottom: 4 }}>
-      <span style={{ fontWeight: 900, color: "#6f6a52", fontSize: "0.8rem", letterSpacing: "0.05em" }}>{label}</span>
-      <span style={{ fontWeight: 900, fontSize: big ? "2rem" : "1.1rem", fontVariantNumeric: "tabular-nums" }}>{value}</span>
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        borderBottom: "1px solid rgba(255,255,255,0.1)",
+        paddingBottom: 5,
+      }}
+    >
+      <span style={{ fontWeight: 900, color: "var(--funky-ink-muted)", fontSize: "0.75rem", letterSpacing: "0.12em", textTransform: "uppercase" }}>
+        {label}
+      </span>
+      {/* 그 판을 대표하는 숫자 하나만 크게 — 나머지는 곁들이는 값이다 */}
+      <span
+        style={{
+          fontWeight: 900,
+          fontSize: big ? "2.1rem" : "1.05rem",
+          fontVariantNumeric: "tabular-nums",
+          color: big ? "var(--funky-cyan)" : "var(--funky-ink)",
+        }}
+      >
+        {value}
+      </span>
     </div>
   );
 }

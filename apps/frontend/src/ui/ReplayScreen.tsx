@@ -170,7 +170,16 @@ export function ReplayScreen({ settings, onExit }: { settings: Settings; onExit:
         <Text variant="chrome" muted>저장한 판을 다시 봅니다</Text>
 
         {error && (
-          <div style={{ color: FUNKY.danger, fontWeight: 900, padding: "0.5rem 1rem", border: `3px solid ${FUNKY.danger}` }}>
+          <div
+            style={{
+              color: "#ffb4b4",
+              fontWeight: 800,
+              padding: "0.55rem 1.1rem",
+              borderRadius: 10,
+              border: `1px solid ${FUNKY.danger}`,
+              background: "rgba(255,59,59,0.14)",
+            }}
+          >
             {error}
           </div>
         )}
@@ -195,10 +204,12 @@ export function ReplayScreen({ settings, onExit }: { settings: Settings; onExit:
             gap: 10,
             width: 420,
             height: 220,
-            border: `3px dashed ${dragging ? FUNKY.sky : "var(--funky-line)"}`,
-            background: dragging ? "var(--funky-sunken)" : "var(--funky-surface)",
+            border: `2px dashed ${dragging ? FUNKY.sky : "var(--funky-line)"}`,
+            borderRadius: 14,
+            background: dragging ? "rgba(0,200,255,0.08)" : "var(--funky-surface)",
             cursor: "pointer",
             fontWeight: 800,
+            transition: "border-color 0.14s ease-out, background-color 0.14s ease-out",
           }}
         >
           <div style={{ fontSize: "1.1rem", fontWeight: 900 }}>리플레이 파일 열기</div>
@@ -255,8 +266,9 @@ export function ReplayScreen({ settings, onExit }: { settings: Settings; onExit:
         <div
           style={{
             padding: "8px 14px",
-            background: FUNKY.danger,
-            color: "#fff",
+            background: "rgba(255,59,59,0.16)",
+            borderBottom: `1px solid ${FUNKY.danger}`,
+            color: "#ffb4b4",
             fontWeight: 800,
             fontSize: "0.82rem",
           }}
@@ -352,8 +364,8 @@ export function ReplayScreen({ settings, onExit }: { settings: Settings; onExit:
           alignItems: "center",
           gap: 12,
           padding: "10px 14px",
-          borderTop: "3px solid var(--funky-line)",
-          background: "var(--funky-surface)",
+          borderTop: "1px solid var(--funky-line)",
+          background: "rgba(0,0,0,0.22)",
         }}
       >
         <Button variant="primary" size="md" onClick={() => ctl()?.toggle()}>
@@ -385,9 +397,11 @@ export function ReplayScreen({ settings, onExit }: { settings: Settings; onExit:
                 setSpeed(x);
               }}
               style={{
-                padding: "4px 8px",
-                border: `2px solid ${speed === x ? FUNKY.sky : "var(--funky-line)"}`,
+                padding: "4px 9px",
+                borderRadius: 6,
+                border: `1px solid ${speed === x ? "transparent" : "var(--funky-line)"}`,
                 background: speed === x ? FUNKY.sky : "transparent",
+                color: speed === x ? "#14101f" : "var(--funky-ink-muted)",
                 fontWeight: 900,
                 fontSize: "0.72rem",
                 cursor: "pointer",
@@ -412,14 +426,14 @@ export function ReplayScreen({ settings, onExit }: { settings: Settings; onExit:
 
 function InfoCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ border: "2px solid var(--funky-line)", background: "var(--funky-surface)", padding: "10px 12px" }}>
+    <div style={{ border: "1px solid var(--funky-line)", borderRadius: 10, background: "var(--funky-surface)", padding: "10px 12px" }}>
       <div
         style={{
           fontSize: "0.66rem",
           fontWeight: 900,
-          letterSpacing: "0.1em",
+          letterSpacing: "0.16em",
           textTransform: "uppercase",
-          opacity: 0.5,
+          color: "var(--funky-ink-muted)",
           marginBottom: 6,
         }}
       >

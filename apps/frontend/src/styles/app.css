@@ -1,13 +1,124 @@
 /* Fetris 전역 레이아웃 — funky-ui 토큰 위에 게임 셸 스타일 */
 
+/* ============================================================================
+   다크 무대 팔레트.
+
+   funky-ui는 컴포넌트를 전부 `--funky-*` 변수로만 그린다. 그래서 여기서 토큰을
+   덮어쓰면 Button·Tabs·Badge·Text가 통째로 따라온다 — 컴포넌트를 손대지 않는다.
+
+   원래 룩은 크림 바탕에 검은 테두리와 하드 섀도우였다. 어두운 무대에서는 검은
+   선이 배경에 묻히고 검은 그림자도 보이지 않으므로, **옅은 빛의 선**과 **깊이로
+   띄우는 그림자**로 바꾼다. 색은 포인트로만 쓴다 — 요소마다 네온을 칠하면
+   화려한 게 아니라 산만해진다.
+   ========================================================================= */
 :root {
-  --fx-bg: #fff5d1;
-  --fx-ink: #222;
-  --fx-border: #000;
+  /* ---- 면 ---- */
+  /* 무대 바닥. 배경 그라디언트가 이 위에 깔린다 */
+  --funky-bg: #120d22;
+  /* 무대 위에 떠 있는 면 — 불투명 판이 아니라 배경이 비치는 유리 */
+  --funky-surface: rgba(255, 255, 255, 0.055);
+  --funky-sunken: rgba(0, 0, 0, 0.26);
+  /* 살짝 뜨는 hover 면 */
+  --funky-accent-soft: rgba(255, 255, 255, 0.1);
+
+  /* ---- 글자 ---- */
+  --funky-ink: #ece9f6;
+  --funky-ink-muted: #9d96b8;
+  /* 네온 면 위에 얹는 글자 */
+  --funky-ink-inverse: #ffffff;
+
+  /* ---- 선 ---- */
+  /* 검은 테두리 대신 빛이 스치는 정도로. 얇을수록 정돈돼 보인다 */
+  --funky-line: rgba(255, 255, 255, 0.14);
+  --funky-border-width: 1px;
+  --funky-border-width-bold: 1px;
+  --funky-border-color: rgba(255, 255, 255, 0.14);
+  --funky-border: 1px solid rgba(255, 255, 255, 0.14);
+  --funky-border-bold: 1px solid rgba(255, 255, 255, 0.22);
+
+  /* ---- 그림자 ---- */
+  /* 하드 오프셋은 밝은 바탕에서나 읽힌다. 어두운 무대에서는 깊이로 띄운다 */
+  --funky-shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.35);
+  --funky-shadow-md: 0 6px 22px rgba(0, 0, 0, 0.42);
+  --funky-shadow-lg: 0 14px 40px rgba(0, 0, 0, 0.5);
+
+  /* ---- 모양 ---- */
+  /* 각진 브루탈리즘에서 아주 살짝만 둥글게 — 유리판처럼 보이게 */
+  --funky-radius: 10px;
+
+  /* ---- 셸 자체가 쓰는 값 ---- */
+  --fx-ink: var(--funky-ink);
+  --fx-line: var(--funky-line);
+  /* 화면 어디서나 같은 무대가 뒤에 깔린다 — 게임에 들어가도 배경이 끊기지 않는다 */
+  --fx-stage:
+    radial-gradient(58% 44% at 18% 12%, rgba(120, 40, 200, 0.22), transparent 70%),
+    radial-gradient(52% 40% at 84% 78%, rgba(255, 78, 186, 0.16), transparent 72%),
+    radial-gradient(130% 95% at 50% 0%, #2a2040 0%, #191230 48%, #120d22 100%);
 }
 
 * {
   box-sizing: border-box;
+}
+
+/*
+  funky-ui의 누름 연출은 요소를 그림자 속으로 밀어 넣는 것이었다. 그림자가 더는
+  단단한 오프셋이 아니므로, 밀어 넣는 대신 살짝 눌리고 밝아지게 한다.
+*/
+.funky-pressable:hover:not(:disabled) {
+  transform: none;
+  box-shadow: var(--funky-shadow-md);
+  filter: brightness(1.12);
+}
+.funky-pressable:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: var(--funky-shadow-sm);
+  filter: brightness(0.96);
+}
+/* 색 없는 버튼은 유리면이라 테두리가 곧 형태다 — hover에서 선이 살아나게 */
+.funky-button--neutral:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.34);
+}
+
+/*
+  못 누르는 버튼은 색을 아예 뺀다.
+
+  원래는 그냥 반투명하게 만들었는데, 네온 면을 반투명하게 두면 어두운 배경과
+  섞여 탁한 자주색 얼룩이 된다 — 꺼진 게 아니라 지저분해 보인다.
+*/
+.funky-button:disabled {
+  background: var(--funky-surface);
+  color: var(--funky-ink-muted);
+  border-color: var(--funky-line);
+  box-shadow: none;
+  opacity: 1;
+}
+
+/*
+  고른 탭은 밝은 면으로 뒤집힌다. funky-ui는 여기에 `--funky-ink-inverse`를
+  쓰는데 그 값은 네온 면 위에 얹는 흰색이라, 밝아진 면 위에서는 글자가 사라진다.
+  뒤집힌 면에는 어두운 글자를 쓴다.
+*/
+.funky-tabs__trigger--active {
+  color: #17122a;
+  border-color: transparent;
+}
+/* 비활성 탭도 유리면 위에서 읽히게 */
+.funky-tabs__trigger:not(.funky-tabs__trigger--active) {
+  background: var(--funky-surface);
+  color: var(--funky-ink-muted);
+}
+.funky-tabs__trigger:not(.funky-tabs__trigger--active):hover {
+  background: var(--funky-accent-soft);
+  color: var(--funky-ink);
+}
+
+/* 같은 이유로 ink 면을 쓰는 다른 것들도 뒤집는다 */
+.funky-button--ink {
+  color: #17122a;
+}
+.funky-nav-item--active,
+.funky-bottom-nav-item--active {
+  color: #17122a;
 }
 
 /*
@@ -28,7 +139,7 @@ body,
   height: 100dvh;
   width: 100%;
   overflow: hidden;
-  background: var(--fx-bg);
+  background: var(--funky-bg);
   font-family: Pretendard, system-ui, -apple-system, sans-serif;
   color: var(--fx-ink);
   -webkit-font-smoothing: antialiased;
@@ -42,6 +153,49 @@ body,
   width: 100%;
   display: flex;
   flex-direction: column;
+  /*
+    무대는 앱 전체에 한 번만 깔린다. 화면마다 자기 배경을 칠하면 메뉴에서
+    게임으로 들어갈 때 바탕이 갈아끼워지며 뚝 끊긴다 — 같은 배경 위에서
+    앞의 것만 바뀌어야 한 공간 안에서 이동하는 것처럼 보인다.
+  */
+  background: var(--fx-stage);
+  background-attachment: fixed;
+}
+
+/* 어두운 바탕에서 스크롤바가 밝은 띠로 튀지 않게 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+/* 입력 요소는 UA 기본 밝은 위젯을 그대로 쓰지 않게 */
+input,
+select,
+textarea,
+button {
+  color-scheme: dark;
+}
+/* 체크박스는 브라우저 기본 파랑을 쓰지 않고 무대 색을 따른다 */
+input[type="checkbox"] {
+  accent-color: var(--funky-green);
+  cursor: pointer;
+}
+input[type="range"] {
+  accent-color: var(--funky-pink);
 }
 
 /* ---- 메뉴 ---- */
@@ -55,6 +209,7 @@ body,
   position: relative;
   overflow: hidden;
 }
+/* 글자마다 제 색으로 빛난다 — 화면에서 화려한 건 여기 하나면 된다 */
 .fx-logo {
   font-weight: 900;
   font-size: clamp(3rem, 12vw, 9rem);
@@ -66,6 +221,16 @@ body,
 }
 .fx-logo span {
   display: inline-block;
+  /*
+    currentColor로 번지게 두면 글자색이 그대로 발광색이 된다.
+    한 겹이면 충분하다 — 두 겹으로 겹치면 글자 사이가 서로 물들어 뭉개진다.
+  */
+  text-shadow: 0 0 30px currentColor;
+  animation: fx-logo-in 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes fx-logo-in {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 .fx-menu-buttons {
   display: grid;
@@ -80,11 +245,17 @@ body,
 }
 .fx-tagline {
   font-weight: 700;
-  color: #6f6a52;
+  color: var(--funky-ink-muted);
   letter-spacing: 0.04em;
 }
 
-/* funky 배경 떠다니는 도형 */
+/*
+  배경에 떠다니는 것들.
+
+  원래는 검은 테두리를 두른 도형이었는데, 어두운 무대에서는 선이 배경에 묻히고
+  하드 섀도우도 보이지 않는다. 형태를 지우고 **번지는 빛**으로 남긴다 — 뒤에서
+  천천히 흐르기만 하면 되지 읽혀야 하는 것은 아니다.
+*/
 .fx-bg-shapes {
   position: absolute;
   inset: 0;
@@ -94,19 +265,23 @@ body,
 }
 .fx-shape {
   position: absolute;
-  border: 3px solid #000;
-  box-shadow: 6px 6px 0 0 rgba(0, 0, 0, 0.2);
-  opacity: 0.9;
-  animation: fx-float 8s ease-in-out infinite;
+  border-radius: 50%;
+  /* 크게 번지고 아주 옅게 — 배경은 배경으로만 남아야 한다 */
+  filter: blur(90px);
+  opacity: 0.16;
+  animation: fx-float 14s ease-in-out infinite;
 }
 @keyframes fx-float {
   0%,
   100% {
-    transform: translateY(0) rotate(0deg);
+    transform: translate(0, 0) scale(1);
   }
   50% {
-    transform: translateY(-22px) rotate(8deg);
+    transform: translate(0, -30px) scale(1.14);
   }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fx-shape { animation: none; }
 }
 
 /* ---- 게임 화면 ---- */
@@ -145,16 +320,30 @@ body,
 .fx-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(255, 245, 209, 0.85);
+  /* 뒤의 보드가 비치되 앞의 패널이 확실히 읽히는 정도로만 눌러 둔다 */
+  background: rgba(8, 5, 16, 0.72);
+  backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 10;
+  animation: fx-overlay-in 180ms ease-out both;
 }
+@keyframes fx-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/*
+  떠 있는 패널.
+
+  무대 위 유리면과 달리 여기는 **뒤를 가리는 것이 일**이라 훨씬 불투명하다.
+  반투명하게 두면 뒤의 보드나 배경 빛이 글자에 섞여 읽히지 않는다.
+*/
 .fx-panel {
-  background: #fff;
-  border: 3px solid #000;
-  box-shadow: 8px 8px 0 0 rgba(0, 0, 0, 0.2);
+  background: rgba(26, 20, 44, 0.94);
+  border: var(--funky-border);
+  border-radius: 14px;
+  box-shadow: var(--funky-shadow-lg);
   padding: 1.5rem;
   width: min(440px, 90vw);
   display: flex;
@@ -164,12 +353,52 @@ body,
   max-height: 88vh;
   max-height: 88dvh;
   overflow-y: auto;
+  animation: fx-panel-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes fx-panel-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 .fx-panel h2 {
   margin: 0;
   font-weight: 900;
-  font-size: 2rem;
+  font-size: 1.8rem;
+  letter-spacing: 0.01em;
   text-transform: uppercase;
+}
+/* 패널 안 라벨 — 입력 위에 붙는 작은 제목 */
+.fx-panel label {
+  color: var(--funky-ink);
+}
+
+/*
+  공용 입력.
+
+  화면마다 인라인으로 테두리를 그리던 것을 한 곳으로 모은다 — 어두운 홈에
+  옅은 선, 포커스에서만 시안이 들어온다.
+*/
+.fx-input {
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  border: var(--funky-border);
+  border-radius: 8px;
+  background: var(--funky-sunken);
+  color: var(--funky-ink);
+  font-family: inherit;
+  font-weight: 800;
+  font-size: 0.95rem;
+  transition: border-color 0.12s ease-out;
+}
+.fx-input::placeholder {
+  color: var(--funky-ink-muted);
+  font-weight: 600;
+}
+.fx-input:focus {
+  outline: none;
+  border-color: var(--funky-cyan);
+}
+.fx-input:disabled {
+  opacity: 0.5;
 }
 
 /* ---- 설정 ---- */
@@ -177,7 +406,7 @@ body,
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 1rem clamp(1rem, 5vw, 4rem);
+  padding: 1.1rem clamp(1rem, 5vw, 4rem);
   gap: 1rem;
   overflow: hidden;
 }
@@ -185,6 +414,8 @@ body,
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding-bottom: 0.9rem;
+  border-bottom: var(--funky-border);
 }
 .fx-settings-body {
   flex: 1;
@@ -196,20 +427,29 @@ body,
 }
 .fx-section-title {
   font-weight: 900;
-  font-size: 1.1rem;
+  font-size: 0.82rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  border-bottom: 3px solid #000;
-  padding-bottom: 0.3rem;
+  letter-spacing: 0.16em;
+  color: var(--funky-ink-muted);
+  border-bottom: var(--funky-border);
+  padding-bottom: 0.4rem;
   margin-bottom: 0.8rem;
 }
+/*
+  설정은 글자가 많고 오래 보는 화면이다. 항목마다 면을 깔면 목록이 아니라
+  카드 더미가 되므로, 배경 없이 옅은 줄로만 나눈다.
+*/
 .fx-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 0.55rem 0.15rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  transition: background-color 0.12s ease-out;
+}
+.fx-row:hover {
+  background: rgba(255, 255, 255, 0.03);
 }
 .fx-row-label {
   font-weight: 700;
@@ -217,8 +457,9 @@ body,
 }
 .fx-row-desc {
   font-size: 0.75rem;
-  color: #6f6a52;
+  color: var(--funky-ink-muted);
   font-weight: 500;
+  margin-top: 0.1rem;
 }
 .fx-row-control {
   display: flex;
@@ -228,32 +469,40 @@ body,
   justify-content: flex-end;
 }
 
-/* 슬라이더 */
+/* 슬라이더 — 홈은 어둡게 파고, 손잡이 하나만 색을 갖는다 */
 .fx-slider {
   -webkit-appearance: none;
   appearance: none;
   width: 140px;
-  height: 8px;
-  background: #fff0b8;
-  border: 2px solid #000;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--funky-sunken);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   outline: none;
 }
 .fx-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 18px;
-  height: 18px;
-  background: #ff4eba;
-  border: 2px solid #000;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--funky-pink);
+  border: none;
   cursor: pointer;
-  box-shadow: 2px 2px 0 0 rgba(0, 0, 0, 0.2);
+  box-shadow: 0 0 12px rgba(255, 78, 186, 0.6);
+  transition: transform 0.1s ease-out;
+}
+.fx-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
 }
 .fx-slider::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-  background: #ff4eba;
-  border: 2px solid #000;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--funky-pink);
+  border: none;
   cursor: pointer;
+  box-shadow: 0 0 12px rgba(255, 78, 186, 0.6);
 }
 .fx-slider-val {
   font-weight: 900;
@@ -263,99 +512,118 @@ body,
 }
 .fx-slider-val--editable {
   cursor: text;
-  border-bottom: 2px dotted rgba(0, 0, 0, 0.3);
+  border-bottom: 1px dotted rgba(255, 255, 255, 0.3);
 }
 .fx-slider-val--editable:hover {
-  background: #fff0b8;
-  border-bottom-color: #000;
+  color: var(--funky-cyan);
+  border-bottom-color: var(--funky-cyan);
 }
 .fx-slider-input {
   width: 76px;
-  border: 2px solid #000;
-  background: #fff;
-  padding: 0.15rem 0.35rem;
+  border: var(--funky-border);
+  border-radius: 6px;
+  background: var(--funky-sunken);
+  color: var(--funky-ink);
+  padding: 0.15rem 0.4rem;
   font-weight: 900;
   font-family: inherit;
   font-variant-numeric: tabular-nums;
   text-align: right;
-  box-shadow: 2px 2px 0 0 rgba(0, 0, 0, 0.2);
 }
 .fx-slider-input:focus {
   outline: none;
-  background: #fff0b8;
+  border-color: var(--funky-cyan);
 }
 
-/* 토글 */
+/* 토글 — 켜졌을 때만 색이 들어온다 */
 .fx-toggle {
-  width: 52px;
-  height: 28px;
-  border: 2px solid #000;
-  background: #fff0b8;
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--funky-sunken);
   position: relative;
   cursor: pointer;
-  transition: background 0.1s ease-out;
+  transition: background-color 0.14s ease-out, border-color 0.14s ease-out;
   flex-shrink: 0;
 }
 .fx-toggle.on {
-  background: #00c22a;
+  background: var(--funky-green);
+  border-color: transparent;
+  box-shadow: 0 0 14px rgba(0, 194, 42, 0.45);
 }
 .fx-toggle .knob {
   position: absolute;
-  top: 1px;
-  left: 1px;
-  width: 22px;
-  height: 22px;
-  background: #fff;
-  border: 2px solid #000;
-  transition: transform 0.1s ease-out;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.72);
+  border: none;
+  transition: transform 0.14s ease-out, background-color 0.14s ease-out;
 }
 .fx-toggle.on .knob {
-  transform: translateX(24px);
+  transform: translateX(20px);
+  background: #fff;
 }
 
-/* 세그먼트 선택 */
+/* 세그먼트 선택 — 고른 칸만 밝은 면이 된다 */
 .fx-seg {
   display: inline-flex;
-  border: 2px solid #000;
+  border: var(--funky-border);
+  border-radius: 8px;
   overflow: hidden;
+  background: var(--funky-sunken);
 }
 .fx-seg button {
   border: none;
-  border-right: 2px solid #000;
-  background: #fff;
-  padding: 0.35rem 0.7rem;
+  background: transparent;
+  color: var(--funky-ink-muted);
+  padding: 0.34rem 0.72rem;
   font-weight: 700;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   cursor: pointer;
   font-family: inherit;
+  transition: background-color 0.12s ease-out, color 0.12s ease-out;
 }
-.fx-seg button:last-child {
-  border-right: none;
+.fx-seg button:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--funky-ink);
 }
 .fx-seg button.active {
-  background: #7828c8;
+  background: var(--funky-purple);
   color: #fff;
 }
 
 /* 키바인딩 버튼 */
 .fx-key {
   min-width: 90px;
-  border: 2px solid #000;
-  background: #fff;
+  border: var(--funky-border);
+  border-radius: 6px;
+  background: var(--funky-surface);
+  color: var(--funky-ink);
   padding: 0.3rem 0.6rem;
   font-weight: 700;
   font-size: 0.8rem;
   cursor: pointer;
   font-family: inherit;
-  box-shadow: 2px 2px 0 0 rgba(0, 0, 0, 0.2);
+  transition: border-color 0.12s ease-out, background-color 0.12s ease-out;
 }
+.fx-key:hover {
+  border-color: rgba(255, 255, 255, 0.34);
+  background: var(--funky-accent-soft);
+}
+/* 키를 기다리는 중 — 여기만 노랗게 깜빡인다 */
 .fx-key.listening {
-  background: #ffd500;
+  background: var(--funky-yellow);
+  border-color: transparent;
+  color: #14101f;
   animation: fx-pulse 0.6s ease-in-out infinite;
 }
 @keyframes fx-pulse {
   50% {
-    opacity: 0.6;
+    opacity: 0.55;
   }
 }
 /* 단축키 슬롯 — 액션당 3개 나란히 */
@@ -368,8 +636,8 @@ body,
   text-align: center;
 }
 .fx-key--empty {
-  background: #fff0b8;
-  color: #6f6a52;
+  background: transparent;
+  color: var(--funky-ink-muted);
   border-style: dashed;
   box-shadow: none;
 }
@@ -381,18 +649,19 @@ body,
   flex-wrap: wrap;
   padding-bottom: 0.75rem;
   margin-bottom: 0.5rem;
-  border-bottom: 2px solid rgba(0, 0, 0, 0.12);
+  border-bottom: var(--funky-border);
 }
 .fx-preset-label {
   font-weight: 900;
-  font-size: 0.8rem;
-  color: #6f6a52;
-  letter-spacing: 0.05em;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: var(--funky-ink-muted);
+  letter-spacing: 0.12em;
   margin-right: 0.25rem;
 }
 .fx-preset-hint {
   font-size: 0.75rem;
-  color: #6f6a52;
+  color: var(--funky-ink-muted);
   margin-left: 0.25rem;
 }
 /* 커스텀 프리셋 칩 — 버튼 + 모서리 삭제(×) */
@@ -407,9 +676,9 @@ body,
   width: 18px;
   height: 18px;
   padding: 0;
-  border: 2px solid #000;
+  border: 1px solid rgba(0, 0, 0, 0.35);
   border-radius: 50%;
-  background: #ff5a5a;
+  background: var(--funky-danger);
   color: #fff;
   font-weight: 900;
   font-size: 0.7rem;
@@ -420,62 +689,162 @@ body,
   justify-content: center;
 }
 .fx-preset-name {
-  border: 2px solid #000;
-  background: #fff;
+  border: var(--funky-border);
+  border-radius: 6px;
+  background: var(--funky-sunken);
+  color: var(--funky-ink);
   padding: 0.3rem 0.6rem;
   font-family: inherit;
   font-weight: 700;
   font-size: 0.8rem;
   width: 120px;
 }
+.fx-preset-name:focus {
+  outline: none;
+  border-color: var(--funky-cyan);
+}
 /* 키 그룹 소제목(게임 키 / 시스템 키) */
 .fx-keygroup-label {
   font-weight: 900;
   font-size: 0.72rem;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #6f6a52;
-  margin: 0.9rem 0 0.2rem;
+  color: var(--funky-ink-muted);
+  margin: 1.1rem 0 0.2rem;
 }
 .fx-keygroup-label:first-of-type {
   margin-top: 0.25rem;
 }
 
+/*
+  3×2로 고정한다. auto-fit에 맡기면 폭에 따라 4+2, 5+1처럼 줄이 어긋나 격자가
+  아니라 흩어진 조각처럼 보인다. 좁은 화면에서만 2열로 접는다.
+*/
 .fx-mode-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 0.75rem;
-  width: min(680px, 86vw);
+  grid-template-columns: repeat(3, 1fr);
+  /* 설명 길이가 달라도 칸 높이는 같아야 줄이 맞는다 */
+  grid-auto-rows: 1fr;
+  gap: 0.6rem;
+  width: min(660px, 88vw);
   z-index: 2;
 }
+@media (max-width: 560px) {
+  .fx-mode-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+/*
+  모드 카드 — 무대 위에 떠 있는 유리판.
+
+  색은 위쪽 가는 선 하나로만 준다. 카드마다 면을 칠하면 고를 것이 일곱이라
+  화면이 색 견본처럼 되어버린다. 고른 것만 밝아지면 충분하다.
+*/
 .fx-mode-card {
-  border: 3px solid #000;
-  box-shadow: 6px 6px 0 0 rgba(0, 0, 0, 0.2);
-  padding: 1rem;
+  position: relative;
+  overflow: hidden;
+  border: var(--funky-border);
+  border-radius: var(--funky-radius);
+  background: var(--funky-surface);
+  box-shadow: var(--funky-shadow-sm);
+  padding: 0.95rem 1.05rem;
   cursor: pointer;
-  background: #fff;
-  transition: transform 0.1s ease-out, box-shadow 0.1s ease-out;
+  color: var(--funky-ink);
   text-align: left;
   font-family: inherit;
+  transition: transform 0.14s ease-out, box-shadow 0.14s ease-out,
+    background-color 0.14s ease-out, border-color 0.14s ease-out;
+}
+.fx-mode-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--funky-cyan), var(--funky-purple));
+  opacity: 0.5;
+  transition: opacity 0.14s ease-out;
 }
 .fx-mode-card:hover {
-  transform: translate(-2px, -2px);
-  box-shadow: 8px 8px 0 0 rgba(0, 0, 0, 0.2);
+  transform: translateY(-3px);
+  background: var(--funky-accent-soft);
+  border-color: rgba(255, 255, 255, 0.32);
+  box-shadow: var(--funky-shadow-md);
+}
+.fx-mode-card:hover::before {
+  opacity: 1;
 }
 .fx-mode-card:active {
-  transform: translate(6px, 6px);
-  box-shadow: 0 0 0 0 rgba(0, 0, 0, 0.2);
+  transform: translateY(-1px);
+  box-shadow: var(--funky-shadow-sm);
 }
 .fx-mode-card .name {
   font-weight: 900;
-  font-size: 1.2rem;
+  font-size: 1.05rem;
+  letter-spacing: 0.01em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 .fx-mode-card .desc {
-  font-size: 0.8rem;
-  color: #6f6a52;
+  font-size: 0.76rem;
+  color: var(--funky-ink-muted);
   font-weight: 500;
-  margin-top: 0.25rem;
+  margin-top: 0.2rem;
+  line-height: 1.35;
+}
+/* 개인 기록 — 있는 카드만 아래에 한 줄 */
+.fx-mode-card .rec {
+  margin-top: 0.4rem;
+  font-size: 0.76rem;
+  font-weight: 900;
+  color: var(--funky-yellow);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+  대전으로 가는 칸. 모드 카드와 같은 재질이되 가로로 넓고 색이 한 겹 더 있어
+  "여기는 다른 것"으로 읽힌다.
+*/
+.fx-versus-cta {
+  position: relative;
+  overflow: hidden;
+  z-index: 2;
+  width: min(660px, 88vw);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.85rem 1rem;
+  border: var(--funky-border);
+  border-radius: var(--funky-radius);
+  background:
+    linear-gradient(90deg, rgba(120, 40, 200, 0.34), rgba(255, 78, 186, 0.26));
+  box-shadow: var(--funky-shadow-sm);
+  color: var(--funky-ink);
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 0.14s ease-out, box-shadow 0.14s ease-out, border-color 0.14s ease-out;
+}
+.fx-versus-cta:hover {
+  transform: translateY(-3px);
+  border-color: rgba(255, 255, 255, 0.36);
+  box-shadow: var(--funky-shadow-md);
+}
+.fx-versus-cta:active {
+  transform: translateY(-1px);
+  box-shadow: var(--funky-shadow-sm);
+}
+.fx-versus-cta .name {
+  font-weight: 900;
+  font-size: 1.05rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.fx-versus-cta .desc {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.72);
 }
 
 /* ---- 대전(1v1) ---- */
@@ -542,48 +911,55 @@ body,
   width: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--fx-bg);
+  /* 셸에 깔린 무대가 그대로 비친다 — 화면마다 바탕을 새로 칠하지 않는다 */
+  background: transparent;
   overflow: hidden;
 }
-/* 상단 CUSTOM ROOM 바 — funky AppShell navbar 룩 (보라 fill + 흰 이탤릭 브랜드) */
+/*
+  상단 바.
+
+  통보라로 채우던 자리다. 어두운 무대 위에서 그 면적은 화면에서 가장 시끄러운
+  요소가 되어, 정작 봐야 할 방 코드와 시작 버튼보다 먼저 눈에 들어왔다.
+  배경은 무대에 녹이고 아래 선 하나로만 구분한다.
+*/
 .fx-room-bar {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.8rem 1.75rem;
+  padding: 0.85rem 1.5rem;
   border-bottom: var(--funky-border);
-  background: var(--funky-purple);
-  color: var(--funky-ink-inverse);
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--funky-ink);
 }
 .fx-room-bar__title {
   font-weight: 900;
-  font-size: 1.1rem;
-  letter-spacing: 0.04em;
+  font-size: 0.95rem;
+  letter-spacing: 0.22em;
   line-height: 1;
   text-transform: uppercase;
+  color: var(--funky-ink-muted);
 }
-/* EXIT — navbar 항목 (보라 위 흰 테두리 박스) */
-/* EXIT — funky-ui 사이트 nav 버튼(site-navlink) 차용: 컬러 면 위 ghost */
+/* EXIT — 나가는 문이라 눈에 띄되 색은 쓰지 않는다 */
 .fx-room-exit {
   font-family: inherit;
   font-weight: 900;
-  font-size: 0.75rem;
-  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--funky-ink-inverse);
-  background: rgba(255, 255, 255, 0.12);
-  border: 2px solid rgba(255, 255, 255, 0.5);
-  border-radius: var(--funky-radius);
+  color: var(--funky-ink-muted);
+  background: transparent;
+  border: var(--funky-border);
+  border-radius: 8px;
   padding: 0.4rem 0.85rem;
   cursor: pointer;
-  transition: background-color var(--funky-motion-duration) var(--funky-motion-easing),
-    border-color var(--funky-motion-duration) var(--funky-motion-easing);
+  transition: background-color 0.12s ease-out, border-color 0.12s ease-out, color 0.12s ease-out;
 }
 .fx-room-exit:hover {
-  background: rgba(255, 255, 255, 0.22);
-  border-color: rgba(255, 255, 255, 0.8);
+  color: #fff;
+  background: rgba(255, 59, 59, 0.16);
+  border-color: rgba(255, 59, 59, 0.55);
 }
 /* 3단 본문 (1:2:1) */
 /* 본문 — 검정 파티션이 아니라 크림 위에 떠 있는 카드 3장 (class-explorer 차용) */
@@ -602,6 +978,7 @@ body,
   min-height: 0;
   background: var(--funky-surface);
   border: var(--funky-border);
+  border-radius: 14px;
   box-shadow: var(--funky-shadow-md);
   overflow: hidden;
 }
@@ -615,36 +992,31 @@ body,
   flex: 1 1 0;
 }
 
-/* 컬럼 헤더 — 검정 바가 아니라 카드 위에 떠 있는 네온 칩 (class-explorer 차용) */
+/*
+  컬럼 제목.
+
+  칸마다 시안·노랑·주황 칩을 달던 자리다. 색이 셋이면 어느 것이 중요한지가
+  아니라 "색이 셋이다"만 읽힌다. 제목은 글자로 충분하고, 색은 방 코드와
+  시작 버튼에만 남긴다.
+*/
 .fx-room-col__head {
   flex: 0 0 auto;
-  align-self: flex-start;
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  margin: 0.9rem 0 0 0.9rem;
-  padding: 0.34rem 0.72rem;
-  border: var(--funky-border);
-  box-shadow: var(--funky-shadow-sm);
-  color: var(--funky-ink);
+  padding: 0.85rem 1rem 0.65rem;
+  border-bottom: var(--funky-border);
+  color: var(--funky-ink-muted);
   font-weight: 900;
-  font-size: 0.8rem;
-  letter-spacing: 0.06em;
+  font-size: 0.7rem;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
 }
-.fx-room-col--players .fx-room-col__head {
-  background: var(--funky-cyan);
-}
-.fx-room-col--settings .fx-room-col__head {
-  background: var(--funky-yellow);
-}
-.fx-room-col--chat .fx-room-col__head {
-  background: var(--funky-orange);
-  color: var(--funky-ink);
-}
 .fx-room-col__head-count {
-  margin-left: 0.5rem;
-  font-size: 0.74rem;
-  opacity: 0.65;
+  margin-left: auto;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
 }
 .fx-room-col__body {
   flex: 1 1 auto;
@@ -668,36 +1040,43 @@ body,
   justify-content: center;
 }
 
-/* 방 코드 블록 */
+/*
+  방 코드 — 이 화면에서 남에게 불러줘야 하는 단 하나의 정보다.
+  면을 형광으로 칠하는 대신 어두운 홈에 두고 글자만 빛나게 한다.
+*/
 .fx-room-code {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.2rem;
+  gap: 0.15rem;
   padding: 0.9rem 0.5rem;
-  background: var(--funky-green);
+  background: var(--funky-sunken);
   border: var(--funky-border);
-  box-shadow: var(--funky-shadow-sm);
+  border-radius: var(--funky-radius);
 }
 .fx-room-code__label {
   font-weight: 900;
-  font-size: 0.65rem;
-  letter-spacing: 0.12em;
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--funky-ink-inverse);
+  color: var(--funky-ink-muted);
 }
 .fx-room-code__value {
   font-weight: 900;
-  font-size: 2.2rem;
-  letter-spacing: 0.26em;
-  line-height: 1.1;
+  font-size: 2.1rem;
+  letter-spacing: 0.24em;
+  /* 자간이 오른쪽에만 붙어 가운데가 밀리는 걸 되돌린다 */
+  text-indent: 0.24em;
+  line-height: 1.15;
   text-transform: uppercase;
-  color: var(--funky-ink-inverse);
+  color: var(--funky-cyan);
+  text-shadow: 0 0 24px rgba(61, 236, 253, 0.45);
+  font-variant-numeric: tabular-nums;
 }
 .fx-room-code__count {
   font-weight: 800;
   font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--funky-ink-muted);
 }
 
 /* 로스터 (플레이어 박스 리스트) */
@@ -706,6 +1085,7 @@ body,
   flex-direction: column;
   gap: 0.5rem;
 }
+/* 카드 안에 든 줄이라 그림자로 또 띄우지 않는다 — 면과 선만으로 충분하다 */
 .fx-player-box {
   display: flex;
   align-items: center;
@@ -714,14 +1094,17 @@ body,
   gap: 0.35rem 0.6rem;
   padding: 0.55rem 0.7rem;
   border: var(--funky-border);
-  background: var(--funky-surface);
-  box-shadow: var(--funky-shadow-sm);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
 }
 .fx-player-box__swatch {
-  width: 18px;
-  height: 18px;
+  width: 10px;
+  height: 10px;
   flex: 0 0 auto;
-  border: 2px solid var(--funky-ink);
+  border-radius: 50%;
+  border: none;
+  /* 자기 색으로 옅게 번지게 — 누구 자리인지 한눈에 */
+  box-shadow: 0 0 10px currentColor;
 }
 .fx-player-box__name {
   /* 이름이 먼저 자리를 잡고, 모자라면 배지가 다음 줄로 내려간다 */
@@ -800,11 +1183,13 @@ body,
   transform: translateX(-50%);
   z-index: 50;
   font-weight: 900;
+  font-size: 0.85rem;
   padding: 0.55rem 1.2rem;
-  color: var(--funky-ink-inverse);
+  border-radius: 999px;
+  color: #fff;
   background: var(--funky-danger);
-  border: var(--funky-border);
-  box-shadow: var(--funky-shadow-md);
+  border: none;
+  box-shadow: 0 6px 24px rgba(255, 59, 59, 0.35);
 }
 
 /* ============================================================================
@@ -1145,10 +1530,8 @@ body,
   투명하게 겹쳐 놓으면 보드들이 한 공간 위에 떠 있는 것처럼 보인다.
 */
 .fx-versus {
-  background:
-    radial-gradient(58% 44% at 18% 12%, rgba(120, 40, 200, 0.22), transparent 70%),
-    radial-gradient(52% 40% at 84% 78%, rgba(255, 78, 186, 0.16), transparent 72%),
-    radial-gradient(130% 95% at 50% 0%, #2a2040 0%, #191230 48%, #120d22 100%);
+  /* 셸과 같은 무대를 쓴다 — 값을 두 군데 적어두면 한쪽만 고쳐져 어긋난다 */
+  background: var(--fx-stage);
 }
 .fx-versus .fx-canvas-wrap {
   background: transparent;

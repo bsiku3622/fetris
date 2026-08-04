@@ -32,33 +32,41 @@ export function RoomBanner({ room, onReturn }: { room: RoomSession; onReturn: ()
         alignItems: "center",
         gap: 10,
         padding: "8px 12px",
-        border: `2px solid ${urgent ? FUNKY.danger : "var(--funky-line)"}`,
-        background: "var(--funky-surface)",
-        boxShadow: "4px 4px 0 rgba(0,0,0,0.25)",
+        borderRadius: 999,
+        border: `1px solid ${urgent ? FUNKY.danger : "var(--funky-line)"}`,
+        background: "rgba(26,20,44,0.92)",
+        backdropFilter: "blur(8px)",
+        boxShadow: "0 6px 22px rgba(0,0,0,0.42)",
         fontWeight: 800,
         fontSize: "0.8rem",
+        color: "var(--funky-ink)",
       }}
     >
+      {/* 판이 도는 중이면 붉게 깜빡여 돌아갈 곳이 있다는 걸 알린다 */}
       <span
         style={{
           display: "inline-block",
-          width: 8,
-          height: 8,
+          width: 7,
+          height: 7,
           borderRadius: "50%",
           background: urgent ? FUNKY.danger : FUNKY.green,
+          boxShadow: `0 0 10px ${urgent ? FUNKY.danger : FUNKY.green}`,
+          animation: urgent ? "fx-pulse 1s ease-in-out infinite" : undefined,
         }}
       />
-      <span style={{ letterSpacing: "0.06em" }}>ROOM {room.code}</span>
-      <span style={{ opacity: 0.65 }}>{label}</span>
+      <span style={{ letterSpacing: "0.08em" }}>ROOM {room.code}</span>
+      <span style={{ color: "var(--funky-ink-muted)" }}>{label}</span>
       <button
         onClick={onReturn}
         style={{
-          border: "2px solid var(--funky-line)",
+          borderRadius: 999,
+          border: `1px solid ${urgent ? "transparent" : "var(--funky-line)"}`,
           background: urgent ? FUNKY.danger : "transparent",
-          color: urgent ? "#fff" : "inherit",
+          color: urgent ? "#fff" : "var(--funky-ink)",
+          fontFamily: "inherit",
           fontWeight: 900,
           fontSize: "0.72rem",
-          padding: "3px 8px",
+          padding: "4px 10px",
           cursor: "pointer",
         }}
       >
