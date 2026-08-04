@@ -285,6 +285,11 @@ export interface RelayServerOptions {
   resultsMs?: number;
   /** 끊긴 참가자의 자리를 잡아두는 시간(ms). 테스트에서 줄여 쓴다. */
   graceMs?: number;
+  /**
+   * bind할 주소. 생략하면 모든 인터페이스에서 받는다.
+   * 앞단에 Nginx를 두는 배포에서는 127.0.0.1로 좁혀 직접 접근을 막는다.
+   */
+  host?: string;
 }
 
 export interface RelayServer {
@@ -1577,7 +1582,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
   }, HEARTBEAT_MS);
   heartbeat.unref?.();
 
-  http.listen(port);
+  http.listen(port, opts.host);
 
   return {
     http,

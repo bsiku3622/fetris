@@ -8,16 +8,18 @@ import { startServer } from "./server.js";
 // ============================================================================
 
 const port = Number(process.env.PORT) || 8787;
+// HOST를 주면 그 주소에만 bind한다. Nginx 뒤에 두는 배포에서는 127.0.0.1로 좁힌다.
+const host = process.env.HOST;
 const botToken = process.env.FETRIS_BOT_TOKEN;
 const botTokensPath = process.env.FETRIS_BOT_TOKENS;
-const server = startServer(port, { botToken, botTokensPath });
+const server = startServer(port, { botToken, botTokensPath, host });
 
 const auth = botTokensPath
   ? `토큰 파일 ${botTokensPath}`
   : botToken
     ? "단일 토큰"
     : "인증 없음(공개)";
-console.log(`[fetris-be] relay listening on :${port} (health: /health, bots: /bot — ${auth})`);
+console.log(`[fetris-be] relay listening on ${host ?? "*"}:${port} (health: /health, bots: /bot — ${auth})`);
 
 const shutdown = (signal: string) => {
   console.log(`[fetris-be] ${signal} 수신 — 종료합니다`);
