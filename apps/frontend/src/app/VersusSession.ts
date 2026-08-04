@@ -13,6 +13,7 @@ import type { KeyMap, Action } from "@fetris/engine/input";
 import { ReplayAction, fingerprint } from "@fetris/engine/replay";
 import type { MatchReplayPlayerEntry } from "@fetris/engine/replay";
 import { VersusMatch } from "./VersusMatch";
+import { countdownAt } from "./countdown";
 import { liveStats } from "@fetris/engine/modes";
 import type { HudInfo } from "@fetris/engine/modes";
 import type { MultiTransport } from "../net/transport";
@@ -37,6 +38,13 @@ export interface VersusCallbacks {
   /** 타깃 전략이 키로 바뀌었다(HUD 갱신용) */
   onStrategyChange?: (s: TargetStrategy) => void;
   onFps?: (fps: number) => void;
+  /**
+   * 시작 카운트다운이 넘어갔다 — 3·2·1, 0은 GO!, 음수는 표시 없음.
+   *
+   * **내 게임 기준으로만** 센다. 상대 보드는 미러라 스트림이 도착하는 만큼
+   * 늘 뒤에 있어서, 보드마다 세면 같은 판인데 서로 다른 숫자가 뜬다.
+   */
+  onCountdown?: (n: number) => void;
 }
 
 export interface VersusSessionOptions {
@@ -95,6 +103,8 @@ export class VersusSession {
   private dangerBeepAccum = 0.6; // 위험 경고음 누적(진입 시 즉시 울리도록 초기값 충전)
   private hudAccum = 0;
   private lastHud: HudInfo = { left: [], right: [] };
+  /** 마지막으로 알린 카운트다운 숫자 — 바뀌는 순간에만 화면·소리에 전한다 */
+  private countdown = -1;
   private localCanvas: HTMLCanvasElement;
   /** 관전 모드면 내 보드를 돌리지도 그리지도 않는다 */
   private readonly spectating: boolean;
@@ -482,7 +492,35 @@ export class VersusSession {
     this.remoteGfx = { ...gfx, backdrop: false, ghostOpacity: Math.max(gfx.ghostOpacity, 0.55) };
   }
 
+  /**
+   * 시작 카운트다운은 **판 하나에서만** 읽는다.
+   *
+   * 뛰는 중이면 내 게임이고, 관전 중이면 내 보드가 아예 돌지 않으므로 보고 있는
+   * 상대의 미러에서 읽는다. 어느 쪽이든 화면에는 하나만 뜨므로 숫자가 갈리지 않는다.
+   */
+  private countdownSource(localGame: Game): Game {
+    if (!this.spectating) return localGame;
+    for (const id of this.focusIds) {
+      const mirror = this.match.remotes.get(id);
+      if (mirror) return mirror.game;
+    }
+    const first = this.match.remotes.values().next().value;
+    return first ? first.game : localGame;
+  }
+
+  /** 숫자가 넘어가는 순간에만 알린다 — 매 프레임 알리면 소리가 겹친다 */
+  private tickCountdown(localGame: Game): void {
+    const n = countdownAt(this.countdownSource(localGame).readyTimer);
+    if (n === this.countdown) return;
+    this.countdown = n;
+    if (n > 0) this.sound.play("count");
+    else if (n === 0) this.sound.play("go");
+    this.cbs.onCountdown?.(n);
+  }
+
   private onRender(localGame: Game, alpha: number, fps: number): void {
+    this.tickCountdown(localGame);
+
     // shake/flash 감쇠
     this.shakeMag *= 0.82;
     if (this.shakeMag < 0.05) this.shakeMag = 0;

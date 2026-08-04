@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Game } from "../src/game.js";
+import { Game, READY_FRAMES } from "../src/game.js";
 import type { InputCommands } from "../src/game.js";
 import { STANDARD_RULESET, DEFAULT_HANDLING } from "../src/config.js";
 import { runReplay, verifyReplay, fingerprint, ReplayRecorder, ReplayAction } from "../src/replay.js";
@@ -11,9 +11,10 @@ import { runReplay, verifyReplay, fingerprint, ReplayRecorder, ReplayAction } fr
 const RULE = { ...STANDARD_RULESET };
 const HANDLING = { ...DEFAULT_HANDLING };
 const SEED = 4242;
-// 이 입력 패턴은 264프레임쯤 톱아웃한다. 게임오버 뒤 입력은 결과에 영향을
-// 주지 않아 변조 탐지를 검증할 수 없으므로, 살아 있는 구간만 다룬다.
-const FRAMES = 200;
+// 이 입력 패턴은 판이 열린 뒤 264프레임쯤 톱아웃한다. 게임오버 뒤 입력은 결과에
+// 영향을 주지 않아 변조 탐지를 검증할 수 없으므로, 살아 있는 구간만 다룬다.
+// 앞의 Ready 구간은 아직 판이 열리기 전이라 그만큼 더 돌려야 한다.
+const FRAMES = READY_FRAMES + 200;
 
 /** 프레임 번호로부터 결정적으로 입력을 만든다(재현 가능한 시퀀스) */
 function actionsAt(frame: number): { action: ReplayAction; down: boolean }[] {
@@ -121,9 +122,18 @@ describe("리플레이", () => {
     expect(game.stats.piecesPlaced).toBeGreaterThan(0);
     expect(game.isGameOver()).toBe(false);
 
-    // 판 중간의 입력 하나를 들어낸다 — 맨 뒤 입력은 이어지는 시뮬이 없어
-    // 결과에 영향을 못 주므로 대조에 쓸 수 없다
-    const mid = Math.floor(recorder.keys.length / 6) * 3;
+    /*
+      판이 열린 뒤의 입력 하나를 들어낸다.
+
+      앞의 Ready 구간에 눌린 키는 아직 조각이 없어 결과를 바꾸지 못하고, 맨 뒤
+      입력은 이어지는 시뮬이 없어 마찬가지다 — 둘 다 변조 탐지에 쓸 수 없다.
+    */
+    const live: number[] = [];
+    for (let i = 0; i < recorder.keys.length; i += 3) {
+      if (recorder.keys[i] >= READY_FRAMES) live.push(i);
+    }
+    expect(live.length).toBeGreaterThan(2);
+    const mid = live[Math.floor(live.length / 2)];
     const tampered = [...recorder.keys.slice(0, mid), ...recorder.keys.slice(mid + 3)];
     const replayed = runReplay({
       rule: RULE, handling: HANDLING, seed: SEED,
@@ -168,7 +178,8 @@ describe("리플레이", () => {
     // 지문이 startTime을 물고 있으면 정상 플레이도 전부 불일치로 잡힌다.
     const live = new Game(RULE, HANDLING, SEED);
     const replayed = new Game(RULE, HANDLING, SEED);
-    for (let f = 0; f < 120; f++) {
+    // startTime은 판이 실제로 열릴 때 찍힌다 — Ready를 넘겨야 대조할 값이 생긴다
+    for (let f = 0; f < READY_FRAMES + 120; f++) {
       live.update(1, undefined, 123456.789);
       replayed.update(1, undefined, 0);
       live.events.length = 0;

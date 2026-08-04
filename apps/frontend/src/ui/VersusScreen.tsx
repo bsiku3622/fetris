@@ -29,7 +29,7 @@ const fmtFrameMs = (f: number) => `${f}f / ${Math.round((f * 1000) / 60)}ms`;
 const OPP_PALETTE = [FUNKY.pink, FUNKY.orange, FUNKY.green, FUNKY.purple, FUNKY.yellow, FUNKY.danger, FUNKY.sky];
 
 type Cfg = {
-  /** 먼저 N승하면 시리즈 종료. 0 = 목표 없이 계속 */
+  /** 먼저 N승하면 이 방의 승부가 끝난다. 항상 1 이상(FT1 = 단판) */
   firstTo: number;
   attackMul: number;
   undo: boolean;
@@ -53,7 +53,7 @@ type Cfg = {
 };
 
 const DEFAULT_CFG: Cfg = {
-  firstTo: 0,
+  firstTo: 3,
   attackMul: 1,
   undo: false,
   garbage: true,
@@ -198,7 +198,7 @@ export function VersusScreen({
       attackMul: remoteConfig.attackMul,
       undo: remoteConfig.undo,
       sharePieces: remoteConfig.sharePieces,
-      firstTo: remoteConfig.firstTo ?? 0,
+      firstTo: Math.max(1, remoteConfig.firstTo ?? 1),
       garbage: rule.garbageEnabled,
       kickset: rule.kickset,
       spinBonus: rule.spinBonus,
@@ -293,7 +293,7 @@ export function VersusScreen({
         <MatchStage settings={settings} room={room} match={room.matchStart} />
         {/*
           다음 판이 이어지는 중이면 결과표 대신 라운드 전환 연출을 태운다.
-          판이 정말 끝났을 때(시리즈 종료·단판)는 리플레이 내려받기와 대기실
+          승부가 끝났을 때(누군가 FT를 채웠다)는 리플레이 내려받기와 대기실
           이동이 필요하므로 기존 결과 화면을 그대로 쓴다.
         */}
         {roundBreak && <RoundTransition room={room} end={roundBreak} opened={breakOpened} />}
@@ -439,7 +439,7 @@ export function VersusScreen({
                   player={p}
                   color={p.id === room.myId ? FUNKY.sky : OPP_PALETTE[i % OPP_PALETTE.length]}
                   me={p.id === room.myId}
-                  firstTo={state.config?.firstTo ?? 0}
+                  firstTo={state.config?.firstTo ?? 1}
                   canKick={isHost && p.isBot}
                   onKick={() => room.kickBot(p.id)}
                 />
@@ -545,14 +545,14 @@ export function VersusScreen({
                     value={String(cfg.firstTo)}
                     disabled={!canEdit}
                     options={[
-                      { value: "0", label: "계속 (목표 없음)" },
                       { value: "1", label: "단판 (FT1)" },
+                      { value: "2", label: "2선승 (FT2)" },
                       { value: "3", label: "3선승 (FT3)" },
                       { value: "5", label: "5선승 (FT5)" },
                       { value: "7", label: "7선승 (FT7)" },
                       { value: "10", label: "10선승 (FT10)" },
                     ]}
-                    onChange={(v) => applyEdit({ firstTo: Number(v) })}
+                    onChange={(v) => applyEdit({ firstTo: Math.max(1, Number(v)) })}
                   />
                   <NumField label="공격 배수" value={cfg.attackMul} min={0} step={0.1} disabled={!canEdit} onChange={(v) => applyEdit({ attackMul: v })} />
                   <ToggleField label="같은 조각 순서 공유" value={cfg.sharePieces} disabled={!canEdit} onChange={(v) => applyEdit({ sharePieces: v })} />
@@ -770,20 +770,26 @@ function MatchReplayButton({ room, align }: { room: RoomSession; align: "center"
 }
 
 /**
- * 판이 정말 끝났을 때의 결과 화면.
+ * 승부가 끝났을 때의 결과 화면.
  *
- * 시리즈 도중의 라운드 전환(RoundTransition)과 달리 여기서 멈춰 서서 결과를
- * 곱씹는 자리이므로, 승패를 크게 알리고 순위·리플레이·대기실 이동을 함께 둔다.
+ * 판 사이의 라운드 전환(RoundTransition)과 달리 여기서 멈춰 서서 결과를 곱씹는
+ * 자리이므로, 승패를 크게 알리고 순위·리플레이·대기실 이동을 함께 둔다.
  * 승리 문구는 글자 하나씩 떨어져 박히고, 뒤에서 빛살이 돌고, 조각들이 흩날린다.
  */
 function ResultsView({ room }: { room: RoomSession }) {
   const end = room.matchEnd!;
   const players = room.state?.players ?? [];
   const nickOf = (id: string) => players.find((p) => p.id === id)?.nick ?? "―";
-  const winsOf = (id: string) => players.find((p) => p.id === id)?.wins ?? 0;
+  /*
+    승수는 판이 끝났다는 메시지에 실려 온 값을 쓴다. 방 상태는 이 메시지 뒤에
+    따라오므로 그걸 읽으면 이번 판 승리가 아직 반영되기 전이고, 대기실로 돌아갈
+    때는 아예 0으로 지워진다 — 어느 쪽이든 결과 화면에 맞는 숫자가 아니다.
+  */
+  const winsOf = (id: string) =>
+    end.standings.find((s) => s.playerId === id)?.wins ?? players.find((p) => p.id === id)?.wins ?? 0;
   const iWon = end.winnerId === room.myId;
-  const firstTo = room.state?.config?.firstTo ?? 0;
-  // 시리즈(FT)까지 끝난 판이면 한 판 승리보다 크게 알린다
+  const firstTo = Math.max(1, room.state?.config?.firstTo ?? 1);
+  /** FT를 채워 승부가 끝났다 — 인원이 모자라 중단된 경우와 구분한다 */
   const series = end.seriesWinnerId;
   const iTookSeries = series === room.myId;
 
@@ -792,7 +798,13 @@ function ResultsView({ room }: { room: RoomSession }) {
   /** 이긴 사람의 화면은 금빛, 진 사람은 차갑게 */
   const tone = champion ? (mine ? FUNKY.yellow : "#8d86a8") : "#8d86a8";
   const word = champion ? (mine ? "WINNER" : "DEFEAT") : "DRAW";
-  const kicker = series ? `FT${firstTo} 시리즈 종료` : champion ? "매치 종료" : "무승부";
+  const kicker = series
+    ? firstTo > 1
+      ? `FT${firstTo} 승부 종료`
+      : "단판 종료"
+    : champion
+      ? "판 종료"
+      : "무승부";
 
   /*
     잔치는 이긴 사람 몫이다. 빛살·띠·조각은 승리 화면에만 붙이고, 패배와
@@ -835,12 +847,10 @@ function ResultsView({ room }: { room: RoomSession }) {
         {champion && (
           <div className="fx-win-who">
             {nickOf(champion)}
-            {firstTo > 0 && (
-              <b>
-                {winsOf(champion)}
-                <i>/{firstTo}</i>
-              </b>
-            )}
+            <b>
+              {winsOf(champion)}
+              <i>/{firstTo}</i>
+            </b>
           </div>
         )}
 
@@ -857,7 +867,7 @@ function ResultsView({ room }: { room: RoomSession }) {
             >
               <span className="fx-win-rank">{st.placement}</span>
               <span className="fx-win-name">{nickOf(st.playerId)}</span>
-              {firstTo > 0 && <span className="fx-win-wins">{winsOf(st.playerId)}</span>}
+              <span className="fx-win-wins">{winsOf(st.playerId)}</span>
             </div>
           ))}
         </div>
@@ -903,7 +913,7 @@ function PlayerRow({
   player: PlayerInfo;
   color: string;
   me: boolean;
-  /** 시리즈 목표 승수(0이면 목표 없음) */
+  /** 목표 승수 — 먼저 이만큼 이기면 승부가 끝난다 */
   firstTo: number;
   canKick: boolean;
   onKick: () => void;
@@ -914,7 +924,7 @@ function PlayerRow({
       <span className="fx-player-box__name">{player.nick}</span>
       {/* 배지는 줄어들지 않는다 — 줄어들면 글자가 이름 위로 겹쳐 올라온다 */}
       <span style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto", whiteSpace: "nowrap" }}>
-        {player.wins > 0 && <Badge color="yellow">{firstTo > 0 ? `${player.wins}/${firstTo}승` : `${player.wins}승`}</Badge>}
+        {player.wins > 0 && <Badge color="yellow">{`${player.wins}/${firstTo}승`}</Badge>}
         {player.isBot && <Badge color="purple">{player.botOwner ? `BOT · ${player.botOwner}` : "BOT"}</Badge>}
         {player.isHost && <Badge color="yellow">호스트</Badge>}
         {me && <Badge color="sky">나</Badge>}

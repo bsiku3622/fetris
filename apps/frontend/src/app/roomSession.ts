@@ -37,13 +37,11 @@ export interface MatchStartInfo {
 export interface MatchEndInfo {
   matchId: number;
   winnerId: string | null;
-  standings: { playerId: string; placement: number }[];
-  /** 있으면 시리즈(FT)까지 끝났다는 뜻 */
+  standings: { playerId: string; placement: number; wins: number }[];
+  /** 있으면 이 사람이 FT를 채워 승부가 끝났다는 뜻 */
   seriesWinnerId?: string;
   /** 결과 화면이 걷히면 서버가 다음 판을 이어 연다 */
   nextRound?: boolean;
-  /** 다음 판이 열리기까지 남은 시간(ms) — 전환 연출을 여기 맞춘다 */
-  nextIn?: number;
 }
 
 export interface ChatLine {
@@ -206,13 +204,13 @@ export function useRoomSession(): RoomSession {
         const nick = net.room?.players.find((p) => p.id === playerId)?.nick ?? "누군가";
         pushChat({ nick: "", text: `${nick}님이 KO됐습니다` });
       };
-      net.onMatchEnd = (matchId, winnerId, standings, seriesWinnerId, nextRound, nextIn) => {
-        setMatchEnd({ matchId, winnerId, standings, seriesWinnerId, nextRound, nextIn });
+      net.onMatchEnd = (matchId, winnerId, standings, seriesWinnerId, nextRound) => {
+        setMatchEnd({ matchId, winnerId, standings, seriesWinnerId, nextRound });
         const champ = net.room?.players.find((p) => p.id === winnerId)?.nick;
         pushChat({ nick: "", text: champ ? `${champ}님이 승리했습니다` : "무승부로 끝났습니다" });
         if (seriesWinnerId) {
           const series = net.room?.players.find((p) => p.id === seriesWinnerId)?.nick;
-          if (series) pushChat({ nick: "", text: `🏆 ${series}님이 시리즈를 가져갔습니다` });
+          if (series) pushChat({ nick: "", text: `🏆 ${series}님이 승부를 가져갔습니다` });
         }
       };
       /*

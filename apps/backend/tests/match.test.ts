@@ -24,9 +24,9 @@ afterAll(async () => {
 });
 
 /** 호스트 + 게스트들로 방을 꾸려 바로 시작할 수 있는 상태로 만든다 */
-async function readyRoom(guestCount: number, maxPlayers = 8) {
+async function readyRoom(guestCount: number, maxPlayers = 8, config = TEST_CONFIG) {
   const { host, code } = await createRoom(url, maxPlayers);
-  host.send({ t: "config", config: TEST_CONFIG });
+  host.send({ t: "config", config });
   const guests: Client[] = [];
   for (let i = 0; i < guestCount; i++) {
     guests.push(await joinRoom(url, code, `G${i + 1}`));
@@ -121,8 +121,8 @@ describe("매치 진행", () => {
     guests[1].close();
   });
 
-  it("우승하면 승수가 쌓이고, 결과 후 대기실로 돌아간다", async () => {
-    const { host, guests } = await readyRoom(1);
+  it("우승하면 승수가 쌓이고, 승부가 끝나면 대기실로 돌아간다", async () => {
+    const { host, guests } = await readyRoom(1); // FT1 — 이 한 판이 곧 승부다
     const start = await startMatch(host, guests);
     const winnerId = start.players.find((id) => id !== undefined);
     expect(winnerId).toBeDefined();
@@ -130,13 +130,18 @@ describe("매치 진행", () => {
     guests[0].send({ t: "ko" });
     const end = await host.waitFor("match-end");
     expect(end.winnerId).not.toBeNull();
+    // FT1을 채웠으므로 이 판으로 승부가 끝난다
+    expect(end.seriesWinnerId).toBe(end.winnerId);
 
-    // results → lobby 자동 복귀
+    // 판이 끝난 직후 상태에는 승수가 올라 있다
+    const after = await host.waitFor("state", 3000);
+    expect(playerIn(after.state, end.winnerId as string)?.wins).toBe(1);
+
+    // results → lobby 자동 복귀. 승부가 끝났으니 다음 승부는 0승부터 시작한다.
     for (;;) {
       const s = await host.waitFor("state", 3000);
       if (s.state.phase === "lobby") {
-        const champ = playerIn(s.state, end.winnerId as string);
-        expect(champ?.wins).toBe(1);
+        expect(playerIn(s.state, end.winnerId as string)?.wins).toBe(0);
         break;
       }
     }
@@ -376,15 +381,57 @@ describe("매치 진행", () => {
     guests[0].close();
   });
 
-  it("FT가 0이면 시리즈 종료 없이 계속 쌓인다", async () => {
-    const { host, guests } = await readyRoom(1); // TEST_CONFIG.firstTo = 0
+  it("FT를 채우기 전에는 승부가 끝나지 않고 다음 판이 이어진다", async () => {
+    const { host, guests } = await readyRoom(1, 8, { ...TEST_CONFIG, firstTo: 3 });
     await startMatch(host, guests);
     guests[0].send({ t: "ko" });
-    const end = await host.waitFor("match-end");
-    expect(end.seriesWinnerId).toBeUndefined();
 
-    const s = await host.waitState((st) => st.phase === "lobby");
-    expect(playerIn(s, end.winnerId as string)?.wins).toBe(1);
+    const end = await host.waitFor("match-end");
+    // 1승은 FT3에 못 미친다 — 승부는 아직 살아 있고 서버가 다음 판을 이어 연다
+    expect(end.seriesWinnerId).toBeUndefined();
+    expect(end.nextRound).toBe(true);
+
+    const after = await host.waitFor("state", 3000);
+    expect(playerIn(after.state, end.winnerId as string)?.wins).toBe(1);
+
+    // 대기실로 떨어지지 않고 다음 판이 열린다
+    const next = await host.waitFor("match-start", 5000);
+    expect(next.matchId).toBeGreaterThan(end.matchId);
+
+    host.close();
+    guests[0].close();
+  });
+
+  it("match-end의 순위표에 이번 판이 반영된 승수가 실린다", async () => {
+    /*
+      방 상태는 match-end 뒤에 따라간다. 받는 쪽이 판이 끝나는 순간 화면을 짜며
+      방 상태를 읽으면 아직 올라가기 전 승수라 "이겼는데 점수가 그대로"가 된다.
+      그래서 순위표에 그 순간의 승수를 함께 싣는다.
+    */
+    const { host, guests } = await readyRoom(1, 8, { ...TEST_CONFIG, firstTo: 3 });
+    await startMatch(host, guests);
+    guests[0].send({ t: "ko" });
+
+    const end = await host.waitFor("match-end");
+    const champ = end.standings.find((s) => s.playerId === end.winnerId);
+    expect(champ?.placement).toBe(1);
+    expect(champ?.wins).toBe(1);
+    // 진 쪽은 그대로 0이어야 한다
+    expect(end.standings.find((s) => s.playerId !== end.winnerId)?.wins).toBe(0);
+
+    host.close();
+    guests[0].close();
+  });
+
+  it("목표 승수가 0으로 들어와도 단판으로 끌어올린다", async () => {
+    // 옛 클라이언트의 "목표 없음"이 그대로 통하면 아무도 도달할 수 없어 판이 영영 이어진다
+    const { host, guests } = await readyRoom(1, 8, { ...TEST_CONFIG, firstTo: 0 });
+    const start = await startMatch(host, guests);
+    expect(start.config.firstTo).toBe(1);
+
+    guests[0].send({ t: "ko" });
+    const end = await host.waitFor("match-end");
+    expect(end.seriesWinnerId).toBe(end.winnerId);
 
     host.close();
     guests[0].close();

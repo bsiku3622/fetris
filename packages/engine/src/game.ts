@@ -25,6 +25,20 @@ export const enum Phase {
   Paused = 5,
 }
 
+/**
+ * 판이 열리고 첫 조각이 내려오기까지 잠가 두는 프레임 수.
+ *
+ * 앞의 1초는 화면이 정리될 여유다 — 시리즈 도중이면 라운드 전환의 장막이
+ * 이 사이에 걷힌다. 남은 3초가 3·2·1이고, 0이 되는 순간이 GO다.
+ *
+ * 이 값은 **모두가 같아야 한다.** 서로 다른 길이로 세면 먼저 센 쪽이 그만큼
+ * 일찍 움직인다. 시작 신호는 서버의 `match-start`가 도착하는 순간이고,
+ * 여기서부터의 대기는 엔진이 프레임으로 세므로 simRate와도 무관하다.
+ */
+export const READY_FRAMES = 240;
+/** 카운트다운 숫자가 보이기 시작하는 지점 — 그 앞은 화면이 정리되는 여유 */
+export const COUNTDOWN_FRAMES = 180;
+
 export const enum EventType {
   Spawn,
   Move,
@@ -165,7 +179,7 @@ export class Game {
     // 가비지 구멍 생성기 — 피스 가방과 상관없게 시드를 분리
     this.garbageGen = new GarbageGen((this.seed ^ 0x9e3779b9) >>> 0, rule.cols, rule.garbageMessiness);
     this.stats = this.freshStats();
-    this.phaseTimer = 60; // 1초 Ready
+    this.phaseTimer = READY_FRAMES;
   }
 
   private freshStats(): Stats {
@@ -199,7 +213,7 @@ export class Game {
     this.holdPiece = Piece.None;
     this.canHold = true;
     this.phase = Phase.Ready;
-    this.phaseTimer = 60;
+    this.phaseTimer = READY_FRAMES;
     this.gravityAccum = 0;
     this.lockTimer = 0;
     this.lockResetCount = 0;
@@ -843,7 +857,13 @@ export class Game {
     if (this.phase === Phase.Paused) this.phase = Phase.Playing;
   }
 
-  /** Ready 페이즈 남은 프레임(없으면 -1). 카운트다운 표시용. */
+  /**
+   * 시작까지 남은 프레임(이미 시작했으면 -1).
+   *
+   * 화면은 이 값 하나로 카운트다운을 그린다 — 보드마다 따로 세지 않는다.
+   * 남의 보드를 미러로 돌리면 스트림이 도착하는 만큼 늘 몇 프레임 뒤에 있어서,
+   * 각자 세게 두면 같은 판인데 서로 다른 숫자가 뜬다.
+   */
   get readyTimer(): number {
     return this.phase === Phase.Ready ? this.phaseTimer : -1;
   }

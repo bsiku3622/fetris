@@ -132,7 +132,8 @@ export const TEST_CONFIG: MatchConfig = {
   sharePieces: true,
   undo: false,
   attackMul: 1,
-  firstTo: 0,
+  // FT1 = 단판. 대부분의 테스트가 한 판 돌고 대기실로 돌아오는 걸 본다.
+  firstTo: 1,
 };
 
 /** 방을 만들고 호스트 클라이언트·코드·초기 상태를 돌려준다 */

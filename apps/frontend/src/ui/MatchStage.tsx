@@ -6,6 +6,7 @@ import type { RoomSession } from "../app/roomSession";
 import type { MatchStartInfo } from "../app/roomSession";
 import type { PlayerInfo, TargetStrategy } from "../net/protocol";
 import { TARGET_LABELS, TARGET_STRATEGIES } from "../net/protocol";
+import { Countdown } from "./Countdown";
 
 // ============================================================================
 // MatchStage — 대전과 관전을 함께 다루는 무대.
@@ -40,6 +41,11 @@ export function MatchStage({
 
   const [focusId, setFocusId] = useState<string | null>(opponents[0] ?? null);
   const [strategy, setStrategy] = useState<TargetStrategy>("random");
+  /**
+   * 판이 열리기 전 3·2·1·GO!. 무대에 하나만 뜬다 — 보드마다 그리면 미러가
+   * 스트림만큼 뒤에 있어 내 보드와 상대 보드에 다른 숫자가 뜬다.
+   */
+  const [count, setCount] = useState(-1);
   /** 이미 KO 연출을 태운 상대 — 중복 실행 방지 */
   const koneRef = useRef<Set<string>>(new Set());
 
@@ -139,6 +145,7 @@ export function MatchStage({
       {
         onSelfKO: () => net.reportKO(),
         onStrategyChange: (s) => setStrategy(s),
+        onCountdown: setCount,
       },
     );
     sessionRef.current = session;
@@ -430,6 +437,8 @@ export function MatchStage({
         </div>
       )}
 
+      {/* 판이 열리기 전 3·2·1·GO! — 라운드 전환의 장막 위로 뜬다 */}
+      <Countdown n={count} />
     </div>
   );
 }

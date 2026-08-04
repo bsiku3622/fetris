@@ -270,26 +270,11 @@ export class Renderer {
     // 액션 텍스트 (필드 왼쪽)
     if (action) action.draw(ctx, bx - pad * 1.5, fieldTop, cell);
 
-    // READY / GO 카운트다운 (필드 중앙)
-    const rt = game.readyTimer;
-    if (rt >= 0) {
-      const txt = rt > 20 ? "READY?" : "GO!";
-      const color = rt > 20 ? FUNKY.purple : FUNKY.green;
-      ctx.save();
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      const fs = Math.floor(cell * 1.8);
-      ctx.font = `900 ${fs}px Pretendard, system-ui, sans-serif`;
-      ctx.lineJoin = "round";
-      ctx.lineWidth = fs * 0.1;
-      const cx = bx + boardW / 2;
-      const cy = fieldTop + (cell * rows) / 2;
-      ctx.strokeStyle = "#000";
-      ctx.strokeText(txt, cx, cy);
-      ctx.fillStyle = color;
-      ctx.fillText(txt, cx, cy);
-      ctx.restore();
-    }
+    /*
+      시작 카운트다운은 여기서 그리지 않는다 — 무대 전체에 하나만 뜬다(DOM).
+      보드마다 자기 게임의 남은 프레임으로 세면, 미러는 스트림이 도착하는 만큼
+      뒤에 있어서 같은 판인데 내 보드와 상대 보드에 다른 숫자가 뜬다.
+    */
 
     // Next 존 (배경과 분리되는 패널)
     const nx = bx + boardW + pad;

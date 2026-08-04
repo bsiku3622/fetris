@@ -4,6 +4,7 @@ import type { GameModeName } from "@fetris/engine/types";
 import type { Settings } from "../app/store";
 import { loadRecords, saveRecords } from "../app/store";
 import { GameSession } from "../app/GameSession";
+import { Countdown } from "./Countdown";
 import type { HudInfo, ModeResult } from "@fetris/engine/modes";
 
 export function GameScreen({
@@ -21,6 +22,8 @@ export function GameScreen({
   const fpsRef = useRef<HTMLDivElement>(null);
   const [result, setResult] = useState<ModeResult | null>(null);
   const [paused, setPaused] = useState(false);
+  // 판이 열리기 전 3·2·1·GO!. 시작하고 나면 더 바뀌지 않아 게임 중 리렌더는 없다.
+  const [count, setCount] = useState(-1);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -46,6 +49,7 @@ export function GameScreen({
       },
       {
         onHud: applyHud,
+        onCountdown: setCount,
         onPauseToggle: () => setPaused((p) => !p),
         onEnd: (r) => {
           setResult(r);
@@ -106,6 +110,8 @@ export function GameScreen({
         <div className="fx-fps" ref={fpsRef}>
           60 FPS
         </div>
+
+        {!paused && !result && <Countdown n={count} />}
 
         {paused && !result && (
           <div className="fx-overlay">

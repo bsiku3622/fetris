@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Game } from "../src/game.js";
+import { Game, READY_FRAMES } from "../src/game.js";
 import type { InputCommands } from "../src/game.js";
 import { STANDARD_RULESET, DEFAULT_HANDLING } from "../src/config.js";
 import {
@@ -18,7 +18,7 @@ import type { ReplayFile } from "../src/replay.js";
 const RULE = { ...STANDARD_RULESET };
 const HANDLING = { ...DEFAULT_HANDLING };
 const SEED = 20260729;
-const FRAMES = 240;
+const FRAMES = READY_FRAMES + 240;
 
 /** 한 판을 두면서 입력을 기록한다 */
 function record(): { game: Game; recorder: ReplayRecorder } {

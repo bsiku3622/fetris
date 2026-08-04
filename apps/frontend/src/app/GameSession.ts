@@ -12,6 +12,7 @@ import { InputManager } from "@fetris/engine/input";
 import type { KeyMap } from "@fetris/engine/input";
 import { Mode } from "@fetris/engine/modes";
 import { saveZenState, loadZenState, clearZenState } from "./store";
+import { countdownAt } from "./countdown";
 import type { HudInfo, ModeResult } from "@fetris/engine/modes";
 import type { Handling, GameModeName, RuleSet } from "@fetris/engine/types";
 import { SpinType, Piece } from "@fetris/engine/types";
@@ -25,6 +26,8 @@ export interface SessionCallbacks {
   onHud?: (hud: HudInfo, fps: number) => void;
   onEnd?: (result: ModeResult) => void;
   onPauseToggle?: () => void;
+  /** 시작 카운트다운이 넘어갈 때마다 — 3·2·1, 0은 GO!, 음수는 표시 없음 */
+  onCountdown?: (n: number) => void;
 }
 
 export interface SessionOptions {
@@ -55,8 +58,8 @@ export class GameSession {
   private ended = false;
   private hudAccum = 0;
   private lastHud: HudInfo = { left: [], right: [] };
-  private playedReady = false;
-  private playedGo = false;
+  /** 마지막으로 알린 카운트다운 숫자 — 바뀌는 순간에만 화면·소리에 전한다 */
+  private countdown = -1;
   private spinThisPiece = false;
 
   constructor(canvas: HTMLCanvasElement, modeName: GameModeName, opts: SessionOptions, cbs: SessionCallbacks = {}) {
@@ -116,8 +119,7 @@ export class GameSession {
 
   retry(): void {
     this.ended = false;
-    this.playedReady = false;
-    this.playedGo = false;
+    this.countdown = -1;
     const seed = (Math.random() * 0xffffffff) >>> 0;
     this.game.reset(seed);
     this.mode.setup(this.game);
@@ -159,19 +161,23 @@ export class GameSession {
     this.input.setKeymap(km);
   }
 
+  /**
+   * 시작 카운트다운을 화면과 소리에 전한다.
+   *
+   * 숫자가 넘어가는 순간에만 알린다 — 매 프레임 알리면 화면이 그때마다 다시
+   * 그려지고 소리도 겹쳐 울린다.
+   */
+  private tickCountdown(game: Game): void {
+    const n = countdownAt(game.readyTimer);
+    if (n === this.countdown) return;
+    this.countdown = n;
+    if (n > 0) this.sound.play("count");
+    else if (n === 0) this.sound.play("go");
+    this.cbs.onCountdown?.(n);
+  }
+
   private onRender(game: Game, alpha: number, fps: number): void {
-    // READY / GO 사운드
-    const rt = game.readyTimer;
-    if (rt >= 0) {
-      if (!this.playedReady) {
-        this.sound.play("ready");
-        this.playedReady = true;
-      }
-      if (rt <= 20 && !this.playedGo) {
-        this.sound.play("go");
-        this.playedGo = true;
-      }
-    }
+    this.tickCountdown(game);
 
     // 모드 업데이트(중력/레벨) — 시뮬 외부지만 다음 틱에 반영됨
     this.mode.update(game, 1);

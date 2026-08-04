@@ -34,7 +34,7 @@ type SfxName =
   | "levelup"
   | "gameover"
   | "hit"
-  | "ready"
+  | "count"
   | "go";
 
 export class SoundEngine {
@@ -321,11 +321,12 @@ export class SoundEngine {
       case "gameover":
         this.tone(190, 0.6, "sine", 0.2, 0, 80);
         break;
-      case "ready":
-        this.tone(440, 0.14, "triangle", 0.11, 0, 440, 0.02);
+      // 3·2·1 — 짧고 마른 틱. 셋 다 같은 음이라 GO!만 도드라진다
+      case "count":
+        this.tone(520, 0.11, "triangle", 0.1, 0, 520, 0.015);
         break;
       case "go":
-        this.tone(660, 0.22, "triangle", 0.15, 0, 880, 0.02);
+        this.tone(784, 0.26, "triangle", 0.17, 0, 1046, 0.02);
         break;
     }
   }

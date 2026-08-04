@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { VersusMatch } from "../src/app/VersusMatch";
 import { createLoopbackPair } from "../src/net/transport";
-import { Phase } from "@fetris/engine/game";
+import { Phase, READY_FRAMES } from "@fetris/engine/game";
 import type { InputCommands } from "@fetris/engine/game";
 import { Piece, Rot, MAX_PLAN_GHOSTS } from "@fetris/engine/types";
 import type { PlanGhost } from "@fetris/engine/types";
@@ -37,7 +37,7 @@ function makePair(seed = 111): [VersusMatch, VersusMatch] {
 
 /** 두 매치를 Ready 카운트다운 너머 Playing까지 함께 진행 */
 function bothToPlaying(a: VersusMatch, b: VersusMatch): void {
-  for (let i = 0; i < 70 && a.local.cur === Piece.None; i++) {
+  for (let i = 0; i < READY_FRAMES + 10 && a.local.cur === Piece.None; i++) {
     a.tick(1, CMD());
     b.tick(1, CMD());
   }
@@ -120,7 +120,7 @@ describe("입력 릴레이", () => {
   it("흘려보낸 입력만으로 상대 미러가 같은 판을 따라 돈다", () => {
     const [a, b] = makePair(4242);
     // 스트림 주기(4프레임)의 배수만큼 돌려야 마지막 조각까지 흘러나간다
-    const TICKS = 240;
+    const TICKS = READY_FRAMES + 240;
     for (let i = 0; i < TICKS; i++) {
       const drop = i > 70 && i % 17 === 0;
       if (drop) a.recorder.push(ReplayAction.HardDrop, true);
@@ -292,7 +292,7 @@ describe("타깃 전략", () => {
   it("even은 가장 적게 때린 상대를 고른다", () => {
     const { m, sent } = soloWithThree();
     m.strategy = "even";
-    for (let i = 0; i < 70 && m.local.cur === Piece.None; i++) m.tick(1, CMD());
+    for (let i = 0; i < READY_FRAMES + 10 && m.local.cur === Piece.None; i++) m.tick(1, CMD());
 
     // 여러 번 공격하면 세 상대에게 돌아가며 분배된다
     // (보드 상태에 따라 공격이 안 나가는 턴도 있어 넉넉히 시도한다)
@@ -309,7 +309,7 @@ describe("타깃 전략", () => {
   it("elims는 가장 높이 쌓인 상대를 고른다", () => {
     const { m, sent } = soloWithThree();
     m.strategy = "elims";
-    for (let i = 0; i < 70 && m.local.cur === Piece.None; i++) m.tick(1, CMD());
+    for (let i = 0; i < READY_FRAMES + 10 && m.local.cur === Piece.None; i++) m.tick(1, CMD());
 
     // Y의 미러 보드만 위험하게 채운다
     const y = m.remotes.get("Y")!;
@@ -326,7 +326,7 @@ describe("타깃 전략", () => {
   it("payback은 나를 때린 상대에게 되갚는다", () => {
     const { m, sent } = soloWithThree();
     m.strategy = "payback";
-    for (let i = 0; i < 70 && m.local.cur === Piece.None; i++) m.tick(1, CMD());
+    for (let i = 0; i < READY_FRAMES + 10 && m.local.cur === Piece.None; i++) m.tick(1, CMD());
 
     // Z가 나를 때렸다고 알린다(수신 경로를 직접 흉내)
     (m as unknown as { onMessage: (msg: unknown, from: string) => void }).onMessage(
@@ -360,7 +360,7 @@ describe("대전 리플레이 기록", () => {
       b.tick(1, CMD());
     };
 
-    for (let i = 0; i < 70 && a.local.cur === Piece.None; i++) step(CMD());
+    for (let i = 0; i < READY_FRAMES + 10 && a.local.cur === Piece.None; i++) step(CMD());
 
     // b가 quad를 세 번 비워 a에게 가비지를 보낸다. 그 사이 a도 조각을 놓는다.
     for (let round = 0; round < 3; round++) {

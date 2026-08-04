@@ -80,7 +80,7 @@ export interface MatchConfig {
   /** 참가자 공통 공격 배수 */
   attackMul: number;
   /**
-   * 시리즈 목표 승수(먼저 N승). 0이면 목표 없이 계속 반복한다.
+   * 목표 승수(먼저 N승). 항상 1 이상이며 FT1이 단판이다.
    * 도달하면 match-end에 seriesWinnerId가 실리고 모두의 승수가 초기화된다.
    */
   firstTo: number;
@@ -250,11 +250,9 @@ type ServerControlBody =
       t: "match-end";
       matchId: number;
       winnerId: string | null;
-      standings: { playerId: string; placement: number }[];
+      standings: { playerId: string; placement: number; wins: number }[];
       /** 결과 화면이 걷히면 서버가 다음 판을 이어 연다(FT 시리즈 진행 중) */
       nextRound?: boolean;
-      /** 다음 판이 열리기까지 남은 시간(ms). 전환 연출을 여기 맞춘다. */
-      nextIn?: number;
       seriesWinnerId?: string;
     }
   /**

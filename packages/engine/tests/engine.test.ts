@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Board } from "../src/board.js";
 import { Randomizer } from "../src/randomizer.js";
 import { getKickset } from "../src/srs.js";
-import { Game, Phase } from "../src/game.js";
+import { Game, Phase, READY_FRAMES } from "../src/game.js";
 import { B2BSurge } from "../src/scoring.js";
 import { detectSpin } from "../src/spin.js";
 import { Piece, Rot, SpinType } from "../src/types.js";
@@ -127,14 +127,14 @@ describe("Game 통합", () => {
   it("Ready 후 Playing 진입 + 피스 스폰", () => {
     const g = new Game({ ...STANDARD_RULESET }, { ...DEFAULT_HANDLING }, 42);
     // Ready 카운트다운 소진
-    for (let i = 0; i < 61; i++) g.update(1, undefined, 1000);
+    for (let i = 0; i < READY_FRAMES + 1; i++) g.update(1, undefined, 1000);
     expect(g.phase).toBe(Phase.Playing);
     expect(g.cur).not.toBe(Piece.None);
   });
 
   it("하드드롭이 피스를 락하고 다음 피스로", () => {
     const g = new Game({ ...STANDARD_RULESET, are: 0 }, { ...DEFAULT_HANDLING, safelock: false }, 7);
-    for (let i = 0; i < 61; i++) g.update(1, undefined, 0);
+    for (let i = 0; i < READY_FRAMES + 1; i++) g.update(1, undefined, 0);
     const first = g.cur;
     g.update(1, { rotateCW: false, rotateCCW: false, rotate180: false, hardDrop: true, hold: false, softDropHeld: false }, 0);
     // are=0 이므로 다음 틱에 새 피스
@@ -146,7 +146,7 @@ describe("Game 통합", () => {
   it("하드드롭은 스폰 직후에도 즉시 동작 (PPS 캡 없음)", () => {
     const cmd = { rotateCW: false, rotateCCW: false, rotate180: false, hardDrop: true, hold: false, softDropHeld: false };
     const g = new Game({ ...STANDARD_RULESET, are: 0 }, { ...DEFAULT_HANDLING }, 11);
-    for (let i = 0; i < 61; i++) g.update(1, undefined, 0);
+    for (let i = 0; i < READY_FRAMES + 1; i++) g.update(1, undefined, 0);
     // 스폰 직후 바로 하드드롭 → 즉시 배치 (프레임 지연 없음)
     g.update(1, cmd, 0);
     expect(g.stats.piecesPlaced).toBe(1);
@@ -154,7 +154,7 @@ describe("Game 통합", () => {
 
   it("회전이 보드 충돌 시 킥으로 보정되거나 취소", () => {
     const g = new Game({ ...STANDARD_RULESET }, { ...DEFAULT_HANDLING }, 3);
-    for (let i = 0; i < 61; i++) g.update(1, undefined, 0);
+    for (let i = 0; i < READY_FRAMES + 1; i++) g.update(1, undefined, 0);
     const beforeRot = g.rot;
     g.update(1, { rotateCW: true, rotateCCW: false, rotate180: false, hardDrop: false, hold: false, softDropHeld: false }, 0);
     // O가 아니면 회전 상태가 바뀌어야(킥 성공) 하거나 그대로(취소)
@@ -172,7 +172,7 @@ describe("소프트드랍 중 ARR=0 DAS — 미끄러지다 구멍에 빠짐", (
       { ...DEFAULT_HANDLING, das: 0, arr: 0, sdf: 41, preferSoftDrop: false },
       1,
     );
-    for (let i = 0; i < 61; i++) g.update(1, undefined, 0);
+    for (let i = 0; i < READY_FRAMES + 1; i++) g.update(1, undefined, 0);
     // 보드 구성: y=30..39 에서 cols {0,1,2,3,6,7,8,9} 솔리드, cols {4,5} 우물
     g.board.clearGrid();
     for (let y = 30; y < 40; y++) {
@@ -212,7 +212,7 @@ describe("결정론", () => {
     function run(): string {
       const g = new Game({ ...STANDARD_RULESET, are: 0, lineClearAre: 0 }, { ...DEFAULT_HANDLING }, 2024);
       const cmd = { rotateCW: false, rotateCCW: false, rotate180: false, hardDrop: true, hold: false, softDropHeld: false };
-      for (let i = 0; i < 61; i++) g.update(1, undefined, 0);
+      for (let i = 0; i < READY_FRAMES + 1; i++) g.update(1, undefined, 0);
       for (let p = 0; p < 20; p++) {
         g.update(1, cmd, 0);
         for (let i = 0; i < 5; i++) g.update(1, undefined, 0);

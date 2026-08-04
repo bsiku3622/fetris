@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { GarbageGen, cancelGarbage, queuedLines } from "../src/garbage.js";
-import { Game } from "../src/game.js";
+import { Game, READY_FRAMES } from "../src/game.js";
 import type { InputCommands } from "../src/game.js";
 import { Piece } from "../src/types.js";
 import type { GarbageChunk } from "../src/types.js";
@@ -61,7 +61,7 @@ describe("cancelGarbage / queuedLines", () => {
 
 /** Ready 카운트다운을 넘겨 Playing 상태 + 활성 피스가 생길 때까지 진행 */
 function toPlaying(game: Game): void {
-  for (let i = 0; i < 70 && game.cur === Piece.None; i++) game.update(1, CMD());
+  for (let i = 0; i < READY_FRAMES + 10 && game.cur === Piece.None; i++) game.update(1, CMD());
 }
 
 describe("Game 가비지 통합", () => {

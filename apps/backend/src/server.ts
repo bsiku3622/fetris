@@ -105,7 +105,7 @@ interface Room {
   resultsTimer: ReturnType<typeof setTimeout> | null;
   /** 결과 화면이 끝나면 다음 판으로 이어갈지(FT 시리즈 진행 중) */
   nextRound: boolean;
-  /** 시리즈가 끝났다 — 대기실로 돌아갈 때 승수를 지운다 */
+  /** 승부가 끝났다 — 대기실로 돌아갈 때 승수를 지운다 */
   resetWins: boolean;
   /** 진행 중인 판의 녹화(서버가 중계하며 그대로 받아 적는다) */
   recording: Recording | null;
@@ -228,9 +228,9 @@ const MAX_BOT_CAPACITY = 16;
 /** 순위표를 보여주고 대기실로 돌아가기까지 */
 const RESULTS_MS = 6000;
 /**
- * 시리즈에서 다음 판까지의 간격. 라운드 전환 연출이 통째로 여기 들어간다 —
- * 보드가 가라앉고, 슬라이드가 닫혀 점수를 보여주고, 3·2·1을 센 뒤 슬라이드가
- * 걷히는 순간이 곧 다음 판 시작이다.
+ * 다음 판까지의 간격 — 보드가 가라앉고, 슬라이드가 닫혀 점수를 보여주는 데까지다.
+ * 카운트다운은 여기 들어가지 않는다. `match-start`가 도착해 슬라이드가 걷힌
+ * 뒤에 엔진이 판을 열기 전 잠가두는 프레임(3·2·1)이 따로 붙는다.
  *
  * **출발 신호는 `match-start`다.** 시작 대기를 룰에 실어 각자 세게 하면, 그
  * 항목을 모르는 참가자(안 고친 봇)만 먼저 두기 시작한다 — 모르는 필드는 그냥
@@ -238,7 +238,7 @@ const RESULTS_MS = 6000;
  *
  * 기다리기 싫으면 누구든 skip-results로 건너뛸 수 있다.
  */
-const ROUND_BREAK_MS = 7600;
+const ROUND_BREAK_MS = 4500;
 const MIN_PARTICIPANTS = 2;
 /**
  * 소켓이 끊긴 참가자의 자리를 잡아두는 시간. 순단으로 판에서 밀려나지 않게
@@ -493,7 +493,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
     for (const p of room.players) {
       p.alive = true;
       p.placement = null;
-      // 시리즈가 끝났으면 다음 시리즈를 0승부터 다시 시작한다
+      // 승부가 끝났으면 다음 승부를 0승부터 다시 시작한다
       if (room.resetWins) p.wins = 0;
     }
     room.resetWins = false;
@@ -678,24 +678,34 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       winner.alive = false;
       winner.wins++;
     }
+    /*
+      승수를 순위와 함께 실어 보낸다.
+
+      방 상태로도 알 수 있지만 그건 이 메시지 **뒤에** 따라간다. 받는 쪽이 판이
+      끝나는 순간 화면을 짜면서 방 상태를 읽으면 아직 올라가기 전 값이라, 이긴
+      사람 점수가 그대로인 화면이 나온다 — "이겼는데 점수가 안 오른다"의 정체다.
+    */
     const standings = participantsOf(room)
       .filter((p) => p.placement !== null)
       .sort((a, b) => (a.placement ?? 99) - (b.placement ?? 99))
-      .map((p) => ({ playerId: p.id, placement: p.placement as number }));
+      .map((p) => ({ playerId: p.id, placement: p.placement as number, wins: p.wins }));
 
-    // 시리즈 목표(FT)에 도달했으면 이번 판으로 시리즈가 끝난다.
-    // 다음 시리즈를 새로 시작할 수 있도록 모두의 승수를 초기화한다.
-    const firstTo = room.config?.firstTo ?? 0;
-    const seriesWinner = winner && firstTo > 0 && winner.wins >= firstTo ? winner : null;
+    /*
+      먼저 FT승을 채운 사람이 이 방의 승자다. 여기서 승부가 끝난다.
+
+      FT는 항상 1 이상이다 — "목표 없이 계속"이라는 선택지는 없앴다. 이름과 달리
+      실제로는 한 판만 하고 끝났고, 그러면 이겨도 승수가 아무 데도 걸리지 않아
+      점수가 오르지 않는 것처럼 보였다. FT1이 곧 단판이므로 그 자리는 이미 있다.
+    */
+    const firstTo = Math.max(1, room.config?.firstTo ?? 1);
+    const champion = winner && winner.wins >= firstTo ? winner : null;
     // 초기화는 대기실로 돌아갈 때 한다 — 여기서 지워버리면 결과 화면의 승수가
     // 이미 0이라 "3/3으로 이겼다"가 보이지 않는다.
-    if (seriesWinner) room.resetWins = true;
+    if (champion) room.resetWins = true;
 
-    // 시리즈가 아직 끝나지 않았으면 다음 판을 서버가 이어서 연다.
-    // FT는 "몇 판을 치른다"는 약속이므로, 매 판 호스트가 다시 시작을 눌러야
-    // 한다면 목표를 걸어둔 의미가 없다.
-    const nextRound =
-      firstTo > 0 && !seriesWinner && rosterOf(room).length >= MIN_PARTICIPANTS;
+    // 아직 아무도 FT를 못 채웠으면 다음 판을 서버가 이어서 연다. FT는 "먼저
+    // N승"이라는 약속이므로, 매 판 호스트가 다시 눌러야 한다면 걸어둔 의미가 없다.
+    const nextRound = !champion && rosterOf(room).length >= MIN_PARTICIPANTS;
     room.nextRound = nextRound;
 
     // 다음 판이 이어지면 전환 연출이 들어갈 만큼 사이를 벌린다
@@ -714,10 +724,7 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
       winnerId: winner?.id ?? null,
       standings,
       nextRound,
-      // 다음 판이 언제 열리는지 알려준다 — 전환 연출의 카운트다운이 그 순간에
-      // 딱 떨어져야 숫자가 겉돌지 않는다
-      ...(nextRound ? { nextIn: breakMs } : {}),
-      ...(seriesWinner ? { seriesWinnerId: seriesWinner.id } : {}),
+      ...(champion ? { seriesWinnerId: champion.id } : {}),
     });
     broadcastState(room);
     room.resultsTimer = setTimeout(() => afterResults(room), breakMs);
@@ -1272,7 +1279,12 @@ export function startServer(port: number, opts: RelayServerOptions = {}): RelayS
           send(ws, { t: "error", reason: "bad-config" });
           return;
         }
-        entry.room.config = raw.config;
+        /*
+          목표 승수만 서버가 손본다. FT는 1 이상이어야 하는데, 0이 들어오면
+          아무도 도달할 수 없어 판이 영영 이어진다 — 옛 클라이언트가 "목표 없음"
+          으로 0을 보내던 자리이므로 여기서 단판으로 끌어올린다.
+        */
+        entry.room.config = { ...raw.config, firstTo: Math.max(1, Math.floor(raw.config.firstTo || 1)) };
         broadcastState(entry.room);
         break;
       }
