@@ -9,3 +9,6 @@ node_modules/
 
 # Playwright MCP 임시 산출물(스냅샷·콘솔 로그)
 .playwright-mcp/
+
+# 봇 토큰 — 소유자별 인증 토큰이 평문으로 들어 있다.
+bot-tokens.json
