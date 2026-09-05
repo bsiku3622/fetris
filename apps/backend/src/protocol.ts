@@ -224,7 +224,15 @@ type ServerControlBody =
   | { t: "resumed"; code: string; myId: string; state: RoomState; ackClientId: number }
   /** 방 상태가 바뀔 때마다(입퇴장·역할·설정·페이즈) 전체 스냅샷 */
   | { t: "state"; state: RoomState }
-  /** 매치 개시 — 참가자는 이 시드로 동시에 시작한다 */
+  /**
+   * 매치 개시 — 참가자는 이 시드로 동시에 판을 연다.
+   *
+   * **"지금 두어라"가 아니다.** 받은 시점이 프레임 0이고, 거기서 240프레임
+   * (`READY_FRAMES`, 60Hz 기준 4초) 동안은 잠겨 있다 — 화면의 3·2·1이 그 구간이다.
+   * 이 길이는 모두가 같아야 한다. 짧게 센 참가자는 먼저 움직일 뿐 아니라, 남들
+   * 미러에서 프레임 기준이 어긋난 채 재생되어 판이 통째로 다르게 그려진다.
+   * 외부 봇 러너가 가장 놓치기 쉬운 규약이다(README의 "시작 카운트다운" 참고).
+   */
   | {
       t: "match-start";
       matchId: number;

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Game } from "../src/game.js";
 import { BoardMirror } from "../src/mirror.js";
-import { ReplayAction, ReplayRecorder, fingerprint } from "../src/replay.js";
+import { ReplayAction, ReplayRecorder, fingerprint, snapshotFingerprint } from "../src/replay.js";
 import { STANDARD_RULESET, DEFAULT_HANDLING } from "../src/config.js";
 
 // ============================================================================
@@ -144,6 +144,56 @@ describe("BoardMirror", () => {
 
     mirror.keyframe(mirror.frame, truth.serialize());
     expect(mirror.game.stats.piecesPlaced).toBe(truth.stats.piecesPlaced);
+  });
+
+  it("조각 수가 같아도 판이 다르면 되돌린다", () => {
+    /*
+      가장 놓치기 쉬운 어긋남이다. 상대와 미러가 같은 박자로 두고 있으면 조각
+      수는 늘 맞아떨어져서, 개수만 견주던 때는 이 경우를 통째로 흘려보냈다 —
+      미러는 라인 하나 못 지운 채 쌓여 올라간 가짜 판을 계속 그렸다.
+    */
+    const { rec } = playSource(300);
+    const mirror = newMirror();
+    mirror.feed(200, rec.keys, rec.garbage);
+    drain(mirror);
+
+    // 조각 수·프레임은 그대로 두고 판만 다른 상태를 만든다
+    const truth = mirror.game.serialize();
+    truth.grid = truth.grid.slice();
+    const row = truth.grid.length - RULE.cols;
+    for (let x = 0; x < RULE.cols; x++) truth.grid[row + x] = ((x % 6) + 1) as number;
+    expect(truth.stats.piecesPlaced).toBe(mirror.game.stats.piecesPlaced);
+
+    mirror.keyframe(mirror.frame, truth);
+    expect(fingerprint(mirror.game)).toBe(snapshotFingerprint(truth));
+  });
+
+  it("몇 프레임 앞선 키프레임은 그 자리에 닿았을 때 대조한다", () => {
+    /*
+      미러는 늘 스트림보다 몇 프레임 뒤에 있다. 받은 그 순간에는 견줄 자리가
+      없으므로 들고 있다가, 그 프레임까지 굴러왔을 때 판단한다.
+    */
+    const { rec } = playSource(300);
+    const mirror = newMirror();
+    mirror.feed(200, rec.keys, rec.garbage);
+    drain(mirror);
+    expect(mirror.frame).toBe(200);
+
+    // 아직 닿지 않은 프레임의 어긋난 키프레임 — 받은 자리에서는 건드리지 않는다
+    const truth = mirror.game.serialize();
+    truth.grid = truth.grid.slice();
+    const row = truth.grid.length - RULE.cols;
+    for (let x = 0; x < RULE.cols; x++) truth.grid[row + x] = ((x % 6) + 1) as number;
+    mirror.keyframe(206, truth);
+    expect(mirror.frame).toBe(200);
+    const before = fingerprint(mirror.game);
+
+    // 그 자리까지 굴러가면 그제야 어긋남을 잡아낸다
+    mirror.feed(206);
+    drain(mirror);
+    expect(fingerprint(mirror.game)).not.toBe(before);
+    expect(fingerprint(mirror.game)).toBe(snapshotFingerprint(truth));
+    expect(mirror.frame).toBe(206);
   });
 
   it("지연으로 설명되는 차이는 그냥 둔다", () => {

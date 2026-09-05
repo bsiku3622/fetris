@@ -1,6 +1,6 @@
 import { Game } from "./game.js";
 import type { GameSnapshot } from "./game.js";
-import { ReplayPlayer } from "./replay.js";
+import { ReplayPlayer, snapshotFingerprint } from "./replay.js";
 import type { ReplayGarbage, ReplayKeys } from "./replay.js";
 import type { Handling, RuleSet } from "./types.js";
 
@@ -30,11 +30,6 @@ const SPRINT_STEPS = 20;
  * 그때마다 화면이 튀므로, 따라잡을 수 없을 만큼 벌어졌을 때만 쓴다.
  */
 const RESYNC_LEAD = 12;
-/**
- * 조각 수가 이만큼까지 벌어지는 건 지연으로 설명된다. 넘어가면 어긋난 것이다.
- * 스트림이 4프레임마다 오므로 그 사이에 놓일 수 있는 조각은 많아야 한둘이다.
- */
-const DRIFT_TOLERANCE = 2;
 
 export interface MirrorOptions {
   rule: RuleSet;
@@ -58,6 +53,11 @@ type MirrorMode =
 export class BoardMirror {
   private player: ReplayPlayer;
   private mode: MirrorMode = "idle";
+  /**
+   * 아직 대조하지 못한 키프레임. 미러는 늘 스트림보다 몇 프레임 뒤에 있어서
+   * 받은 그 순간에는 견줄 자리가 없다 — 그 프레임에 닿을 때까지 들고 있는다.
+   */
+  private pending: { frame: number; snap: GameSnapshot } | null = null;
 
   constructor(opts: MirrorOptions) {
     this.player = new ReplayPlayer({
@@ -110,32 +110,51 @@ export class BoardMirror {
    *  1. **프레임이 크게 밀렸을 때** — 입력이 통째로 빈 구간(순단)은 따라 돌
    *     방법이 없으므로 상태를 그대로 받아 이어 간다.
    *  2. **내용이 어긋났을 때** — 프레임은 맞는데 판이 다르다면 상대가 나와
-   *     다른 조건으로 돌고 있다는 뜻이다(엔진 버전이 달라 룰 하나를 무시하는
-   *     봇 같은 경우). 그대로 두면 미러가 제 갈 길로 흘러가 **그럴듯한 가짜
-   *     판**을 그린다 — 어긋난 줄도 모르고 보게 되므로 진짜 상태로 되돌린다.
+   *     다른 조건으로 돌고 있다는 뜻이다(시작 시점이 어긋났거나, 엔진 버전이
+   *     달라 룰 하나를 무시하는 봇 같은 경우). 그대로 두면 미러가 제 갈 길로
+   *     흘러가 **그럴듯한 가짜 판**을 그린다 — 어긋난 줄도 모르고 보게 되므로
+   *     진짜 상태로 되돌린다.
+   *
+   * 2번은 **같은 프레임에 서서** 판단해야 한다. 미러는 스트림이 도착하는 만큼
+   * 늘 몇 프레임 뒤에 있어서 받은 그 자리에서는 견줄 것이 없기 때문이다. 그래서
+   * 키프레임을 들고 있다가 그 프레임에 닿는 순간 지문을 견준다.
    */
   keyframe(frame: number, snap: GameSnapshot): void {
     if (this.mode === "snapshot") {
       this.player.game.deserialize(snap);
       return;
     }
-    if (this.mode === "stream" && !this.stale(frame, snap)) return;
+    // 아직 스트림을 못 받았거나, 따라잡을 수 없을 만큼 벌어졌다
+    if (this.mode !== "stream" || frame > this.player.frame + RESYNC_LEAD) {
+      this.resync(frame, snap);
+      return;
+    }
+    this.pending = { frame, snap };
+    this.checkPending();
+  }
+
+  /** 받은 상태를 그대로 받아 적고 거기서부터 다시 이어 돈다 */
+  private resync(frame: number, snap: GameSnapshot): void {
+    this.pending = null;
     this.player.syncTo(snap, frame);
     this.mode = "stream";
   }
 
-  /** 이 키프레임으로 되돌려야 하는 상태인가 */
-  private stale(frame: number, snap: GameSnapshot): boolean {
-    if (frame > this.player.frame + RESYNC_LEAD) return true;
-    const theirs = snap?.stats?.piecesPlaced;
-    if (typeof theirs !== "number") return false;
-    const mine = this.player.game.stats.piecesPlaced;
-    /*
-      미러는 스트림이 도착하는 만큼 늘 몇 프레임 뒤에 있으므로, 그 사이에 조각이
-      놓였으면 상대가 한둘 앞서는 건 정상이다. 그 폭을 넘어서거나 미러가 오히려
-      앞서 있다면 지연으로는 설명되지 않는다 — 어긋난 것이다.
-    */
-    return mine > theirs || theirs - mine > DRIFT_TOLERANCE;
+  /**
+   * 들고 있던 키프레임의 프레임에 닿았으면 내용을 견준다.
+   *
+   * 조각 수만 견주던 때는 **개수가 같고 자리만 다른 어긋남**을 통째로 놓쳤다 —
+   * 상대와 미러가 같은 박자로 두고 있으면 조각 수는 늘 맞아떨어지기 때문이다.
+   * 그 사이 미러는 라인 하나 지우지 못한 채 쌓여 올라간 가짜 판을 그렸다.
+   */
+  private checkPending(): void {
+    const p = this.pending;
+    if (!p || this.player.frame < p.frame) return;
+    this.pending = null;
+    // 지나쳐 버렸으면 견줄 자리가 없다(메시지 순서가 뒤집힌 경우)
+    if (this.player.frame > p.frame) return;
+    if (snapshotFingerprint(this.player.game.serialize()) === snapshotFingerprint(p.snap)) return;
+    this.resync(p.frame, p.snap);
   }
 
   /** 옛 방식(보드 스냅샷만 보내는 봇) — 받은 그대로 얹는다 */
@@ -160,6 +179,8 @@ export class BoardMirror {
     for (let i = 0; i < budget; i++) {
       if (!this.player.step()) break;
       n++;
+      // 들고 있던 키프레임의 자리에 닿았다 — 여기서만 판을 견줄 수 있다
+      if (this.pending !== null && this.player.frame >= this.pending.frame) this.checkPending();
     }
     return n;
   }

@@ -258,7 +258,14 @@ export function runReplay(opts: ReplayOptions): Game {
  * 같아질 수가 없다. 나머지 stats는 전부 시뮬레이션에서 나온 값이다.
  */
 export function fingerprint(game: Game): string {
-  const raw = game.serialize();
+  return snapshotFingerprint(game.serialize());
+}
+
+/**
+ * 스냅샷만 손에 쥐고 있을 때의 지문. 남이 보내온 상태와 내 상태를 견주는 자리에
+ * 쓴다(미러가 키프레임과 대조할 때) — 그쪽은 Game이 아니라 직렬화된 상태다.
+ */
+export function snapshotFingerprint(raw: GameSnapshot): string {
   const snap = JSON.stringify({ ...raw, stats: { ...raw.stats, startTime: 0 } });
   let h = 0x811c9dc5;
   for (let i = 0; i < snap.length; i++) {

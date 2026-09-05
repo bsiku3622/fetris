@@ -174,6 +174,12 @@ type ServerControlBody =
   /** resume 성공 — 같은 자리로 돌아왔다 */
   | { t: "resumed"; code: string; myId: string; state: RoomState; ackClientId: number }
   | { t: "state"; state: RoomState }
+  /**
+   * 판을 열라는 신호. **"지금 두어라"가 아니다** — 받은 시점이 프레임 0이고,
+   * 거기서 `READY_FRAMES`(240) 동안은 잠겨 있다(화면의 3·2·1). 이 길이는 모두가
+   * 같아야 한다. 짧게 센 참가자는 먼저 움직일 뿐 아니라, 남들 미러에서 프레임
+   * 기준이 어긋난 채 재생되어 판이 통째로 다르게 그려진다.
+   */
   | {
       t: "match-start";
       matchId: number;
