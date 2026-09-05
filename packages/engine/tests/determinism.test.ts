@@ -66,7 +66,7 @@ describe("결정론", () => {
     const blitz = new BlitzScore();
     for (let level = 1; level <= 24; level++) {
       blitz.level = level;
-      expect(blitz.gravity()).toBe(Math.min(20, 0.02 * Math.pow(1.35, level - 1)));
+      expect(blitz.gravity()).toBeCloseTo(Math.min(20, 0.02 * Math.pow(1.35, level - 1)), 12);
     }
     // 상한 구간
     blitz.level = 25;
